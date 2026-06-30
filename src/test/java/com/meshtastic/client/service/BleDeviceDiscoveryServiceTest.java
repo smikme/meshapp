@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -95,6 +97,33 @@ class BleDeviceDiscoveryServiceTest {
         assertFalse(discovery.isScanning());
     }
 
+    @Test
+    void updatesListenersWhenDeviceNameIsResolvedAfterInitialDiscovery() throws Exception {
+        BleDeviceDiscoveryService discovery = BleDeviceDiscoveryService.getInstance();
+        RecordingBlePlatform platform = new RecordingBlePlatform();
+        CountDownLatch updates = new CountDownLatch(2);
+        CopyOnWriteArrayList<List<BleDevice>> snapshots = new CopyOnWriteArrayList<>();
+
+        discovery.setParallelConnectionSupportForTests(true);
+        discovery.setPlatformFactoryForTests(() -> platform);
+        discovery.addListener(devices -> {
+            if (!devices.isEmpty()) {
+                snapshots.add(devices);
+                updates.countDown();
+            }
+        });
+
+        discovery.startScanning();
+        assertTrue(platform.startScanCalled.await(1, TimeUnit.SECONDS));
+
+        platform.emit(new BleDevice("AA:BB:CC:DD:EE:FF", "Unknown", -70));
+        platform.emit(new BleDevice("AA:BB:CC:DD:EE:FF", "Meshy", -70));
+
+        assertTrue(updates.await(1, TimeUnit.SECONDS));
+        List<BleDevice> latest = snapshots.get(snapshots.size() - 1);
+        assertEquals("Meshy", latest.getFirst().name());
+    }
+
     private static void awaitUnchecked(CountDownLatch latch) {
         try {
             latch.await();
@@ -106,10 +135,19 @@ class BleDeviceDiscoveryServiceTest {
 
     private static final class RecordingBlePlatform implements BlePlatform {
         private final CountDownLatch startScanCalled = new CountDownLatch(1);
+        private volatile Consumer<BleDevice> scanConsumer;
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
+            scanConsumer = onDeviceFound;
             startScanCalled.countDown();
+        }
+
+        void emit(BleDevice device) {
+            Consumer<BleDevice> consumer = scanConsumer;
+            if (consumer != null) {
+                consumer.accept(device);
+            }
         }
 
         @Override

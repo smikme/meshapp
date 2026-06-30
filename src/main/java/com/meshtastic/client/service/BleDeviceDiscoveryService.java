@@ -123,8 +123,8 @@ public final class BleDeviceDiscoveryService {
                         : device;
                 discoveredDevices.put(device.address(), profiledDevice);
 
-                // Notify on new devices or meaningful RSSI changes.
-                if (existing == null || Math.abs(existing.rssi() - profiledDevice.rssi()) > 5) {
+                // Notify on new devices, resolved names, protocol changes, or meaningful RSSI changes.
+                if (existing == null || deviceChanged(existing, profiledDevice)) {
                     fireChanged();
                 }
             });
@@ -368,6 +368,12 @@ public final class BleDeviceDiscoveryService {
 
     private boolean isScanGenerationActive(long generation) {
         return scanning && scanGeneration.get() == generation;
+    }
+
+    private static boolean deviceChanged(BleDevice existing, BleDevice current) {
+        return Math.abs(existing.rssi() - current.rssi()) > 5
+                || !Objects.equals(existing.name(), current.name())
+                || existing.protocolType() != current.protocolType();
     }
 
     private void handleScanStartFailure(long generation, String logPrefix, RuntimeException e) {

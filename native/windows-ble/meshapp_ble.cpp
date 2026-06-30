@@ -36,6 +36,8 @@
 #include <condition_variable>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace winrt;
 using namespace Windows::Foundation;
@@ -140,12 +142,31 @@ static bool g_pairing_response_ready = false;
 static bool g_pairing_request_cancelled = false;
 static std::string g_pairing_request_pin;
 
+static std::mutex g_scan_cache_mutex;
+static std::unordered_map<uint64_t, std::string> g_scan_names;
+static std::unordered_set<uint64_t> g_scan_matched_addresses;
+
 static int active_profile() {
     return g_profile.load() == PROFILE_MESHCORE ? PROFILE_MESHCORE : PROFILE_MESHTASTIC;
 }
 
 static guid active_service_uuid() {
     return active_profile() == PROFILE_MESHCORE ? to_guid(MC_SVC_UUID) : to_guid(SVC_UUID);
+}
+
+static bool guid_equals(guid const& left, guid const& right) {
+    return std::memcmp(&left, &right, sizeof(guid)) == 0;
+}
+
+static bool advertisement_has_service(
+        BluetoothLEAdvertisement const& advertisement,
+        guid const& service_uuid) {
+    for (auto const& uuid : advertisement.ServiceUuids()) {
+        if (guid_equals(uuid, service_uuid)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static guid active_inbound_uuid() {
@@ -573,6 +594,11 @@ static void do_stop_scan() {
         }
     } catch (...) {}
     g_device_callback.store(nullptr);
+    {
+        std::lock_guard<std::mutex> lock(g_scan_cache_mutex);
+        g_scan_names.clear();
+        g_scan_matched_addresses.clear();
+    }
     log_msg("[meshble] Scan stopped");
 }
 
@@ -702,25 +728,49 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
             try {
                 g_ble->watcher = BluetoothLEAdvertisementWatcher();
                 g_ble->watcher.ScanningMode(BluetoothLEScanningMode::Active);
-
-                auto filter = BluetoothLEAdvertisementFilter();
-                auto adv = BluetoothLEAdvertisement();
-                adv.ServiceUuids().Append(active_service_uuid());
-                filter.Advertisement(adv);
-                g_ble->watcher.AdvertisementFilter(filter);
+                auto service_uuid = active_service_uuid();
 
                 g_ble->watcher_received_token = g_ble->watcher.Received(
-                    [](BluetoothLEAdvertisementWatcher const&,
+                    [service_uuid](BluetoothLEAdvertisementWatcher const&,
                        BluetoothLEAdvertisementReceivedEventArgs const& args) {
                         try {
                             auto callback = g_device_callback.load();
                             if (!callback) return;
-                            auto addr = mac_to_string(args.BluetoothAddress());
-                            auto name = args.Advertisement().LocalName();
+                            auto raw_addr = args.BluetoothAddress();
+                            auto advertisement = args.Advertisement();
+                            auto name = advertisement.LocalName();
                             std::string nameStr;
                             if (!name.empty()) nameStr = winrt::to_string(name);
+
+                            bool hasTargetService = advertisement_has_service(advertisement, service_uuid);
+                            bool shouldNotify = false;
+                            std::string displayName;
+                            {
+                                std::lock_guard<std::mutex> lock(g_scan_cache_mutex);
+                                if (!nameStr.empty()) {
+                                    g_scan_names[raw_addr] = nameStr;
+                                }
+
+                                bool knownTarget = g_scan_matched_addresses.find(raw_addr)
+                                        != g_scan_matched_addresses.end();
+                                if (hasTargetService) {
+                                    g_scan_matched_addresses.insert(raw_addr);
+                                    knownTarget = true;
+                                    shouldNotify = true;
+                                } else if (knownTarget && !nameStr.empty()) {
+                                    shouldNotify = true;
+                                }
+
+                                auto cachedName = g_scan_names.find(raw_addr);
+                                if (cachedName != g_scan_names.end()) {
+                                    displayName = cachedName->second;
+                                }
+                            }
+
+                            if (!shouldNotify) return;
+                            auto addr = mac_to_string(raw_addr);
                             callback(addr.c_str(),
-                                nameStr.empty() ? nullptr : nameStr.c_str(),
+                                displayName.empty() ? nullptr : displayName.c_str(),
                                 args.RawSignalStrengthInDBm());
                         } catch (const hresult_error& e) {
                             log_msg("[meshble] Advertisement callback failed: %ls", e.message().c_str());
@@ -740,7 +790,7 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
                     });
 
                 g_ble->watcher.Start();
-                log_msg("[meshble] Scan started");
+                log_msg("[meshble] Scan started (software service filter)");
                 return 0;
             } catch (const hresult_error& e) {
                 log_msg("[meshble] Scan failed: %ls", e.message().c_str());
