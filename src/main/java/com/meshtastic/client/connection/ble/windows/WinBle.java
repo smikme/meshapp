@@ -6,6 +6,7 @@ import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -100,11 +101,13 @@ public class WinBle implements BlePlatform {
         lib.meshble_set_profile(profile.nativeCode());
 
         // Static callback — prevent GC
-        scanCallback = (address, name, rssi) -> {
+        scanCallback = (addressPtr, namePtr, rssi) -> {
             try {
                 Consumer<BleDevice> consumer = scanConsumer;
+                String address = utf8String(addressPtr);
                 if (consumer != null && address != null) {
-                    String deviceName = (name != null) ? name : "Unknown";
+                    String name = utf8String(namePtr);
+                    String deviceName = (name != null && !name.isBlank()) ? name : "Unknown";
                     consumer.accept(new BleDevice(address, deviceName, rssi, profile.protocolType()));
                 }
             } catch (Throwable t) {
@@ -120,6 +123,10 @@ public class WinBle implements BlePlatform {
         } else {
             log.info("BLE сканирование запущено");
         }
+    }
+
+    private static String utf8String(com.sun.jna.Pointer pointer) {
+        return pointer == null ? null : pointer.getString(0, StandardCharsets.UTF_8.name());
     }
 
     @Override
