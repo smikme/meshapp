@@ -36,6 +36,7 @@
 #include <condition_variable>
 #include <memory>
 #include <stdexcept>
+#include <initializer_list>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -169,6 +170,67 @@ static bool advertisement_has_service(
     return false;
 }
 
+static bool has_utf8_sequence(std::string const& value, std::initializer_list<unsigned char> sequence) {
+    if (sequence.size() == 0 || value.size() < sequence.size()) {
+        return false;
+    }
+
+    std::vector<unsigned char> needle(sequence);
+    for (size_t i = 0; i <= value.size() - needle.size(); i++) {
+        bool match = true;
+        for (size_t j = 0; j < needle.size(); j++) {
+            if (static_cast<unsigned char>(value[i + j]) != needle[j]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int scan_name_quality(std::string const& value) {
+    int score = 0;
+    for (unsigned char ch : value) {
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+            score += 3;
+        } else if (ch == '_' || ch == '-' || ch == ' ' || ch == '.') {
+            score += 2;
+        } else if (ch >= 0x20 && ch < 0x7f) {
+            score += 1;
+        } else if (ch < 0x20 || ch == 0x7f) {
+            score -= 20;
+        }
+    }
+
+    // U+FFFD replacement character and U+25A1 white square usually mean a
+    // malformed or placeholder name. Do not let them overwrite better names.
+    if (has_utf8_sequence(value, {0xef, 0xbf, 0xbd})
+            || has_utf8_sequence(value, {0xe2, 0x96, 0xa1})) {
+        score -= 30;
+    }
+
+    return score;
+}
+
+static bool is_better_scan_name(std::string const& candidate, std::string const& current) {
+    if (candidate.empty()) {
+        return false;
+    }
+    if (current.empty()) {
+        return true;
+    }
+
+    int candidateScore = scan_name_quality(candidate);
+    int currentScore = scan_name_quality(current);
+    if (candidateScore != currentScore) {
+        return candidateScore > currentScore;
+    }
+    return candidate.size() > current.size();
+}
+
 static guid active_inbound_uuid() {
     return active_profile() == PROFILE_MESHCORE ? to_guid(MC_TX_UUID) : to_guid(FR_UUID);
 }
@@ -261,6 +323,35 @@ static std::vector<uint8_t> buffer_to_bytes(IBuffer const& buffer) {
     std::vector<uint8_t> data(reader.UnconsumedBufferLength());
     if (!data.empty()) reader.ReadBytes(data);
     return data;
+}
+
+static std::string local_name_from_advertisement(BluetoothLEAdvertisement const& advertisement) {
+    std::string shortenedName;
+
+    for (auto const& section : advertisement.DataSections()) {
+        auto type = section.DataType();
+        if (type != 0x08 && type != 0x09) {
+            continue;
+        }
+
+        auto data = buffer_to_bytes(section.Data());
+        while (!data.empty() && data.back() == 0) {
+            data.pop_back();
+        }
+        if (data.empty()) {
+            continue;
+        }
+
+        std::string value(data.begin(), data.end());
+        if (type == 0x09) {
+            return value;
+        }
+        if (shortenedName.empty()) {
+            shortenedName = value;
+        }
+    }
+
+    return shortenedName;
 }
 
 static IBuffer bytes_to_buffer(const unsigned char* data, int length) {
@@ -738,16 +829,22 @@ MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
                             if (!callback) return;
                             auto raw_addr = args.BluetoothAddress();
                             auto advertisement = args.Advertisement();
+                            std::string sectionName = local_name_from_advertisement(advertisement);
+                            std::string winrtName;
                             auto name = advertisement.LocalName();
-                            std::string nameStr;
-                            if (!name.empty()) nameStr = winrt::to_string(name);
+                            if (!name.empty()) winrtName = winrt::to_string(name);
+                            std::string nameStr = is_better_scan_name(sectionName, winrtName)
+                                    ? sectionName
+                                    : winrtName;
 
                             bool hasTargetService = advertisement_has_service(advertisement, service_uuid);
                             bool shouldNotify = false;
                             std::string displayName;
                             {
                                 std::lock_guard<std::mutex> lock(g_scan_cache_mutex);
-                                if (!nameStr.empty()) {
+                                auto currentName = g_scan_names.find(raw_addr);
+                                if (currentName == g_scan_names.end()
+                                        || is_better_scan_name(nameStr, currentName->second)) {
                                     g_scan_names[raw_addr] = nameStr;
                                 }
 
