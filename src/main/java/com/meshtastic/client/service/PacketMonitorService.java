@@ -5,10 +5,12 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketLogEntry.Direction;
 import com.meshtastic.client.utils.PacketDebugFormatter;
+import org.meshtastic.proto.MQTTProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -16,6 +18,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,6 +42,10 @@ public final class PacketMonitorService {
     private static final long BROADCAST_NODE_NUM = 0xFFFF_FFFFL;
     private static final Pattern STANDARD_NODE_ID_PATTERN = Pattern.compile("^!?[0-9a-fA-F]{8}$");
     public static final String TRANSPORT_MECHANISM_UNSPECIFIED = "__UNSPECIFIED__";
+    public static final String TRANSPORT_MQTT = "TRANSPORT_MQTT";
+    private static final String MQTT_PACKET_TYPE = "MQTT";
+    private static final int MQTT_TEXT_PREVIEW_LIMIT = 140;
+    private static final int MQTT_HEX_PREVIEW_BYTES = 16;
 
     private enum PageRequestKind {
         LATEST,
@@ -272,6 +279,47 @@ public final class PacketMonitorService {
     }
 
     /**
+     * Records an MQTT packet received from the broker by the desktop proxy.
+     *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param topic        broker topic
+     * @param payload      broker payload
+     * @param retained     MQTT retained flag
+     */
+    public void recordMqttIncoming(String connectionId, String topic, byte[] payload, boolean retained) {
+        recordMqttPacket(Direction.INCOMING, connectionId, topic, payload, retained);
+    }
+
+    /**
+     * Records an MQTT packet received from the broker with an already decoded display packet.
+     *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param topic        broker topic
+     * @param payload      broker payload
+     * @param retained     MQTT retained flag
+     * @param displayPacket decrypted/decoded packet to show in the monitor, or {@code null}
+     */
+    public void recordMqttIncoming(String connectionId,
+                                   String topic,
+                                   byte[] payload,
+                                   boolean retained,
+                                   MeshProtos.MeshPacket displayPacket) {
+        recordMqttPacket(Direction.INCOMING, connectionId, topic, payload, retained, displayPacket);
+    }
+
+    /**
+     * Records an MQTT packet published to the broker by the desktop proxy.
+     *
+     * @param connectionId connection identifier in {@link ConnectionManager}
+     * @param topic        broker topic
+     * @param payload      broker payload
+     * @param retained     MQTT retained flag
+     */
+    public void recordMqttOutgoing(String connectionId, String topic, byte[] payload, boolean retained) {
+        recordMqttPacket(Direction.OUTGOING, connectionId, topic, payload, retained);
+    }
+
+    /**
      * Internal journal entry point for protobuf packets.
      * If capture is disabled, the packet is ignored silently. Listeners are
      * notified only after a successful database insert, and live events follow
@@ -336,6 +384,66 @@ public final class PacketMonitorService {
                 payloadText,
                 packetBytes
         );
+        persistEntry(entry);
+    }
+
+    private synchronized void recordMqttPacket(Direction direction,
+                                               String connectionId,
+                                               String topic,
+                                               byte[] payload,
+                                               boolean retained) {
+        recordMqttPacket(direction, connectionId, topic, payload, retained, null);
+    }
+
+    private synchronized void recordMqttPacket(Direction direction,
+                                               String connectionId,
+                                               String topic,
+                                               byte[] payload,
+                                               boolean retained,
+                                               MeshProtos.MeshPacket displayPacket) {
+        if (!captureEnabled.get()) {
+            return;
+        }
+        if (insertStmt == null) {
+            log.warn("Packet monitor DB not initialized — MQTT packet dropped");
+            return;
+        }
+
+        byte[] safePayload = payload != null ? payload.clone() : new byte[0];
+        String ownerNodeId = resolveOwnerNodeId(connectionId);
+        DeviceState deviceState = resolveDeviceState(connectionId);
+        MeshProtos.MeshPacket meshPacket = displayPacket != null
+                ? displayPacket
+                : parseMqttMeshPacket(safePayload);
+
+        PacketLogEntry entry;
+        if (meshPacket != null) {
+            PacketDebugFormatter.PacketDetails details =
+                    PacketDebugFormatter.describeMeshPacket(meshPacket, direction, deviceState);
+            entry = new PacketLogEntry(
+                    ownerNodeId,
+                    System.currentTimeMillis(),
+                    direction,
+                    details.packetType(),
+                    TRANSPORT_MQTT,
+                    details.fromNode(),
+                    details.toNode(),
+                    formatMqttPayloadText(topic, safePayload, retained, details.payloadText()),
+                    meshPacket.toByteArray()
+            );
+        } else {
+            entry = new PacketLogEntry(
+                    ownerNodeId,
+                    System.currentTimeMillis(),
+                    direction,
+                    MQTT_PACKET_TYPE,
+                    TRANSPORT_MQTT,
+                    direction == Direction.OUTGOING ? localMqttEndpoint(ownerNodeId) : "MQTT broker",
+                    direction == Direction.OUTGOING ? "MQTT broker" : localMqttEndpoint(ownerNodeId),
+                    formatMqttPayloadText(topic, safePayload, retained, mqttPayloadPreview(safePayload)),
+                    safePayload
+            );
+        }
         persistEntry(entry);
     }
 
@@ -612,13 +720,19 @@ public final class PacketMonitorService {
         if (dbConnection == null) {
             return 0;
         }
-        SqlQuery sqlQuery = buildFilteredQuery("""
+        String sql = """
                 SELECT COUNT(*)
                 FROM lora_packet_logs
-                WHERE 1 = 1
-                """, null, null, null, true, false);
-        try (PreparedStatement ps = dbConnection.prepareStatement(sqlQuery.sql())) {
-            bindParams(ps, sqlQuery.params());
+                WHERE transport_mechanism IN (
+                    'TRANSPORT_LORA',
+                    'TRANSPORT_LORA_ALT1',
+                    'TRANSPORT_LORA_ALT2',
+                    'TRANSPORT_LORA_ALT3',
+                    'MESHCORE_COMPANION',
+                    'TRANSPORT_MQTT'
+                )
+                """;
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
             }
@@ -1086,7 +1200,8 @@ public final class PacketMonitorService {
         StringBuilder sql = new StringBuilder(baseSql);
         List<Object> params = new ArrayList<>();
 
-        sql.append("""
+        if (!isMqttTransportQuery(query)) {
+            sql.append("""
                 
                 AND transport_mechanism IN (
                     'TRANSPORT_LORA',
@@ -1096,6 +1211,7 @@ public final class PacketMonitorService {
                     'MESHCORE_COMPANION'
                 )
                 """);
+        }
 
         if (query != null && query.direction() != null) {
             sql.append("\nAND direction = ?");
@@ -1211,6 +1327,10 @@ public final class PacketMonitorService {
         return new SqlQuery(sql.toString(), params);
     }
 
+    private static boolean isMqttTransportQuery(PacketQuery query) {
+        return query != null && TRANSPORT_MQTT.equals(query.transportMechanism());
+    }
+
     private static void bindParams(PreparedStatement ps, List<Object> params) throws SQLException {
         for (int i = 0; i < params.size(); i++) {
             Object value = params.get(i);
@@ -1272,6 +1392,102 @@ public final class PacketMonitorService {
         }
 
         return List.copyOf(patterns);
+    }
+
+    private static MeshProtos.MeshPacket parseMqttMeshPacket(byte[] payload) {
+        if (payload == null || payload.length == 0) {
+            return null;
+        }
+        try {
+            MQTTProtos.ServiceEnvelope envelope = MQTTProtos.ServiceEnvelope.parseFrom(payload);
+            if (envelope.hasPacket() && isMeaningfulMeshPacket(envelope.getPacket())) {
+                return envelope.getPacket();
+            }
+        } catch (InvalidProtocolBufferException ignored) {
+            // Try raw MeshPacket below.
+        }
+        try {
+            MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.parseFrom(payload);
+            return isMeaningfulMeshPacket(packet) ? packet : null;
+        } catch (InvalidProtocolBufferException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isMeaningfulMeshPacket(MeshProtos.MeshPacket packet) {
+        return packet != null
+                && (packet.hasDecoded()
+                || packet.hasEncrypted()
+                || packet.getFrom() != 0
+                || packet.getTo() != 0
+                || packet.getId() != 0
+                || packet.getChannel() != 0
+                || packet.getRxTime() != 0);
+    }
+
+    private static String formatMqttPayloadText(String topic,
+                                                byte[] payload,
+                                                boolean retained,
+                                                String payloadDescription) {
+        String safeTopic = topic != null ? topic : "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("topic=\"")
+                .append(safeTopic.replace("\"", "\\\""))
+                .append("\", retained=")
+                .append(retained)
+                .append(", bytes=")
+                .append(payload != null ? payload.length : 0);
+        if (payloadDescription != null && !payloadDescription.isBlank()) {
+            sb.append(", payload=").append(payloadDescription);
+        }
+        return sb.toString();
+    }
+
+    private static String mqttPayloadPreview(byte[] payload) {
+        if (payload == null || payload.length == 0) {
+            return "empty";
+        }
+        if (isMostlyPrintableUtf8(payload)) {
+            String text = new String(payload, StandardCharsets.UTF_8)
+                    .replace("\r", "\\r")
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t");
+            if (text.length() > MQTT_TEXT_PREVIEW_LIMIT) {
+                text = text.substring(0, MQTT_TEXT_PREVIEW_LIMIT - 3) + "...";
+            }
+            return "text=\"" + text.replace("\"", "\\\"") + "\"";
+        }
+        StringBuilder hex = new StringBuilder("hex=");
+        int previewLength = Math.min(payload.length, MQTT_HEX_PREVIEW_BYTES);
+        for (int i = 0; i < previewLength; i++) {
+            if (i > 0) {
+                hex.append(' ');
+            }
+            hex.append(String.format("%02x", payload[i] & 0xFF));
+        }
+        if (payload.length > previewLength) {
+            hex.append(" ...");
+        }
+        return hex.toString();
+    }
+
+    private static boolean isMostlyPrintableUtf8(byte[] payload) {
+        String text = new String(payload, StandardCharsets.UTF_8);
+        if (!Arrays.equals(text.getBytes(StandardCharsets.UTF_8), payload)) {
+            return false;
+        }
+        int printable = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch == '\r' || ch == '\n' || ch == '\t' || !Character.isISOControl(ch)) {
+                printable++;
+            }
+        }
+        return printable == text.length();
+    }
+
+    private static String localMqttEndpoint(String ownerNodeId) {
+        return ownerNodeId != null && !ownerNodeId.isBlank() ? ownerNodeId : "Local node";
     }
 
     private static Integer parseStandardNodeId(String searchText) {

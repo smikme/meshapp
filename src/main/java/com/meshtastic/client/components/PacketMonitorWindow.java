@@ -1654,6 +1654,10 @@ public final class PacketMonitorWindow {
         return I18n.t("packetMonitor.filter.route.outgoing");
     }
 
+    static String filterAllMqtt() {
+        return I18n.t("packetMonitor.filter.route.allMqtt");
+    }
+
     static String filterAllTypes() {
         return I18n.t("packetMonitor.filter.type.all");
     }
@@ -1669,6 +1673,15 @@ public final class PacketMonitorWindow {
 
     private static boolean isOutgoingRouteSelection(String value) {
         return matchesLocalizedOption(value, filterOutgoing(), "Исходящие", "Outgoing");
+    }
+
+    private static boolean isAllMqttRouteSelection(String value) {
+        return matchesLocalizedOption(
+                value,
+                filterAllMqtt(),
+                "Все MQTT (входящие/исходящие)",
+                "All MQTT (incoming/outgoing)"
+        );
     }
 
     private static boolean isAllTypesSelection(String value) {
@@ -1695,7 +1708,8 @@ public final class PacketMonitorWindow {
         return List.of(
                 filterAllRoutes(),
                 filterIncoming(),
-                filterOutgoing()
+                filterOutgoing(),
+                filterAllMqtt()
         );
     }
 
@@ -1708,6 +1722,9 @@ public final class PacketMonitorWindow {
         }
         if (isOutgoingRouteSelection(selectedRoute)) {
             return new RouteFilterSelection(PacketLogEntry.Direction.OUTGOING, null);
+        }
+        if (isAllMqttRouteSelection(selectedRoute)) {
+            return new RouteFilterSelection(null, PacketMonitorService.TRANSPORT_MQTT);
         }
         return new RouteFilterSelection(null, null);
     }

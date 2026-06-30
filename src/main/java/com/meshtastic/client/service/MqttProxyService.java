@@ -5,6 +5,8 @@ import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.AppPreferences.MqttDownlinkFilterMode;
+import com.meshtastic.client.utils.MeshtasticChannelCrypto;
+import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import org.eclipse.paho.client.mqttv3.DisconnectedBufferOptions;
 import org.eclipse.paho.client.mqttv3.IMqttActionListener;
@@ -27,8 +29,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -52,6 +56,8 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     static final int DEFAULT_TCP_PORT = 1883;
     static final int DEFAULT_TLS_PORT = 8883;
     static final long LOCAL_ECHO_TTL_MS = 10_000;
+    static final long DOWNLINK_DUPLICATE_TTL_MS = 5 * 60_000L;
+    static final int DOWNLINK_DUPLICATE_MAX_ENTRIES = 4_096;
     private static final long DOWNLINK_SEND_MIN_INTERVAL_MS = 75L;
     private static final int MQTT_QOS = 0;
     private static final int DISCONNECTED_BUFFER_SIZE = 256;
@@ -63,6 +69,8 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     private final DeviceState deviceState;
     private final Object lifecycleLock = new Object();
     private final LocalEchoSuppressor localEchoSuppressor = new LocalEchoSuppressor(LOCAL_ECHO_TTL_MS);
+    private final DownlinkDuplicateSuppressor downlinkDuplicateSuppressor =
+            new DownlinkDuplicateSuppressor(DOWNLINK_DUPLICATE_TTL_MS, DOWNLINK_DUPLICATE_MAX_ENTRIES);
     private final ThreadPoolExecutor downlinkExecutor;
 
     private volatile boolean closed;
@@ -182,6 +190,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         RecentPublication publication = localEchoSuppressor.remember(proxyMessage.getTopic(), payload);
         try {
             mqttClient.publish(proxyMessage.getTopic(), payload, MQTT_QOS, proxyMessage.getRetained());
+            recordMqttOutgoing(proxyMessage.getTopic(), payload, proxyMessage.getRetained());
             log.debug("Forwarded MQTT uplink for '{}': topic='{}' bytes={} retained={}",
                     connectionName, proxyMessage.getTopic(), payload.length, proxyMessage.getRetained());
         } catch (MqttException e) {
@@ -347,6 +356,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             client = null;
             activeConfig = null;
             localEchoSuppressor.clear();
+            downlinkDuplicateSuppressor.clear();
             if (removeListener && listenerRegistered) {
                 protocolHandler.removeListener(this);
                 listenerRegistered = false;
@@ -394,11 +404,17 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         DownlinkFilterDecision filterDecision = evaluateDownlinkFilter(
                 payload,
                 filterMode,
-                deviceState != null ? deviceState.getMyNodeNum() : 0
+                deviceState
         );
         if (!filterDecision.forward()) {
             log.trace("Dropped MQTT downlink for '{}': topic='{}' bytes={} retained={} mode={} reason={}",
                     connectionName, topic, payload.length, retained, filterMode, filterDecision.reason());
+            return;
+        }
+        DownlinkPacketKey duplicateKey = filterDecision.duplicateKey();
+        if (duplicateKey != null && downlinkDuplicateSuppressor.rememberIfDuplicate(duplicateKey)) {
+            log.trace("Dropped duplicate MQTT downlink for '{}': topic='{}' bytes={} retained={} mode={}",
+                    connectionName, topic, payload.length, retained, filterMode);
             return;
         }
 
@@ -406,10 +422,14 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         log.trace("Received MQTT downlink for '{}': topic='{}' bytes={} retained={} queueDepth={}/{}",
                 connectionName, topic, payload.length, retained, queueDepth, DOWNLINK_QUEUE_SIZE);
         byte[] downlinkPayload = payload;
-        downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained));
+        MeshProtos.MeshPacket monitorPacket = filterDecision.monitorPacket();
+        downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained, monitorPacket));
     }
 
-    private void forwardBrokerMessageToRadio(String topic, byte[] payload, boolean retained) {
+    private void forwardBrokerMessageToRadio(String topic,
+                                             byte[] payload,
+                                             boolean retained,
+                                             MeshProtos.MeshPacket monitorPacket) {
         if (closed) {
             return;
         }
@@ -422,52 +442,117 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             log.warn("Failed to forward MQTT downlink for '{}' topic='{}'", connectionName, topic, e);
             return;
         }
+        recordMqttIncoming(topic, payload, retained, monitorPacket);
         log.trace("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
                 connectionName, topic, payload.length, retained);
+    }
+
+    private void recordMqttIncoming(String topic,
+                                    byte[] payload,
+                                    boolean retained,
+                                    MeshProtos.MeshPacket monitorPacket) {
+        PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
+        if (monitorService != null) {
+            monitorService.recordMqttIncoming(connectionId, topic, payload, retained, monitorPacket);
+        }
+    }
+
+    private void recordMqttOutgoing(String topic, byte[] payload, boolean retained) {
+        PacketMonitorService monitorService = PacketMonitorService.getIfInitialized();
+        if (monitorService != null) {
+            monitorService.recordMqttOutgoing(connectionId, topic, payload, retained);
+        }
     }
 
     static DownlinkFilterDecision evaluateDownlinkFilter(byte[] payload,
                                                          MqttDownlinkFilterMode mode,
                                                          int localNodeNum) {
+        return evaluateDownlinkFilter(payload, mode, null, localNodeNum);
+    }
+
+    static DownlinkFilterDecision evaluateDownlinkFilter(byte[] payload,
+                                                         MqttDownlinkFilterMode mode,
+                                                         DeviceState state) {
+        return evaluateDownlinkFilter(
+                payload,
+                mode,
+                state,
+                state != null ? state.getMyNodeNum() : 0
+        );
+    }
+
+    private static DownlinkFilterDecision evaluateDownlinkFilter(byte[] payload,
+                                                                 MqttDownlinkFilterMode mode,
+                                                                 DeviceState state,
+                                                                 int localNodeNum) {
         MqttDownlinkFilterMode safeMode = mode != null ? mode : MqttDownlinkFilterMode.NO_FILTER;
         if (safeMode == MqttDownlinkFilterMode.NO_FILTER) {
             return DownlinkFilterDecision.forward("filter disabled");
         }
 
-        MQTTProtos.ServiceEnvelope envelope;
+        MeshProtos.MeshPacket packet;
         try {
-            envelope = MQTTProtos.ServiceEnvelope.parseFrom(
-                    payload != null ? payload : new byte[0]
-            );
+            packet = parseDownlinkMeshPacket(payload);
         } catch (InvalidProtocolBufferException e) {
-            return DownlinkFilterDecision.drop("invalid service envelope");
+            return DownlinkFilterDecision.drop("invalid service envelope or mesh packet");
         }
 
-        if (!envelope.hasPacket()) {
-            return DownlinkFilterDecision.drop("missing mesh packet");
-        }
-
-        MeshProtos.MeshPacket packet = envelope.getPacket();
-        if (isDecodedTextPacket(packet)) {
-            return DownlinkFilterDecision.forward("decoded text packet");
-        }
-        if (isDecodedRoutingAckForLocalNode(packet, localNodeNum)) {
-            return DownlinkFilterDecision.forward("decoded routing ACK for local node");
+        DownlinkPacketKey duplicateKey = DownlinkPacketKey.from(packet);
+        DownlinkFilterDecision decodedDecision = evaluateDecodedDownlinkFilter(packet, localNodeNum);
+        if (decodedDecision != null) {
+            return decodedDecision.withDuplicateKey(duplicateKey);
         }
 
         if (!packet.hasEncrypted()) {
             return DownlinkFilterDecision.drop("not a text or encrypted packet");
         }
 
+        var decrypted = MeshtasticChannelCrypto.decryptChannelPacket(packet, state);
+        if (decrypted.isPresent()) {
+            MeshProtos.MeshPacket decryptedPacket = decrypted.get().packet();
+            DownlinkFilterDecision decryptedDecision =
+                    evaluateDecodedDownlinkFilter(decryptedPacket, localNodeNum);
+            if (decryptedDecision != null) {
+                return decryptedDecision
+                        .withMonitorPacket(decryptedPacket)
+                        .withDuplicateKey(duplicateKey);
+            }
+            return DownlinkFilterDecision.drop("decrypted packet is not text or local routing ACK")
+                    .withMonitorPacket(decryptedPacket);
+        }
+
         if (safeMode == MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED) {
-            return DownlinkFilterDecision.forward("encrypted packet");
+            return DownlinkFilterDecision.forward("encrypted packet")
+                    .withDuplicateKey(duplicateKey);
         }
 
         if (localNodeNum != 0 && packet.getTo() == localNodeNum) {
-            return DownlinkFilterDecision.forward("encrypted packet for local node");
+            return DownlinkFilterDecision.forward("encrypted packet for local node")
+                    .withDuplicateKey(duplicateKey);
         }
 
         return DownlinkFilterDecision.drop("encrypted packet is not addressed to local node");
+    }
+
+    private static DownlinkFilterDecision evaluateDecodedDownlinkFilter(MeshProtos.MeshPacket packet,
+                                                                        int localNodeNum) {
+        if (isDecodedTextPacket(packet)) {
+            return DownlinkFilterDecision.forward("decoded text packet").withMonitorPacket(packet);
+        }
+        if (isDecodedRoutingAckForLocalNode(packet, localNodeNum)) {
+            return DownlinkFilterDecision.forward("decoded routing ACK for local node").withMonitorPacket(packet);
+        }
+        return null;
+    }
+
+    private static MeshProtos.MeshPacket parseDownlinkMeshPacket(byte[] payload)
+            throws InvalidProtocolBufferException {
+        byte[] safePayload = payload != null ? payload : new byte[0];
+        MQTTProtos.ServiceEnvelope envelope = MQTTProtos.ServiceEnvelope.parseFrom(safePayload);
+        if (envelope.hasPacket()) {
+            return envelope.getPacket();
+        }
+        return MeshProtos.MeshPacket.parseFrom(safePayload);
     }
 
     private static boolean isDecodedTextPacket(MeshProtos.MeshPacket packet) {
@@ -541,19 +626,151 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
 
     record ProxyState(ProxyConfig config, String reason) {}
 
-    record DownlinkFilterDecision(boolean forward, String reason) {
+    /**
+     * Result of evaluating one MQTT broker payload against the downlink filter.
+     *
+     * @param forward whether the raw MQTT payload should be forwarded to the node
+     * @param reason diagnostic reason used in trace logging
+     * @param monitorPacket decoded packet representation for the post-filter monitor, or {@code null}
+     * @param duplicateKey stable packet key for filtered-mode duplicate suppression, or {@code null}
+     */
+    record DownlinkFilterDecision(boolean forward,
+                                  String reason,
+                                  MeshProtos.MeshPacket monitorPacket,
+                                  DownlinkPacketKey duplicateKey) {
         static DownlinkFilterDecision forward(String reason) {
-            return new DownlinkFilterDecision(true, reason);
+            return new DownlinkFilterDecision(true, reason, null, null);
         }
 
         static DownlinkFilterDecision drop(String reason) {
-            return new DownlinkFilterDecision(false, reason);
+            return new DownlinkFilterDecision(false, reason, null, null);
+        }
+
+        DownlinkFilterDecision withMonitorPacket(MeshProtos.MeshPacket monitorPacket) {
+            return new DownlinkFilterDecision(forward, reason, monitorPacket, duplicateKey);
+        }
+
+        DownlinkFilterDecision withDuplicateKey(DownlinkPacketKey duplicateKey) {
+            return new DownlinkFilterDecision(forward, reason, monitorPacket, duplicateKey);
+        }
+    }
+
+    /**
+     * Stable identity of a Meshtastic packet used for MQTT downlink duplicate suppression.
+     * <p>
+     * MQTT topic and {@code ServiceEnvelope} metadata are intentionally excluded so the same
+     * mesh packet delivered through different broker paths is still recognized as a duplicate.
+     *
+     * @param from packet sender node number
+     * @param to packet destination node number
+     * @param id mesh packet id
+     * @param channel mesh channel index/hash field
+     * @param payloadVariant protobuf payload variant used by the packet
+     * @param payload decoded or encrypted payload bytes
+     */
+    record DownlinkPacketKey(int from,
+                             int to,
+                             int id,
+                             int channel,
+                             MeshProtos.MeshPacket.PayloadVariantCase payloadVariant,
+                             ByteString payload) {
+        static DownlinkPacketKey from(MeshProtos.MeshPacket packet) {
+            ByteString payload = switch (packet.getPayloadVariantCase()) {
+                case DECODED -> packet.getDecoded().toByteString();
+                case ENCRYPTED -> packet.getEncrypted();
+                default -> ByteString.EMPTY;
+            };
+            return new DownlinkPacketKey(
+                    packet.getFrom(),
+                    packet.getTo(),
+                    packet.getId(),
+                    packet.getChannel(),
+                    packet.getPayloadVariantCase(),
+                    payload
+            );
         }
     }
 
     private record RecentPublication(String topic,
                                      byte[] payload,
                                      long expiresAtMillis) {}
+
+    private record RecentDownlinkPacket(DownlinkPacketKey key, long expiresAtMillis) {}
+
+    /**
+     * Bounded in-memory duplicate detector for MQTT downlinks that passed filtering.
+     * <p>
+     * Entries expire by age and by maximum count so retained or repeated broker deliveries
+     * do not repeatedly consume the radio link, while the cache cannot grow unbounded.
+     */
+    static final class DownlinkDuplicateSuppressor {
+        private final long ttlMillis;
+        private final int maxEntries;
+        private final Deque<RecentDownlinkPacket> recentPackets = new ArrayDeque<>();
+        private final Set<DownlinkPacketKey> recentKeys = new HashSet<>();
+
+        /**
+         * Creates a duplicate detector.
+         *
+         * @param ttlMillis duplicate retention window in milliseconds
+         * @param maxEntries maximum number of packet keys to keep
+         */
+        DownlinkDuplicateSuppressor(long ttlMillis, int maxEntries) {
+            this.ttlMillis = Math.max(1L, ttlMillis);
+            this.maxEntries = Math.max(1, maxEntries);
+        }
+
+        /**
+         * Remembers a packet key and reports whether it has already been seen recently.
+         *
+         * @param key packet identity produced by the downlink filter
+         * @return {@code true} when the packet is a recent duplicate
+         */
+        boolean rememberIfDuplicate(DownlinkPacketKey key) {
+            if (key == null) {
+                return false;
+            }
+            synchronized (recentPackets) {
+                long nowMillis = System.currentTimeMillis();
+                purgeExpiredPackets(nowMillis);
+                if (recentKeys.contains(key)) {
+                    return true;
+                }
+                remember(key, nowMillis);
+                return false;
+            }
+        }
+
+        /**
+         * Clears remembered packet keys, typically when the MQTT proxy is stopped.
+         */
+        void clear() {
+            synchronized (recentPackets) {
+                recentPackets.clear();
+                recentKeys.clear();
+            }
+        }
+
+        private void remember(DownlinkPacketKey key, long nowMillis) {
+            recentPackets.addLast(new RecentDownlinkPacket(key, nowMillis + ttlMillis));
+            recentKeys.add(key);
+            while (recentPackets.size() > maxEntries) {
+                RecentDownlinkPacket removed = recentPackets.removeFirst();
+                recentKeys.remove(removed.key());
+            }
+        }
+
+        private void purgeExpiredPackets(long nowMillis) {
+            while (!recentPackets.isEmpty()) {
+                RecentDownlinkPacket first = recentPackets.peekFirst();
+                if (first == null || first.expiresAtMillis > nowMillis) {
+                    return;
+                }
+                recentPackets.removeFirst();
+                recentKeys.remove(first.key());
+            }
+        }
+    }
 
     static final class LocalEchoSuppressor {
         private final long ttlMillis;

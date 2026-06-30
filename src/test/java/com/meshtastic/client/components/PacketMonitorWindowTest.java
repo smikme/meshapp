@@ -2,6 +2,7 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.PacketLogEntry;
+import com.meshtastic.client.service.PacketMonitorService;
 import javafx.geometry.Rectangle2D;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,15 @@ class PacketMonitorWindowTest {
         assertEquals(null, incoming.transportMechanism());
         assertEquals(PacketLogEntry.Direction.OUTGOING, outgoing.direction());
         assertEquals(null, outgoing.transportMechanism());
+    }
+
+    @Test
+    void shouldResolveMqttRouteFilterToTransport() {
+        PacketMonitorWindow.RouteFilterSelection mqtt =
+                PacketMonitorWindow.resolveRouteFilterSelection("Все MQTT (входящие/исходящие)");
+
+        assertEquals(null, mqtt.direction());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, mqtt.transportMechanism());
     }
 
     @Test
