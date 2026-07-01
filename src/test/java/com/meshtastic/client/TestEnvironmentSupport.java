@@ -110,6 +110,12 @@ public final class TestEnvironmentSupport {
             }
             writeStaticField(nodeCacheService, "instance", null);
 
+            Class<?> favoriteNodeService = Class.forName("com.meshtastic.client.service.FavoriteNodeService");
+            writeStaticField(favoriteNodeService, "instance", null);
+
+            Class<?> ignoredNodeService = Class.forName("com.meshtastic.client.service.IgnoredNodeService");
+            writeStaticField(ignoredNodeService, "instance", null);
+
             Class<?> packetMonitorService = Class.forName("com.meshtastic.client.service.PacketMonitorService");
             Object packetMonitorInstance = readStaticField(packetMonitorService, "instance");
             if (packetMonitorInstance != null) {

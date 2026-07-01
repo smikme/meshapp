@@ -71,6 +71,7 @@ public final class LuaCompletionEngine {
         mesh.member("canvas", "canvas.", "object", "mesh.canvas");
         mesh.member("form", "form.", "object", "mesh.form");
         mesh.member("traceroute", "traceroute.", "object", "mesh.traceroute");
+        mesh.member("node", "node.", "object", "mesh.node");
         mesh.member("nodeinfo", "nodeinfo.", "object", "mesh.nodeinfo");
         mesh.member("admin", "admin.", "object", "mesh.admin");
         mesh.member("telemetry", "telemetry.", "object", "mesh.telemetry");
@@ -155,6 +156,15 @@ public final class LuaCompletionEngine {
 
         TypeDef nodeinfo = new TypeDef();
         nodeinfo.member("request(target, options)", "request(", "function", "string");
+
+        TypeDef nodeApi = new TypeDef();
+        for (String member : List.of(
+                "set_favorite_node(target)",
+                "remove_favorite_node(target)",
+                "set_ignored_node(target)",
+                "remove_ignored_node(target)")) {
+            nodeApi.member(member, member.substring(0, member.indexOf('(') + 1), "function", "boolean");
+        }
 
         TypeDef admin = new TypeDef();
         for (String member : List.of(
@@ -365,6 +375,7 @@ public final class LuaCompletionEngine {
         defs.put("mesh.canvas", canvas);
         defs.put("mesh.form", form);
         defs.put("mesh.traceroute", traceroute);
+        defs.put("mesh.node", nodeApi);
         defs.put("mesh.nodeinfo", nodeinfo);
         defs.put("mesh.admin", admin);
         defs.put("mesh.telemetry", telemetry);
@@ -807,6 +818,9 @@ public final class LuaCompletionEngine {
         }
         if (value.startsWith("mesh.nodeinfo")) {
             return Optional.of("mesh.nodeinfo");
+        }
+        if (value.startsWith("mesh.node")) {
+            return Optional.of("mesh.node");
         }
         if (value.startsWith("mesh.admin")) {
             return Optional.of("mesh.admin");

@@ -717,6 +717,19 @@ end
 | `snr_towards` | список number | SNR по прямому маршруту в dB |
 | `snr_back` | список number | SNR по обратному маршруту в dB |
 
+## `mesh.node`
+
+`mesh.node` управляет локальными флагами нод MeshApp. Функции работают синхронно через `FavoriteNodeService` и `IgnoredNodeService`: они обновляют локальный флаг для текущего owner node и отправляют соответствующую admin-команду через активное подключение, если оно доступно. Эти функции возвращают `true` и не вызывают `on_admin(event)`.
+
+`target` может быть node ID строкой (`"!abcdef12"`), числовым `node_num` или таблицей ноды с полями `node_num`, `node_id`.
+
+| Функция | Возврат | Назначение |
+|---------|---------|------------|
+| `mesh.node.set_favorite_node(target)` | boolean | Добавляет target-ноду в избранные ноды MeshApp и синхронизирует флаг с устройством |
+| `mesh.node.remove_favorite_node(target)` | boolean | Удаляет target-ноду из избранных нод MeshApp и синхронизирует флаг с устройством |
+| `mesh.node.set_ignored_node(target)` | boolean | Добавляет target-ноду в игнорируемые ноды MeshApp и синхронизирует флаг с устройством |
+| `mesh.node.remove_ignored_node(target)` | boolean | Удаляет target-ноду из игнорируемых нод MeshApp и синхронизирует флаг с устройством |
+
 ## `mesh.nodeinfo`
 
 | Функция | Возврат | Назначение |

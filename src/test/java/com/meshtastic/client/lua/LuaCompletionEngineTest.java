@@ -355,6 +355,17 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesNodeFlagApi() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.node.|
+                """);
+        assertItemsContain(apiResult, "set_favorite_node(target)");
+        assertItemsContain(apiResult, "remove_favorite_node(target)");
+        assertItemsContain(apiResult, "set_ignored_node(target)");
+        assertItemsContain(apiResult, "remove_ignored_node(target)");
+    }
+
+    @Test
     void completesTelemetryApiAndFields() {
         LuaCompletionEngine.CompletionResult apiResult = complete("""
                 mesh.telemetry.|

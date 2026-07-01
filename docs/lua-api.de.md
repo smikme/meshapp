@@ -718,6 +718,19 @@ Farben können als JavaFX-/CSS-String (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"whi
 | `snr_towards` | Liste von number | SNR-Werte der Hinroute in dB |
 | `snr_back` | Liste von number | SNR-Werte der Rückroute in dB |
 
+## `mesh.node`
+
+`mesh.node` verwaltet lokale MeshApp-Knotenflags. Die Funktionen sind synchron und verwenden `FavoriteNodeService` und `IgnoredNodeService`: Sie aktualisieren den lokalen Flag für den aktuellen Owner-Knoten und senden bei verfügbarer aktiver Verbindung den passenden Admin-Befehl an das Gerät. Diese Funktionen geben `true` zurück und rufen kein `on_admin(event)` auf.
+
+`target` kann ein Knoten-ID-String (`"!abcdef12"`), numerisches `node_num` oder eine Knotentabelle mit `node_num`, `node_id` sein.
+
+| Funktion | Rückgabe | Zweck |
+|----------|--------|---------|
+| `mesh.node.set_favorite_node(target)` | boolean | Fügt den Zielknoten zu den MeshApp-Favoriten hinzu und synchronisiert den Flag mit dem Gerät |
+| `mesh.node.remove_favorite_node(target)` | boolean | Entfernt den Zielknoten aus den MeshApp-Favoriten und synchronisiert den Flag mit dem Gerät |
+| `mesh.node.set_ignored_node(target)` | boolean | Fügt den Zielknoten zu den ignorierten MeshApp-Knoten hinzu und synchronisiert den Flag mit dem Gerät |
+| `mesh.node.remove_ignored_node(target)` | boolean | Entfernt den Zielknoten aus den ignorierten MeshApp-Knoten und synchronisiert den Flag mit dem Gerät |
+
 ## `mesh.nodeinfo`
 
 | Funktion | Rückgabe | Zweck |

@@ -715,6 +715,19 @@ Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, 
 | `snr_towards` | list of number | Forward-route SNR values in dB |
 | `snr_back` | list of number | Reverse-route SNR values in dB |
 
+## `mesh.node`
+
+`mesh.node` manages local MeshApp node flags. The functions are synchronous and use `FavoriteNodeService` and `IgnoredNodeService`: they update the local flag for the current owner node and send the corresponding admin command through the active connection when available. These functions return `true` and do not call `on_admin(event)`.
+
+`target` can be a node ID string (`"!abcdef12"`), numeric `node_num`, or a node table with `node_num`, `node_id`.
+
+| Function | Return | Purpose |
+|----------|--------|---------|
+| `mesh.node.set_favorite_node(target)` | boolean | Adds the target node to MeshApp favorite nodes and syncs the flag to the device |
+| `mesh.node.remove_favorite_node(target)` | boolean | Removes the target node from MeshApp favorite nodes and syncs the flag to the device |
+| `mesh.node.set_ignored_node(target)` | boolean | Adds the target node to MeshApp ignored nodes and syncs the flag to the device |
+| `mesh.node.remove_ignored_node(target)` | boolean | Removes the target node from MeshApp ignored nodes and syncs the flag to the device |
+
 ## `mesh.nodeinfo`
 
 | Function | Return | Purpose |

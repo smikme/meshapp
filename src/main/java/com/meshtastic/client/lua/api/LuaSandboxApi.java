@@ -24,7 +24,7 @@ import java.util.Locale;
  * modules:
  * {@code mesh.chat}, {@code mesh.kv}, {@code mesh.json}, {@code mesh.curl},
  * {@code mesh.ui}, {@code mesh.timer}, {@code mesh.canvas}, {@code mesh.form}, {@code mesh.traceroute},
- * {@code mesh.nodeinfo}, {@code mesh.admin}, {@code mesh.telemetry}, plus the
+ * {@code mesh.node}, {@code mesh.nodeinfo}, {@code mesh.admin}, {@code mesh.telemetry}, plus the
  * core functions {@code mesh.log}, {@code mesh.now}, {@code mesh.localtime},
  * {@code mesh.date}, {@code mesh.time}, {@code mesh.datetime},
  * {@code mesh.iso_date}, {@code mesh.iso_time}, {@code mesh.iso_datetime},
@@ -152,6 +152,7 @@ public final class LuaSandboxApi {
         mesh.set("canvas", new LuaCanvasApi(context).create());
         mesh.set("form", new LuaFormApi(context).create());
         mesh.set("traceroute", new LuaTracerouteApi(context).create());
+        mesh.set("node", new LuaNodeApi(context).create());
         mesh.set("nodeinfo", new LuaNodeInfoApi(context).create());
         mesh.set("admin", new LuaRemoteAdminApi(context).create());
         mesh.set("telemetry", new LuaTelemetryApi(context, mapper).create());
