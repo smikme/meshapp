@@ -720,7 +720,7 @@ Farben können als JavaFX-/CSS-String (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"whi
 
 ## `mesh.node`
 
-`mesh.node` verwaltet lokale MeshApp-Knotenflags. Die Funktionen sind synchron und verwenden `FavoriteNodeService` und `IgnoredNodeService`: Sie aktualisieren den lokalen Flag für den aktuellen Owner-Knoten und senden bei verfügbarer aktiver Verbindung den passenden Admin-Befehl an das Gerät. Diese Funktionen geben `true` zurück und rufen kein `on_admin(event)` auf.
+`mesh.node` verwaltet lokale MeshApp-Knotenflags. Die Funktionen sind synchron und verwenden `FavoriteNodeService` und `IgnoredNodeService`: Sie aktualisieren den lokalen Flag für den Owner-Knoten der Lua-Sitzung und senden bei verfügbarer Verbindung des Bots den passenden Admin-Befehl an das Gerät. Diese Funktionen geben `true` zurück und rufen kein `on_admin(event)` auf.
 
 `target` kann ein Knoten-ID-String (`"!abcdef12"`), numerisches `node_num` oder eine Knotentabelle mit `node_num`, `node_id` sein.
 

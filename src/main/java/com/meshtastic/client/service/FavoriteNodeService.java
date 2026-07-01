@@ -52,10 +52,14 @@ public final class FavoriteNodeService {
     }
 
     public void addFavorite(String nodeId, String ownerNodeId) {
+        addFavorite(nodeId, ownerNodeId, null);
+    }
+
+    public void addFavorite(String nodeId, String ownerNodeId, String connectionId) {
         if (nodeId == null) { return; }
         pendingUnfavorites.remove(pendingKey(ownerNodeId, nodeId));
         NodeCacheService.getInstance().setFavorite(nodeId, ownerNodeId, true);
-        sendToDevice(nodeId, ownerNodeId, true);
+        sendToDevice(nodeId, ownerNodeId, connectionId, true);
         fireListeners();
     }
 
@@ -64,11 +68,15 @@ public final class FavoriteNodeService {
     }
 
     public void removeFavorite(String nodeId, String ownerNodeId) {
+        removeFavorite(nodeId, ownerNodeId, null);
+    }
+
+    public void removeFavorite(String nodeId, String ownerNodeId, String connectionId) {
         if (nodeId == null) { return; }
         pendingUnfavorites.add(pendingKey(ownerNodeId, nodeId));
         log.info("Added pending unfavorite for owner {} node {}", ownerNodeId, nodeId);
         NodeCacheService.getInstance().setFavorite(nodeId, ownerNodeId, false);
-        sendToDevice(nodeId, ownerNodeId, false);
+        sendToDevice(nodeId, ownerNodeId, connectionId, false);
         fireListeners();
     }
 
@@ -125,14 +133,23 @@ public final class FavoriteNodeService {
     }
 
     private void sendToDevice(String nodeId, String ownerNodeId, boolean favorite) {
+        sendToDevice(nodeId, ownerNodeId, null, favorite);
+    }
+
+    private void sendToDevice(String nodeId, String ownerNodeId, String connectionId, boolean favorite) {
         try {
             ConnectionManager cm = ConnectionManager.getInstance();
             String owner = ownerNodeId != null ? ownerNodeId.toLowerCase(Locale.ROOT) : "";
+            String requiredConnectionId = connectionId != null ? connectionId.trim() : "";
             boolean sent = false;
             for (ConnectionEntry entry : cm.getEntries()) {
                 if (!entry.isConnected()) { continue; }
+                if (!requiredConnectionId.isBlank() && !requiredConnectionId.equals(entry.getId())) {
+                    continue;
+                }
                 String entryOwner = cm.getOwnerNodeId(entry.getId());
-                if (!owner.isBlank()
+                if (requiredConnectionId.isBlank()
+                        && !owner.isBlank()
                         && (entryOwner == null || !owner.equals(entryOwner.toLowerCase(Locale.ROOT)))) {
                     continue;
                 }
@@ -151,10 +168,12 @@ public final class FavoriteNodeService {
                 break; // Send through the first active connection only.
             }
             if (!sent) {
-                log.warn("No active connection found to send favorite change for owner {} node {}", ownerNodeId, nodeId);
+                log.warn("No active connection found to send favorite change for owner {} node {} connection {}",
+                        ownerNodeId, nodeId, requiredConnectionId);
             }
         } catch (Exception e) {
-            log.warn("Failed to send favorite change to device for owner {} node {}", ownerNodeId, nodeId, e);
+            log.warn("Failed to send favorite change to device for owner {} node {} connection {}",
+                    ownerNodeId, nodeId, connectionId, e);
         }
     }
 

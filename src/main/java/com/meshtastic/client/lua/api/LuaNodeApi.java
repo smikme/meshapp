@@ -39,24 +39,34 @@ public final class LuaNodeApi {
 
     private LuaValue updateFavoriteNode(Varargs args, boolean favorite) {
         String nodeId = readTargetNodeId(args.arg1());
-        String ownerNodeId = context.ownerNodeIdOrEmpty();
+        String ownerNodeId = botOwnerNodeId();
+        String connectionId = botConnectionId();
         if (favorite) {
-            FavoriteNodeService.getInstance().addFavorite(nodeId, ownerNodeId);
+            FavoriteNodeService.getInstance().addFavorite(nodeId, ownerNodeId, connectionId);
         } else {
-            FavoriteNodeService.getInstance().removeFavorite(nodeId, ownerNodeId);
+            FavoriteNodeService.getInstance().removeFavorite(nodeId, ownerNodeId, connectionId);
         }
         return LuaValue.TRUE;
     }
 
     private LuaValue updateIgnoredNode(Varargs args, boolean ignored) {
         String nodeId = readTargetNodeId(args.arg1());
-        String ownerNodeId = context.ownerNodeIdOrEmpty();
+        String ownerNodeId = botOwnerNodeId();
+        String connectionId = botConnectionId();
         if (ignored) {
-            IgnoredNodeService.getInstance().addIgnored(nodeId, ownerNodeId);
+            IgnoredNodeService.getInstance().addIgnored(nodeId, ownerNodeId, connectionId);
         } else {
-            IgnoredNodeService.getInstance().removeIgnored(nodeId, ownerNodeId);
+            IgnoredNodeService.getInstance().removeIgnored(nodeId, ownerNodeId, connectionId);
         }
         return LuaValue.TRUE;
+    }
+
+    private String botOwnerNodeId() {
+        return context.ownerNodeId() != null ? context.ownerNodeId() : "";
+    }
+
+    private String botConnectionId() {
+        return context.connectionId() != null ? context.connectionId() : "";
     }
 
     private String readTargetNodeId(LuaValue value) {

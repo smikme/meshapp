@@ -717,7 +717,7 @@ Color can be passed as a JavaFX/CSS string (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, 
 
 ## `mesh.node`
 
-`mesh.node` manages local MeshApp node flags. The functions are synchronous and use `FavoriteNodeService` and `IgnoredNodeService`: they update the local flag for the current owner node and send the corresponding admin command through the active connection when available. These functions return `true` and do not call `on_admin(event)`.
+`mesh.node` manages local MeshApp node flags. The functions are synchronous and use `FavoriteNodeService` and `IgnoredNodeService`: they update the local flag for the Lua session owner node and send the corresponding admin command through the bot connection when available. These functions return `true` and do not call `on_admin(event)`.
 
 `target` can be a node ID string (`"!abcdef12"`), numeric `node_num`, or a node table with `node_num`, `node_id`.
 

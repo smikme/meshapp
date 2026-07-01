@@ -70,6 +70,39 @@ class LuaNodeApiTest {
     }
 
     @Test
+    void nodeFlagHelpersUseBotSessionOwnerInsteadOfLiveSelectedTarget() {
+        LuaTable botNode = new LuaNodeApi(new LuaSandboxContext(
+                7L,
+                "bot-connection",
+                null,
+                null,
+                null,
+                "!11111111",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                () -> new LuaSandboxContext.ConnectionSnapshot(
+                        "selected-connection",
+                        null,
+                        null,
+                        null,
+                        "!22222222"))).create();
+
+        assertTrue(botNode.get("set_favorite_node").call(LuaValue.valueOf("!aabbccdd")).toboolean());
+
+        assertTrue(NodeCacheService.getInstance().isFavorite("!aabbccdd", "!11111111"));
+        assertFalse(NodeCacheService.getInstance().isFavorite("!aabbccdd", "!22222222"));
+    }
+
+    @Test
     void rejectsInvalidTarget() {
         assertThrows(LuaError.class, () -> node.get("set_favorite_node").call(LuaValue.valueOf("deadbeef")));
     }
