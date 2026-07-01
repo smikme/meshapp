@@ -164,6 +164,15 @@ public final class MessageDbService {
                     """);
 
                 stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_threads (
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type     VARCHAR(10) NOT NULL,
+                        chat_key      VARCHAR(20) NOT NULL,
+                        PRIMARY KEY (owner_node_id, chat_type, chat_key)
+                    )
+                    """);
+
+                stmt.execute("""
                     CREATE TABLE IF NOT EXISTS traceroute_results (
                         id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
                         owner_node_id          VARCHAR(20) NOT NULL DEFAULT '',
@@ -291,6 +300,9 @@ public final class MessageDbService {
             return;
         }
         String normalizedOwnerNodeId = ownerNodeId != null ? ownerNodeId : "";
+        if ("dm".equals(chatType)) {
+            ensureChatThread(chatType, chatKey, normalizedOwnerNodeId);
+        }
         try {
             Long existingDbId = findExistingMessageDbId(
                     msg.getPacketId(),
@@ -337,6 +349,25 @@ public final class MessageDbService {
             }
         } catch (SQLException e) {
             log.error("Failed to save message to DB", e);
+        }
+    }
+
+    /**
+     * Persists an explicit chat thread so an empty DM chat can survive restart.
+     */
+    public synchronized void ensureChatThread(String chatType, String chatKey, String ownerNodeId) {
+        if (dbConnection == null || chatType == null || chatType.isBlank()
+                || chatKey == null || chatKey.isBlank()) {
+            return;
+        }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "MERGE INTO chat_threads (owner_node_id, chat_type, chat_key) VALUES (?, ?, ?)")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to ensure chat thread ({}, {})", chatType, chatKey, e);
         }
     }
 
@@ -1987,8 +2018,8 @@ public final class MessageDbService {
      * Returns the list of unique DM peers (chat_key) from the database for the device.
      */
     public List<String> getDistinctDmPeers(String ownerNodeId) {
-        List<String> peers = new ArrayList<>();
-        if (dbConnection == null) { return peers; }
+        Set<String> peers = new LinkedHashSet<>();
+        if (dbConnection == null) { return new ArrayList<>(peers); }
         try (PreparedStatement ps = dbConnection.prepareStatement(
                 "SELECT DISTINCT chat_key FROM messages WHERE owner_node_id = ? AND chat_type = 'dm'")) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -2000,7 +2031,18 @@ public final class MessageDbService {
         } catch (SQLException e) {
             log.error("Failed to get distinct DM peers", e);
         }
-        return peers;
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "SELECT chat_key FROM chat_threads WHERE owner_node_id = ? AND chat_type = 'dm'")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    peers.add(rs.getString(1));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to get explicit DM peers", e);
+        }
+        return new ArrayList<>(peers);
     }
 
     /**
@@ -2111,6 +2153,23 @@ public final class MessageDbService {
             ps2.executeUpdate();
         } catch (SQLException e) {
             log.error("Failed to delete chat ({}, {})", chatType, chatKey, e);
+        }
+    }
+
+    /**
+     * Removes an explicit empty-chat marker. "Clear history" keeps this marker,
+     * while "delete local chat" removes it.
+     */
+    public synchronized void deleteChatThread(String chatType, String chatKey, String ownerNodeId) {
+        if (dbConnection == null) { return; }
+        try (PreparedStatement ps = dbConnection.prepareStatement(
+                "DELETE FROM chat_threads WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?")) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.error("Failed to delete chat thread ({}, {})", chatType, chatKey, e);
         }
     }
 

@@ -344,6 +344,7 @@ abstract class FormChatBase extends Form {
     protected abstract void clearLoadedMessageState();
     protected abstract void showNewChatDialog();
     protected abstract void deleteChat(ChatItem item);
+    protected abstract void confirmClearChatHistory(ChatItem item);
     protected abstract void showChannelProperties(ChatItem item);
     protected abstract void toggleChatMute(ChatItem item);
     protected abstract void loadOlderMessages();

@@ -28,9 +28,16 @@ import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Separator;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -338,6 +345,14 @@ abstract class FormChatData extends FormChatRequests {
         Map<String, MeshMessage> lastMessages = db.getLastMessagePerChat("dm", ownerId);
         Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers(ownerId));
         dmPeers.addAll(state.getAllDirectMessages().keySet());
+        ChatSelection savedSelection = selectedChatForBoundConnection();
+        if (savedSelection != null
+                && savedSelection.type() == ChatItem.ChatType.DIRECT_MESSAGE
+                && savedSelection.peerNodeId() != null
+                && !savedSelection.peerNodeId().isBlank()) {
+            dmPeers.add(savedSelection.peerNodeId());
+            db.ensureChatThread("dm", savedSelection.peerNodeId(), ownerId);
+        }
 
         List<ChatItem> items = new ArrayList<>();
         for (String peerNodeId : dmPeers) {
@@ -444,6 +459,105 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     /**
+     * Confirms and clears the local message history for a channel or DM.
+     */
+    protected void confirmClearChatHistory(ChatItem item) {
+        if (item == null) {
+            return;
+        }
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
+            return;
+        }
+        ModalPane pane = ModalPane.getInstance();
+        if (pane == null) {
+            return;
+        }
+        pane.show(buildClearHistoryConfirmationPanel(item, () -> clearChatHistory(item)));
+    }
+
+    private VBox buildClearHistoryConfirmationPanel(ChatItem item, Runnable onConfirm) {
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(20, 30, 20, 30));
+        panel.setPrefWidth(380);
+        panel.setMaxWidth(380);
+        panel.setMaxHeight(Double.MAX_VALUE);
+        panel.getStyleClass().add("modal-side-panel");
+
+        String displayName = UnicodeTextUtils.sanitizeForJavaFxDisplay(item.getDisplayName());
+        Label titleLabel = new Label(I18n.t("chat.confirm.clearHistory.title", displayName));
+        titleLabel.getStyleClass().add("dialog-title");
+
+        Label messageLabel = new Label(I18n.t("chat.confirm.clearHistory.message"));
+        messageLabel.setWrapText(true);
+
+        CheckBox acknowledgeCheckBox = new CheckBox(I18n.t("chat.confirm.clearHistory.acknowledge"));
+        acknowledgeCheckBox.setWrapText(true);
+
+        Button cancelButton = new Button(I18n.t("common.cancel"));
+        cancelButton.setOnAction(e -> Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide));
+
+        Button confirmButton = new Button(I18n.t("chat.confirm.clearHistory.action"));
+        confirmButton.getStyleClass().add("accent");
+        confirmButton.disableProperty().bind(acknowledgeCheckBox.selectedProperty().not());
+        confirmButton.setOnAction(e -> {
+            Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide);
+            onConfirm.run();
+        });
+
+        HBox buttonRow = new HBox(10, cancelButton, confirmButton);
+        buttonRow.setAlignment(Pos.CENTER_RIGHT);
+        buttonRow.setPadding(new Insets(10, 0, 0, 0));
+
+        panel.getChildren().addAll(
+                titleLabel,
+                new Separator(),
+                messageLabel,
+                acknowledgeCheckBox,
+                buttonRow);
+        return panel;
+    }
+
+    private void clearChatHistory(ChatItem item) {
+        if (item == null) {
+            return;
+        }
+
+        MessageDbService db = MessageDbService.getInstance();
+        ChatDbKey key = ChatDbKey.from(item);
+        String ownerId = currentOwnerNodeId();
+
+        savedChatScrollStates.remove(chatScrollCacheKey(item));
+        AppPreferences.removeChatScrollState(ownerId, key.scrollStateKey());
+
+        db.deleteChat(key.dbType(), key.dbKey(), ownerId);
+        lastReadCounts.remove(key.readKey());
+        preserveChatListItemAfterHistoryClear(db, key, ownerId, item);
+
+        if (isChatDetailOpenFor(item)) {
+            closeMessageSearch(false);
+            openingChatUnreadCount = 0;
+            loadInitialMessages(false);
+            refreshMessageSearchResults(false);
+        }
+
+        reloadChatList();
+    }
+
+    private void preserveChatListItemAfterHistoryClear(MessageDbService db,
+                                                       ChatDbKey key,
+                                                       String ownerId,
+                                                       ChatItem item) {
+        if (item.getType() != ChatItem.ChatType.DIRECT_MESSAGE) {
+            return;
+        }
+        db.ensureChatThread(key.dbType(), key.dbKey(), ownerId);
+        if (state != null) {
+            state.ensureDirectMessageThread(item.getPeerNodeId());
+        }
+    }
+
+    /**
      * Deletes a channel on the device or removes a direct chat locally.
      */
     protected void deleteChat(ChatItem item) {
@@ -457,6 +571,8 @@ abstract class FormChatData extends FormChatRequests {
         MessageDbService db = MessageDbService.getInstance();
         ChatDbKey key = ChatDbKey.from(item);
         String chatId = key.scrollStateKey();
+        boolean wasSelected = selectedChat != null && chatItemMatches(selectedChat, item);
+        boolean wasSavedSelection = chatItemMatchesSelection(item, selectedChatForBoundConnection());
         savedChatScrollStates.remove(chatScrollCacheKey(item));
         AppPreferences.removeChatScrollState(currentOwnerNodeId(), chatId);
 
@@ -465,8 +581,11 @@ abstract class FormChatData extends FormChatRequests {
             case DIRECT_MESSAGE -> deleteDirectChat(db, item, key);
         }
 
-        if (selectedChat != null && chatItemMatches(selectedChat, item)) {
+        if (wasSelected) {
             closeChat();
+        }
+        if (wasSelected || wasSavedSelection) {
+            clearSelectedChatForBoundConnection();
         }
 
         reloadChatList();
@@ -483,6 +602,7 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         db.deleteChat(key.dbType(), key.dbKey(), currentOwnerNodeId());
+        db.deleteChatThread(key.dbType(), key.dbKey(), currentOwnerNodeId());
         lastReadCounts.remove(key.readKey());
     }
 

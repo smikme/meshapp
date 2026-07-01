@@ -730,6 +730,103 @@ class FormChatTest {
     }
 
     @Test
+    void reloadChatListRestoresSavedEmptyDirectChat() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                String connectionId = "connection-saved-empty-dm";
+                String peerNodeId = "!00000002";
+                AppPreferences.saveSelectedChat(connectionId, "dm:" + peerNodeId);
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = connectionId;
+
+                form.reloadChatList();
+
+                assertTrue(form.chatListView.getItems().stream()
+                        .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
+                                && peerNodeId.equals(item.getPeerNodeId())));
+                assertEquals(List.of(peerNodeId),
+                        MessageDbService.getInstance().getDistinctDmPeers(state.getOwnerNodeId()));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
+    void clearDirectChatHistoryKeepsChatInListAfterRestart() {
+        onFxThread(() -> {
+            MessageDbService db = MessageDbService.getInstance();
+            DeviceState state = new DeviceState();
+            String peerNodeId = "!00000002";
+            String ownerNodeId;
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                ownerNodeId = state.getOwnerNodeId();
+                MeshMessage message = incoming("dm history");
+                message.setPacketId(7001);
+                db.save(message, "dm", peerNodeId, ownerNodeId);
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = "connection-clear-dm-history";
+                form.reloadChatList();
+                ChatItem dm = form.chatListView.getItems().stream()
+                        .filter(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE)
+                        .filter(item -> peerNodeId.equals(item.getPeerNodeId()))
+                        .findFirst()
+                        .orElseThrow();
+                assertFalse(state.getAllDirectMessages().containsKey(peerNodeId));
+
+                form.openChat(dm);
+                invokeOneArg(form, "clearChatHistory", ChatItem.class, dm);
+
+                assertTrue(db.loadLast("dm", peerNodeId, 10, ownerNodeId).isEmpty());
+                assertTrue(state.getAllDirectMessages().containsKey(peerNodeId));
+                assertNotNull(form.selectedChat);
+                assertEquals(peerNodeId, form.selectedChat.getPeerNodeId());
+                assertTrue(form.chatListView.getItems().stream()
+                        .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
+                                && peerNodeId.equals(item.getPeerNodeId())));
+            } finally {
+                state.shutdown();
+            }
+
+            TestEnvironmentSupport.resetSingletons();
+
+            DeviceState restartedState = new DeviceState();
+            try {
+                restartedState.setMyNodeNum(0x12345678);
+                restartedState.addChannel(channelProto(0));
+                FormChat restartedForm = new FormChat();
+                restartedForm.state = restartedState;
+                restartedForm.boundConnectionId = "connection-clear-dm-history";
+
+                restartedForm.reloadChatList();
+
+                assertTrue(MessageDbService.getInstance().loadLast("dm", peerNodeId, 10, ownerNodeId).isEmpty());
+                assertFalse(restartedState.getAllDirectMessages().containsKey(peerNodeId));
+                assertTrue(restartedForm.chatListView.getItems().stream()
+                        .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
+                                && peerNodeId.equals(item.getPeerNodeId())));
+            } finally {
+                restartedState.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
     void hiddenIncomingMessageDoesNotTouchViewportState() {
         onFxThread(() -> {
             MessageDbService db = MessageDbService.getInstance();
@@ -943,6 +1040,23 @@ class FormChatTest {
                 java.lang.reflect.Method method = current.getDeclaredMethod(methodName);
                 method.setAccessible(true);
                 method.invoke(target);
+                return;
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("Failed to invoke method " + methodName, e);
+            }
+        }
+        throw new AssertionError("Failed to find method " + methodName);
+    }
+
+    private static void invokeOneArg(Object target, String methodName, Class<?> argType, Object arg) {
+        Class<?> current = target.getClass();
+        while (current != null) {
+            try {
+                java.lang.reflect.Method method = current.getDeclaredMethod(methodName, argType);
+                method.setAccessible(true);
+                method.invoke(target, arg);
                 return;
             } catch (NoSuchMethodException ignored) {
                 current = current.getSuperclass();

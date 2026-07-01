@@ -1,6 +1,7 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ChatItem;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
 import javafx.scene.layout.HBox;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -58,6 +60,9 @@ class ChatListCellTest {
 
             cell.updateItem(chat, false);
             assertNotNull(cell.getContextMenu());
+            assertTrue(cell.getContextMenu().getItems().stream()
+                    .map(MenuItem::getText)
+                    .anyMatch(I18n.t("chat.menu.clearHistory")::equals));
 
             cell.updateItem(null, true);
             assertNull(cell.getContextMenu());

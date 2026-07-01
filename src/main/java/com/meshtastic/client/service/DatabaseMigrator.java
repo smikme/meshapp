@@ -37,13 +37,14 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 22;
+    static final int CURRENT_VERSION = 23;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
     private static final List<String> APPLICATION_TABLES = List.of(
             "MESSAGES",
             "CHAT_READ_COUNTS",
+            "CHAT_THREADS",
             "NODES",
             "NODE_FLAGS",
             "TELEMETRY_HISTORY",
@@ -209,6 +210,7 @@ public final class DatabaseMigrator {
             if (version < 20) { migrateToV20(connection); version = 20; }
             if (version < 21) { migrateToV21(connection); version = 21; }
             if (version < 22) { migrateToV22(connection); version = 22; }
+            if (version < 23) { migrateToV23(connection); version = 23; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -896,6 +898,25 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v22: added typed telemetry columns and one-wire temperature table");
+    }
+
+    /** v23: explicit chat threads for empty DM conversations. */
+    private static void migrateToV23(Connection connection) throws SQLException {
+        createChatThreadsTable(connection);
+        log.info("Migration v23: created explicit chat threads table");
+    }
+
+    private static void createChatThreadsTable(Connection connection) throws SQLException {
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS chat_threads (
+                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_type     VARCHAR(10) NOT NULL,
+                        chat_key      VARCHAR(20) NOT NULL,
+                        PRIMARY KEY (owner_node_id, chat_type, chat_key)
+                    )
+                    """);
+        }
     }
 
     private static void createNodeFlagsTable(Connection connection) throws SQLException {

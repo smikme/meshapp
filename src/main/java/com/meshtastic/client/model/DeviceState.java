@@ -304,6 +304,10 @@ public class DeviceState {
 
     public void ensureDirectMessageThread(String peerNodeId) {
         messageStore.ensureDirectMessageThread(peerNodeId);
+        String ownerNodeId = getOwnerNodeId();
+        if (ownerNodeId != null && peerNodeId != null && !peerNodeId.isBlank()) {
+            messageDbService.ensureChatThread("dm", peerNodeId, ownerNodeId);
+        }
     }
 
     public List<MeshMessage> getDirectMessages(String peerNodeId) {

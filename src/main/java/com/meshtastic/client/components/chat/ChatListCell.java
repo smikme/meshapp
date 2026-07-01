@@ -75,7 +75,20 @@ public class ChatListCell extends ListCell<ChatItem> {
     public ChatListCell(Consumer<ChatItem> onDeleteChat,
                         Consumer<ChatItem> onShowProperties,
                         Consumer<ChatItem> onToggleMute) {
-        this(onDeleteChat, onShowProperties, onToggleMute, false);
+        this(onDeleteChat, onShowProperties, onToggleMute, item -> {}, false);
+    }
+
+    /**
+     * @param onDeleteChat callback used by the context menu to delete or disable a chat
+     * @param onShowProperties callback used by the context menu to open channel properties
+     * @param onToggleMute callback used to toggle chat notifications
+     * @param onClearHistory callback used by the context menu to clear chat history
+     */
+    public ChatListCell(Consumer<ChatItem> onDeleteChat,
+                        Consumer<ChatItem> onShowProperties,
+                        Consumer<ChatItem> onToggleMute,
+                        Consumer<ChatItem> onClearHistory) {
+        this(onDeleteChat, onShowProperties, onToggleMute, onClearHistory, false);
     }
 
     /**
@@ -87,6 +100,21 @@ public class ChatListCell extends ListCell<ChatItem> {
     public ChatListCell(Consumer<ChatItem> onDeleteChat,
                         Consumer<ChatItem> onShowProperties,
                         Consumer<ChatItem> onToggleMute,
+                        boolean compact) {
+        this(onDeleteChat, onShowProperties, onToggleMute, item -> {}, compact);
+    }
+
+    /**
+     * @param onDeleteChat callback used by the context menu to delete or disable a chat
+     * @param onShowProperties callback used by the context menu to open channel properties
+     * @param onToggleMute callback used to toggle chat notifications
+     * @param onClearHistory callback used by the context menu to clear chat history
+     * @param compact whether the cell should show only avatar and unread count
+     */
+    public ChatListCell(Consumer<ChatItem> onDeleteChat,
+                        Consumer<ChatItem> onShowProperties,
+                        Consumer<ChatItem> onToggleMute,
+                        Consumer<ChatItem> onClearHistory,
                         boolean compact) {
         this.compact = compact;
         root.setAlignment(compact ? Pos.CENTER : Pos.CENTER_LEFT);
@@ -185,8 +213,21 @@ public class ChatListCell extends ListCell<ChatItem> {
             }
         });
 
+        MenuItem clearHistoryItem = new MenuItem(I18n.t("chat.menu.clearHistory"));
+        clearHistoryItem.setOnAction(ev -> {
+            ChatItem chatItem = getItem();
+            if (chatItem != null) {
+                onClearHistory.accept(chatItem);
+            }
+        });
+
         MenuItem closeItem = new MenuItem(I18n.t("chat.menu.deleteLocal"));
-        chatContextMenu = new ContextMenu(propertiesItem, notificationsItem, new SeparatorMenuItem(), closeItem);
+        chatContextMenu = new ContextMenu(
+                propertiesItem,
+                notificationsItem,
+                new SeparatorMenuItem(),
+                clearHistoryItem,
+                closeItem);
 
         // Properties are available only for channels.
         chatContextMenu.setOnShowing(ev -> {
@@ -203,6 +244,7 @@ public class ChatListCell extends ListCell<ChatItem> {
                         ? I18n.t("chat.menu.notificationsEnable")
                         : I18n.t("chat.menu.notificationsDisable"));
             }
+            clearHistoryItem.setText(I18n.t("chat.menu.clearHistory"));
             closeItem.setText(isChannel ? I18n.t("chat.menu.disableChannel") : I18n.t("chat.menu.deleteLocal"));
         });
 

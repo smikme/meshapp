@@ -260,6 +260,7 @@ abstract class FormChatUi extends FormChatBase {
                 this::deleteChat,
                 this::showChannelProperties,
                 this::toggleChatMute,
+                this::confirmClearChatHistory,
                 compact));
     }
 

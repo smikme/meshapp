@@ -324,6 +324,32 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void explicitDmThreadSurvivesServiceRestartWithoutMessages() {
+        service.ensureChatThread("dm", "!peer", "!owner");
+
+        TestEnvironmentSupport.resetSingletons();
+        service = MessageDbService.getInstance();
+
+        assertEquals(List.of("!peer"), service.getDistinctDmPeers("!owner"));
+        assertTrue(service.loadLast("dm", "!peer", 10, "!owner").isEmpty());
+    }
+
+    @Test
+    void deleteChatKeepsExplicitDmThreadButDeleteChatThreadRemovesIt() {
+        service.ensureChatThread("dm", "!peer", "!owner");
+        service.save(message("dm", 61, 10), "dm", "!peer", "!owner");
+
+        service.deleteChat("dm", "!peer", "!owner");
+
+        assertTrue(service.loadLast("dm", "!peer", 10, "!owner").isEmpty());
+        assertEquals(List.of("!peer"), service.getDistinctDmPeers("!owner"));
+
+        service.deleteChatThread("dm", "!peer", "!owner");
+
+        assertTrue(service.getDistinctDmPeers("!owner").isEmpty());
+    }
+
+    @Test
     void unreadEligibleCountIncludesIncomingSystemMessagesButExcludesOutgoing() {
         MeshMessage incoming = message("incoming", 10, 10);
         MeshMessage outgoing = new MeshMessage("!00000001", "!ffffffff", 0, "outgoing", 20, true);
@@ -634,17 +660,39 @@ class MessageDbServiceTest {
     }
 
     @Test
-    void deleteChatRemovesMessagesAndReadCount() {
+    void deleteChatRemovesMessagesReactionsAndReadCountOnlyForTargetChat() {
         service.save(message("one", 1, 10), "channel", "2", "!owner");
         service.save(message("two", 2, 20), "channel", "2", "!owner");
+        service.save(message("other-chat", 3, 30), "channel", "3", "!owner");
+        service.save(message("other-owner", 4, 40), "channel", "2", "!other");
         service.saveReaction(reaction(1, 9004, "😀", 21, false), "channel", "2", "!owner");
+        service.saveReaction(reaction(3, 9005, "👍", 31, false), "channel", "3", "!owner");
+        service.saveReaction(reaction(4, 9006, "🎉", 41, false), "channel", "2", "!other");
         service.saveReadCount("channel", "2", 2, "!owner");
+        service.saveReadCount("channel", "3", 1, "!owner");
+        service.saveReadCount("channel", "2", 1, "!other");
 
         service.deleteChat("channel", "2", "!owner");
 
         assertTrue(service.loadLast("channel", "2", 10, "!owner").isEmpty());
         assertTrue(service.loadReactionsByTargetPacketIds("channel", "2", "!owner", List.of(1)).isEmpty());
-        assertTrue(service.loadAllReadCounts("!owner").isEmpty());
+        assertNull(service.loadAllReadCounts("!owner").get("ch:2"));
+        assertEquals(List.of("other-chat"),
+                service.loadLast("channel", "3", 10, "!owner").stream().map(MeshMessage::getText).toList());
+        assertEquals(List.of("other-owner"),
+                service.loadLast("channel", "2", 10, "!other").stream().map(MeshMessage::getText).toList());
+        assertEquals(List.of("👍"),
+                service.loadReactionsByTargetPacketIds("channel", "3", "!owner", List.of(3)).get(3)
+                        .stream()
+                        .map(MessageReaction::getEmoji)
+                        .toList());
+        assertEquals(List.of("🎉"),
+                service.loadReactionsByTargetPacketIds("channel", "2", "!other", List.of(4)).get(4)
+                        .stream()
+                        .map(MessageReaction::getEmoji)
+                        .toList());
+        assertEquals(1, service.loadAllReadCounts("!owner").get("ch:3"));
+        assertEquals(1, service.loadAllReadCounts("!other").get("ch:2"));
     }
 
     private static MeshMessage message(String text, int packetId, long timestamp) {
