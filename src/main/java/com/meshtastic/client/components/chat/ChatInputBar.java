@@ -2,6 +2,7 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.components.EmojiImageCache;
 import com.meshtastic.client.components.EmojiPicker;
+import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.MeshMessage;
@@ -26,6 +27,7 @@ import javafx.scene.input.TransferMode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.Circle;
@@ -149,6 +151,7 @@ public class ChatInputBar extends VBox {
                 : ChatBotCommandHelper::suggestBots;
         this.nodeSuggestionProvider = nodeSuggestionProvider;
         getStyleClass().add("chat-input-wrapper");
+        setMaxHeight(Region.USE_PREF_SIZE);
         addEventFilter(DragEvent.DRAG_OVER, this::handleImageDragOver);
         addEventFilter(DragEvent.DRAG_DROPPED, this::handleImageDragDropped);
 
@@ -230,9 +233,11 @@ public class ChatInputBar extends VBox {
         inputBar.setAlignment(Pos.CENTER_LEFT);
         inputBar.setPadding(new Insets(8, 15, 8, 15));
         inputBar.getStyleClass().add("chat-input-bar");
+        inputBar.setMaxHeight(Region.USE_PREF_SIZE);
 
         inputStack = new StackPane(inputBar, commandSuggestionRoot);
         inputStack.setMaxWidth(Double.MAX_VALUE);
+        inputStack.setMaxHeight(Region.USE_PREF_SIZE);
         inputStack.setAlignment(Pos.BOTTOM_LEFT);
         StackPane.setAlignment(inputBar, Pos.BOTTOM_LEFT);
         StackPane.setAlignment(commandSuggestionRoot, Pos.BOTTOM_LEFT);
@@ -244,7 +249,9 @@ public class ChatInputBar extends VBox {
         replyQuoteLabel = new Label();
         replyQuoteLabel.getStyleClass().add("chat-reply-quote");
         replyQuoteLabel.setMaxWidth(Double.MAX_VALUE);
+        replyQuoteLabel.setMaxHeight(Region.USE_PREF_SIZE);
         replyQuoteLabel.setWrapText(false);
+        EmojiRenderingSupport.disableFor(replyQuoteLabel);
         HBox.setHgrow(replyQuoteLabel, Priority.ALWAYS);
 
         Button cancelReplyBtn = new Button("✕");
@@ -256,6 +263,8 @@ public class ChatInputBar extends VBox {
         replyBar.setAlignment(Pos.CENTER_LEFT);
         replyBar.setPadding(new Insets(6, 15, 6, 15));
         replyBar.getStyleClass().add("chat-reply-bar");
+        replyBar.setFillHeight(false);
+        replyBar.setMaxHeight(Region.USE_PREF_SIZE);
         replyBar.setVisible(false);
         replyBar.setManaged(false);
 

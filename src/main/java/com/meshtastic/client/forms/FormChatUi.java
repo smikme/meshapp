@@ -608,9 +608,21 @@ abstract class FormChatUi extends FormChatBase {
 
         messageScrollPane = createMessageScrollPane();
         messageArea = new StackPane(messageScrollPane, scrollDownWrapper);
-        VBox.setVgrow(messageArea, Priority.ALWAYS);
         registerMessageScrollListeners();
         chatInputBar = createChatInputBar();
+        applyChatDetailGrowthConstraints();
+    }
+
+    private void applyChatDetailGrowthConstraints() {
+        if (messageArea != null) {
+            messageArea.setMaxHeight(Double.MAX_VALUE);
+            VBox.setVgrow(messageArea, Priority.ALWAYS);
+        }
+        if (chatInputBar != null) {
+            chatInputBar.setMaxHeight(Region.USE_PREF_SIZE);
+            VBox.setVgrow(chatInputBar, Priority.NEVER);
+            VBox.setVgrow(chatInputBar.getInputSeparator(), Priority.NEVER);
+        }
     }
 
     private VBox createPlaceholderBox() {
@@ -1403,6 +1415,7 @@ abstract class FormChatUi extends FormChatBase {
             headerNameLabel.setText(UnicodeTextUtils.sanitizeForJavaFxDisplay(chat.getDisplayName()));
 
             // Show header, messages, and input controls.
+            applyChatDetailGrowthConstraints();
             detailPane.getChildren().clear();
             detailPane.getChildren().addAll(
                     chatHeader, headerSep, messageSelectionBar, messageArea,

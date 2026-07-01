@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -63,6 +64,49 @@ class EmojiRenderingSupportTest {
             assertEquals(ContentDisplay.GRAPHIC_ONLY, label.getContentDisplay());
             assertNotNull(label.getGraphic());
             assertTrue(label.getGraphic() instanceof ImageView);
+            return null;
+        });
+    }
+
+    @Test
+    void disabledLabeledControlKeepsNativeLabelRendering() {
+        onFxThread(() -> {
+            Label label = new Label("Node 🐸");
+            EmojiRenderingSupport.disableFor(label);
+            VBox root = new VBox(label);
+            Scene scene = new Scene(root, 240, 80);
+
+            EmojiRenderingSupport.install(scene);
+            root.applyCss();
+            root.layout();
+
+            assertEquals("Node 🐸", label.getText());
+            assertNotEquals(ContentDisplay.GRAPHIC_ONLY, label.getContentDisplay());
+            assertNull(label.getGraphic());
+            return null;
+        });
+    }
+
+    @Test
+    void disablingAlreadyRenderedLabeledControlRestoresNativeRendering() {
+        onFxThread(() -> {
+            Label label = new Label("Node 🐸");
+            VBox root = new VBox(label);
+            Scene scene = new Scene(root, 240, 80);
+
+            EmojiRenderingSupport.install(scene);
+            root.applyCss();
+            root.layout();
+
+            assertEquals(ContentDisplay.GRAPHIC_ONLY, label.getContentDisplay());
+            assertNotNull(label.getGraphic());
+
+            EmojiRenderingSupport.disableFor(label);
+            label.setText("Node 🐸 Travel");
+
+            assertEquals("Node 🐸 Travel", label.getText());
+            assertNotEquals(ContentDisplay.GRAPHIC_ONLY, label.getContentDisplay());
+            assertNull(label.getGraphic());
             return null;
         });
     }
