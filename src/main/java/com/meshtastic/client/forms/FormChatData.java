@@ -602,7 +602,6 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         db.deleteChat(key.dbType(), key.dbKey(), currentOwnerNodeId());
-        db.deleteChatThread(key.dbType(), key.dbKey(), currentOwnerNodeId());
         lastReadCounts.remove(key.readKey());
     }
 
@@ -612,6 +611,7 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         db.deleteChat(key.dbType(), key.dbKey(), currentOwnerNodeId());
+        db.deleteChatThread(key.dbType(), key.dbKey(), currentOwnerNodeId());
         lastReadCounts.remove(key.readKey());
     }
 

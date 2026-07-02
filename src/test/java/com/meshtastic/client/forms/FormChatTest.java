@@ -827,6 +827,48 @@ class FormChatTest {
     }
 
     @Test
+    void deleteDirectChatRemovesPersistentThreadAndSavedSelection() {
+        onFxThread(() -> {
+            MessageDbService db = MessageDbService.getInstance();
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                String connectionId = "connection-delete-dm-thread";
+                String peerNodeId = "!00000002";
+                state.ensureDirectMessageThread(peerNodeId);
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = connectionId;
+                form.reloadChatList();
+                ChatItem dm = form.chatListView.getItems().stream()
+                        .filter(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE)
+                        .filter(item -> peerNodeId.equals(item.getPeerNodeId()))
+                        .findFirst()
+                        .orElseThrow();
+
+                form.openChat(dm);
+                assertEquals("dm:" + peerNodeId, AppPreferences.loadSelectedChat(connectionId));
+
+                invokeOneArg(form, "deleteChat", ChatItem.class, dm);
+
+                assertTrue(db.getDistinctDmPeers(state.getOwnerNodeId()).isEmpty());
+                assertFalse(state.getAllDirectMessages().containsKey(peerNodeId));
+                assertTrue(form.chatListView.getItems().stream()
+                        .noneMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
+                                && peerNodeId.equals(item.getPeerNodeId())));
+                assertEquals(null, AppPreferences.loadSelectedChat(connectionId));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
     void hiddenIncomingMessageDoesNotTouchViewportState() {
         onFxThread(() -> {
             MessageDbService db = MessageDbService.getInstance();
