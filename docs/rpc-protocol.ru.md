@@ -1,5 +1,7 @@
 # Протокол MeshApp Remote RPC
 
+**Язык:** Русский | [English](rpc-protocol.md) | [Deutsch](rpc-protocol.de.md)
+
 Эта страница описывает JSON RPC-протокол, который MeshApp использует для удаленного подключения одного экземпляра MeshApp к другому экземпляру MeshApp Host. Протокол не является JSON-RPC 2.0 и не передает raw Meshtastic/MeshCore byte stream. Remote RPC - это отдельный прикладной слой для вызова whitelisted host-методов, получения host-событий и работы с состоянием уже выбранного подключения на Host.
 
 Основные исходники:
