@@ -18,9 +18,11 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -45,16 +47,22 @@ public final class WinBleProcess implements BlePlatform {
 
     private static final Logger log = LoggerFactory.getLogger(WinBleProcess.class);
     private static final Gson GSON = new Gson();
-    private static final Duration START_TIMEOUT = Duration.ofSeconds(10);
+    private static final String START_TIMEOUT_SECONDS_PROPERTY =
+            "meshapp.windowsBle.helperStartTimeoutSeconds";
+    private static final Duration START_TIMEOUT =
+            configuredPositiveDuration(START_TIMEOUT_SECONDS_PROPERTY, Duration.ofSeconds(45));
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration CONNECT_TIMEOUT = Duration.ofMinutes(3);
     private static final Duration WRITE_TIMEOUT = Duration.ofSeconds(15);
+    private static final int RECENT_HELPER_OUTPUT_LINES = 12;
 
     private final Object processLock = new Object();
     private final Object writeLock = new Object();
+    private final Object helperOutputLock = new Object();
     private final AtomicInteger nextRequestId = new AtomicInteger(1);
     private final AtomicBoolean connectInProgress = new AtomicBoolean(false);
     private final Map<Integer, CompletableFuture<Message>> pending = new ConcurrentHashMap<>();
+    private final Deque<String> recentHelperOutput = new ArrayDeque<>();
 
     private volatile Process process;
     private volatile BufferedWriter writer;
@@ -268,8 +276,11 @@ public final class WinBleProcess implements BlePlatform {
         try {
             CompletableFuture<Void> ready = new CompletableFuture<>();
             readyFuture = ready;
+            clearRecentHelperOutput();
 
-            ProcessBuilder builder = new ProcessBuilder(helperCommand());
+            java.util.List<String> command = helperCommand();
+            log.debug("Starting Windows BLE helper: {}", command);
+            ProcessBuilder builder = new ProcessBuilder(command);
             Process started = builder.start();
             process = started;
             writer = new BufferedWriter(new OutputStreamWriter(started.getOutputStream(), StandardCharsets.UTF_8));
@@ -291,8 +302,12 @@ public final class WinBleProcess implements BlePlatform {
             stopHelper();
             throw new IllegalStateException("Windows BLE helper failed to start: " + e.getCause().getMessage(), e.getCause());
         } catch (TimeoutException e) {
+            String details = recentHelperOutputSummary();
             stopHelper();
-            throw new IllegalStateException("Windows BLE helper start timed out", e);
+            throw new IllegalStateException("Windows BLE helper start timed out after "
+                    + START_TIMEOUT.toSeconds() + "s"
+                    + " (set -D" + START_TIMEOUT_SECONDS_PROPERTY + "=<seconds> to adjust)"
+                    + (details.isBlank() ? "" : ". Recent helper output: " + details), e);
         } catch (IOException e) {
             stopHelper();
             throw new IllegalStateException("Windows BLE helper start failed: " + e.getMessage(), e);
@@ -308,6 +323,7 @@ public final class WinBleProcess implements BlePlatform {
                 try {
                     message = GSON.fromJson(line, Message.class);
                 } catch (RuntimeException e) {
+                    rememberHelperOutput("stderr", line);
                     log.debug("[win-ble-helper stderr] {}", line);
                     continue;
                 }
@@ -330,6 +346,7 @@ public final class WinBleProcess implements BlePlatform {
                 new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                rememberHelperOutput("stdout", line);
                 log.debug("[win-ble-helper] {}", line);
             }
         } catch (IOException ignored) {
@@ -435,6 +452,30 @@ public final class WinBleProcess implements BlePlatform {
         }
     }
 
+    private void rememberHelperOutput(String stream, String line) {
+        if (line == null || line.isBlank()) {
+            return;
+        }
+        synchronized (helperOutputLock) {
+            recentHelperOutput.addLast(stream + ": " + line);
+            while (recentHelperOutput.size() > RECENT_HELPER_OUTPUT_LINES) {
+                recentHelperOutput.removeFirst();
+            }
+        }
+    }
+
+    private void clearRecentHelperOutput() {
+        synchronized (helperOutputLock) {
+            recentHelperOutput.clear();
+        }
+    }
+
+    private String recentHelperOutputSummary() {
+        synchronized (helperOutputLock) {
+            return String.join(" | ", recentHelperOutput);
+        }
+    }
+
     private void stopHelper() {
         synchronized (processLock) {
             Process current = process;
@@ -458,6 +499,19 @@ public final class WinBleProcess implements BlePlatform {
         return response != null && response.message != null && !response.message.isBlank()
                 ? response.message
                 : fallback;
+    }
+
+    private static Duration configuredPositiveDuration(String propertyName, Duration fallback) {
+        String raw = System.getProperty(propertyName);
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            long seconds = Long.parseLong(raw.trim());
+            return seconds > 0 ? Duration.ofSeconds(seconds) : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 
     private static java.util.List<String> helperCommand() {
