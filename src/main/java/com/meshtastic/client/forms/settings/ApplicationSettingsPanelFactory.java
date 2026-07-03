@@ -21,6 +21,7 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
@@ -37,6 +38,7 @@ public final class ApplicationSettingsPanelFactory {
     private static final String STATUS_CONNECTING_CLASS = "remote-rpc-status-connecting";
     private static final String STATUS_ERROR_CLASS = "remote-rpc-status-error";
     private static final String STATUS_DISABLED_CLASS = "remote-rpc-status-disabled";
+    private static final double MQTT_DOWNLINK_FILTER_COMBO_WIDTH = 280;
 
     private ApplicationSettingsPanelFactory() {}
 
@@ -514,6 +516,8 @@ public final class ApplicationSettingsPanelFactory {
             );
         filterBox.setButtonCell(createMqttDownlinkFilterModeCell());
         filterBox.setCellFactory(ignored -> createMqttDownlinkFilterModeCell());
+        filterBox.setMinWidth(MQTT_DOWNLINK_FILTER_COMBO_WIDTH);
+        filterBox.setPrefWidth(MQTT_DOWNLINK_FILTER_COMBO_WIDTH);
         filterBox
             .getSelectionModel()
             .select(AppPreferences.getMqttDownlinkFilterMode());
@@ -548,11 +552,11 @@ public final class ApplicationSettingsPanelFactory {
                 boolean empty
             ) {
                 super.updateItem(item, empty);
-                setText(
-                    empty || item == null
-                        ? null
-                        : I18n.t(item.displayKey())
-                );
+                String text = empty || item == null
+                    ? null
+                    : I18n.t(item.displayKey());
+                setText(text);
+                setTooltip(text == null ? null : new Tooltip(text));
             }
         };
     }
