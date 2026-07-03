@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import com.meshtastic.client.service.MessageDbService;
+import com.meshtastic.client.service.RemoteRpcHostService;
 
 /**
  * Central state store for a connected Meshtastic device.
@@ -260,6 +261,9 @@ public class DeviceState {
 
     public void fireMessageChange(MessageChangeEvent event) {
         messageStore.fireMessageChange(event);
+        if (event != null && event.kind() == MessageChangeEvent.Kind.STATUS_CHANGED) {
+            RemoteRpcHostService.getInstance().publishMessageStatusChanged(event);
+        }
     }
 
     /**
@@ -300,6 +304,10 @@ public class DeviceState {
 
     public void ensureDirectMessageThread(String peerNodeId) {
         messageStore.ensureDirectMessageThread(peerNodeId);
+        String ownerNodeId = getOwnerNodeId();
+        if (ownerNodeId != null && peerNodeId != null && !peerNodeId.isBlank()) {
+            messageDbService.ensureChatThread("dm", peerNodeId, ownerNodeId);
+        }
     }
 
     public List<MeshMessage> getDirectMessages(String peerNodeId) {

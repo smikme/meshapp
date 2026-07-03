@@ -306,6 +306,7 @@ Scripts run in an isolated LuaJ environment. Dangerous APIs are disabled: `io`, 
 Entry points:
 
 - `on_message(msg)` - reaction to a new message
+- `on_reaction(reaction)` - message reaction handling
 - `on_command(command)` - command handling
 - `on_node_selected(event)`, `on_traceroute(event)`, `on_node_info(event)`, `on_admin(event)` - asynchronous event handlers
 

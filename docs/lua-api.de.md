@@ -4,7 +4,7 @@
 
 MeshApp führt Benutzer-Lua-Skripte in einer LuaJ-Sandbox aus. Skripte können den Namespace `mesh`, zentrale Lua-Funktionen, die Bibliotheken `string`, `table`, `math`, `coroutine`, `bit32` sowie Funktionen wie `pairs`, `ipairs`, `pcall`, `tonumber` und `tostring` verwenden. Unsichere globale APIs sind deaktiviert: `io`, `os`, `debug`, `package`, `require`, `dofile`, `loadfile`, `luajava`, `collectgarbage`, `module`.
 
-Ein normales Skript läuft einmal und beendet sich, sofern es nicht `on_message(msg)` deklariert oder ausstehende asynchrone Operationen hat. Wenn `on_message(msg)` deklariert ist, bleibt das Skript aktiv und empfängt neue Nachrichten. Befehlsbots verwenden `on_command(command)`, und UI-/Anfrageergebnisse kommen in separaten Callback-Funktionen an.
+Ein normales Skript läuft einmal und beendet sich, sofern es weder `on_message(msg)` noch `on_reaction(reaction)` deklariert und keine ausstehenden asynchronen Operationen hat. Wenn `on_message(msg)` oder `on_reaction(reaction)` deklariert ist, bleibt das Skript aktiv und empfängt neue Chat-Ereignisse. Befehlsbots verwenden `on_command(command)`, und UI-/Anfrageergebnisse kommen in separaten Callback-Funktionen an.
 
 Ausführungslimits:
 
@@ -231,6 +231,7 @@ local key = "daily:" .. mesh.iso_date()
 | Callback | Aufrufzeitpunkt |
 |----------|-------------------|
 | `on_message(msg)` | Für jede neue eingehende oder ausgehende Nachricht, während das Skript läuft |
+| `on_reaction(reaction)` | Für jede neue eingehende oder ausgehende Nachrichtenreaktion, während das Skript läuft |
 | `on_command(command)` | Wenn ein Automationsbot aus dem Chat gestartet wird |
 | `on_extension_open(event)` | Wenn ein Erweiterungsskript über die linke Werkzeugleiste geöffnet wird |
 | `on_form_event(event)` | Nach einer Aktion oder Wertänderung einer über `mesh.form.*` erstellten Komponente |
@@ -308,12 +309,18 @@ end
 | `mesh.chat.send_channel(channel, text[, reply_id])` | `message` oder `nil` | Sendet eine Funknachricht an einen Kanal |
 | `mesh.chat.send_dm(node_id, text[, reply_id])` | `message` oder `nil` | Sendet eine Funk-Direktnachricht |
 | `mesh.chat.reply(msg, text)` | `message` oder `nil` | Sendet eine Antwort in denselben Chat, in dem `msg` angekommen ist |
+| `mesh.chat.react(msg, emoji)` | `true` oder `nil` | Sendet eine Meshtastic-Reaktion auf `msg` |
 | `mesh.chat.bot_message(chat_type, chat_key, text)` | `message` | Fügt dem Verlauf eine lokale Botnachricht hinzu, ohne sie per Funk zu senden |
 | `mesh.chat.bot_reply(msg, text)` | `message` | Fügt einer Nachricht eine lokale Botantwort hinzu |
 | `mesh.chat.bot_notice(chat_type, chat_key, text[, options])` | `true` | Zeigt eine temporäre Bot-UI-Nachricht, ohne sie in den Verlauf zu schreiben |
 | `mesh.chat.recent(chat_type, chat_key[, limit])` | Liste von `message` | Gibt aktuelle Nachrichten zurück, `limit` von 1 bis 200, Standard 20 |
 | `mesh.chat.nodes()` | Liste von `node` | Gibt bekannte Knoten der aktuellen Verbindung zurück |
 | `mesh.chat.channels()` | Liste von `channel` | Gibt bekannte Kanäle der aktuellen Verbindung zurück |
+
+`mesh.chat.react(msg, emoji)` benötigt eine Nachrichtentabelle mit `packet_id`
+und einem unterstützten `chat_type` (`channel` oder `dm`). Reaktionen werden
+über die aktive Meshtastic-Verbindung gesendet und sind für MeshCore-Verbindungen
+nicht verfügbar.
 
 ## `mesh.kv`
 
@@ -711,6 +718,19 @@ Farben können als JavaFX-/CSS-String (`"#ffcc00"`, `"rgba(255,0,0,0.5)"`, `"whi
 | `snr_towards` | Liste von number | SNR-Werte der Hinroute in dB |
 | `snr_back` | Liste von number | SNR-Werte der Rückroute in dB |
 
+## `mesh.node`
+
+`mesh.node` verwaltet lokale MeshApp-Knotenflags. Die Funktionen sind synchron und verwenden `FavoriteNodeService` und `IgnoredNodeService`: Sie aktualisieren den lokalen Flag für den Owner-Knoten der Lua-Sitzung und senden bei verfügbarer Verbindung des Bots den passenden Admin-Befehl an das Gerät. Diese Funktionen geben `true` zurück und rufen kein `on_admin(event)` auf.
+
+`target` kann ein Knoten-ID-String (`"!abcdef12"`), numerisches `node_num` oder eine Knotentabelle mit `node_num`, `node_id` sein.
+
+| Funktion | Rückgabe | Zweck |
+|----------|--------|---------|
+| `mesh.node.set_favorite_node(target)` | boolean | Fügt den Zielknoten zu den MeshApp-Favoriten hinzu und synchronisiert den Flag mit dem Gerät |
+| `mesh.node.remove_favorite_node(target)` | boolean | Entfernt den Zielknoten aus den MeshApp-Favoriten und synchronisiert den Flag mit dem Gerät |
+| `mesh.node.set_ignored_node(target)` | boolean | Fügt den Zielknoten zu den ignorierten MeshApp-Knoten hinzu und synchronisiert den Flag mit dem Gerät |
+| `mesh.node.remove_ignored_node(target)` | boolean | Entfernt den Zielknoten aus den ignorierten MeshApp-Knoten und synchronisiert den Flag mit dem Gerät |
+
 ## `mesh.nodeinfo`
 
 | Funktion | Rückgabe | Zweck |
@@ -862,6 +882,25 @@ Zurückgegeben von `on_message(msg)`, `mesh.chat.recent(...)` und Sende-/Botnach
 | `rx_rssi` | number | RSSI des empfangenen Pakets |
 | `rx_snr` | number | SNR des empfangenen Pakets in dB |
 
+### `reaction`
+
+Zurückgegeben von `on_reaction(reaction)`.
+
+| Feld | Typ | Zweck / Rückgabewert |
+|-------|------|--------------------------|
+| `db_id` | number | Lokale MeshApp-Datenbank-ID der Reaktion |
+| `packet_id` | number | Mesh-Paket-ID des Reaktionspakets |
+| `target_packet_id` | number | `packet_id` der Nachricht, auf die reagiert wurde |
+| `chat_type` | string oder `nil` | Chat-Typ: `channel` oder `dm` |
+| `chat_key` | string oder `nil` | Chat-Schlüssel: Kanalindex als String oder Knoten-ID des Gegenübers |
+| `from` | string oder `nil` | Sender-Knoten-ID |
+| `emoji` | string oder `nil` | Reaktions-Emoji |
+| `timestamp` | number | Unix-Zeit der Reaktion in Sekunden |
+| `outgoing` | boolean | `true`, wenn die Reaktion vom aktuellen Knoten/Client gesendet wurde |
+| `status` | string oder `nil` | Zustellstatus wie `SENDING`, `DELIVERED`, `CONFIRMED` oder `FAILED` |
+| `error_reason` | string oder `nil` | Fehlergrund, wenn bekannt |
+| `sender_name` | string oder `nil` | Anzeigename des Senders |
+
 ### `node`
 
 Zurückgegeben von `mesh.chat.nodes()`, `mesh.ui.pick_node(...)`, `mesh.nodeinfo.request(...)` und als `target` für Anfragen akzeptiert.
@@ -992,6 +1031,25 @@ function on_message(msg)
     if string.lower(msg.text) == "hello" then
         mesh.chat.reply(msg, "Hallo von " .. tostring(mesh.owner().node_id))
     end
+end
+```
+
+### Auf Nachrichten reagieren und Reaktionen protokollieren
+
+```lua
+function on_message(msg)
+    if msg.outgoing or msg.system or not msg.text then
+        return
+    end
+
+    if string.lower(msg.text) == "ok" then
+        mesh.chat.react(msg, "👍")
+    end
+end
+
+function on_reaction(reaction)
+    mesh.log("reaction " .. tostring(reaction.emoji)
+        .. " to packet " .. tostring(reaction.target_packet_id))
 end
 ```
 

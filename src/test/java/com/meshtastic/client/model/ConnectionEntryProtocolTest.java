@@ -49,4 +49,39 @@ class ConnectionEntryProtocolTest {
 
         assertTrue(entry.isAutoconnect());
     }
+
+    @Test
+    void remoteRpcEntryForcesRemoteRpcProtocol() {
+        ConnectionEntry entry = ConnectionEntry.remoteRpc("rpc", "127.0.0.1", 44030, "mra1_test");
+
+        entry.setProtocol(ProtocolType.MESHTASTIC);
+
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getProtocol());
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+        assertEquals(RemoteRpcConnectionMode.DIRECT, entry.getEffectiveRemoteRpcMode());
+    }
+
+    @Test
+    void remoteRpcRouterEntryKeepsRouterMode() {
+        ConnectionEntry entry = ConnectionEntry.remoteRpcRouter("rpc", "router.example.org", 8080, "mra1_test");
+
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getProtocol());
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+        assertEquals(RemoteRpcConnectionMode.ROUTER, entry.getEffectiveRemoteRpcMode());
+        assertEquals(ConnectionEntry.CLOUD_RPC_ROUTER_SERVER, entry.getHost());
+        assertEquals(ConnectionEntry.CLOUD_RPC_ROUTER_PORT, entry.getPort());
+    }
+
+    @Test
+    void remoteRpcProtocolForcesRemoteRpcType() {
+        ConnectionEntry entry = new ConnectionEntry("rpc", "127.0.0.1", 44030);
+
+        entry.setProtocol(ProtocolType.REMOTE_RPC);
+
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getType());
+        assertEquals(ConnectionType.REMOTE_RPC, entry.getEffectiveType());
+        assertEquals(ProtocolType.REMOTE_RPC, entry.getEffectiveProtocol());
+    }
 }

@@ -12,11 +12,16 @@ import com.meshtastic.client.forms.FormSetting;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaExtensionManager;
 import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.lua.LuaScriptService;
+import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.system.FormManager;
 import javafx.application.Platform;
+
+import java.util.List;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -27,6 +32,7 @@ public class MyDrawerBuilder {
 
     private static final MenuManager menuManager = new MenuManager();
     private static boolean scriptChangeListenerInstalled;
+    private static boolean connectionChangeListenerInstalled;
 
     public static MenuManager getMenuManager() {
         return menuManager;
@@ -34,6 +40,7 @@ public class MyDrawerBuilder {
 
     public static void init(DrawerPane drawerPane) {
         installScriptChangeListener();
+        installConnectionChangeListener();
         initMenuStructure();
         menuManager.rebuildMenu(drawerPane);
     }
@@ -75,7 +82,7 @@ public class MyDrawerBuilder {
     }
 
     private static void addExtensionMenuItems() {
-        for (LuaScript script : LuaExtensionManager.enabledExtensionScripts()) {
+        for (LuaScript script : enabledExtensionScripts()) {
             String itemId = LuaExtensionManager.navigationKey(script.getId());
             menuManager.add(new MenuManager.MenuItem(
                     itemId,
@@ -86,7 +93,45 @@ public class MyDrawerBuilder {
                     MenuManager.MenuItem.Type.ITEM,
                     null,
                     itemId));
-            menuManager.registerAction(itemId, () -> LuaExtensionManager.getInstance().openExtension(script.getId()));
+            menuManager.registerAction(itemId, () -> openExtension(script.getId()));
+        }
+    }
+
+    private static List<LuaScript> enabledExtensionScripts() {
+        try (LuaScriptDataSource dataSource = LuaScriptDataSources.forCurrentConnection()) {
+            return dataSource.listScripts().stream()
+                    .filter(LuaScript::isEnabled)
+                    .filter(script -> script.getBotType() == LuaScript.BotType.EXTENSION)
+                    .toList();
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    private static void openExtension(long scriptId) {
+        LuaScriptDataSource dataSource = LuaScriptDataSources.forCurrentConnection();
+        boolean launched = false;
+        try {
+            java.util.Optional<LuaScript> script = dataSource.findScript(scriptId);
+            if (script.isPresent()) {
+                dataSource.runScript(script.get(), null);
+                launched = true;
+            }
+        } catch (RuntimeException ignored) {
+            launched = false;
+        } finally {
+            if (!launched) {
+                closeQuietly(dataSource);
+            }
+        }
+    }
+
+    private static void closeQuietly(LuaScriptDataSource dataSource) {
+        if (dataSource != null) {
+            try {
+                dataSource.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -96,6 +141,14 @@ public class MyDrawerBuilder {
         }
         scriptChangeListenerInstalled = true;
         LuaScriptService.getInstance().addScriptChangeListener(() -> Platform.runLater(MyDrawerBuilder::rebuild));
+    }
+
+    private static void installConnectionChangeListener() {
+        if (connectionChangeListenerInstalled) {
+            return;
+        }
+        connectionChangeListenerInstalled = true;
+        ConnectionManager.getInstance().addListener(() -> Platform.runLater(MyDrawerBuilder::rebuild));
     }
 
     private static MenuManager.MenuItem menuItem(String id,

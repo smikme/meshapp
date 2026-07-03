@@ -591,6 +591,18 @@ class DatabaseMigratorTest {
     }
 
     @Test
+    void migrateFromV22CreatesChatThreadsTable() throws Exception {
+        try (Connection connection = openConnection("upgrade-v22-chat-threads")) {
+            createSchemaVersion(connection, 22);
+
+            DatabaseMigrator.migrate(connection);
+
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            assertTrue(tableExists(connection, "CHAT_THREADS"));
+        }
+    }
+
+    @Test
     void migrateLegacyAppDatabaseWithoutSchemaVersionPreservesMessages() throws Exception {
         try (Connection connection = openConnection("legacy-app-preserve")) {
             try (Statement stmt = connection.createStatement()) {

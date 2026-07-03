@@ -1144,6 +1144,35 @@
     -fx-padding: 15;
 }
 
+.remote-rpc-status-row {
+    -fx-padding: 4 0 0 0;
+}
+
+.remote-rpc-status-dot {
+    -fx-font-size: 1.0769em;
+    -fx-font-weight: bold;
+}
+
+.remote-rpc-status-connected {
+    -fx-text-fill: #1EA97C;
+}
+
+.remote-rpc-status-connecting {
+    -fx-text-fill: #F59E0B;
+}
+
+.remote-rpc-status-error {
+    -fx-text-fill: #B91C1C;
+}
+
+.remote-rpc-status-disabled {
+    -fx-text-fill: #9CA3AF;
+}
+
+.remote-rpc-status-text {
+    -fx-opacity: 0.78;
+}
+
 /* Tables */
 .table-view {
     -fx-fixed-cell-size: 28;
@@ -1974,6 +2003,10 @@
     -fx-border-width: 0 0 1 0;
 }
 
+.chat-list-view:compact .virtual-flow .clipped-container .sheet .list-cell {
+    -fx-alignment: center;
+}
+
 .light-theme .chat-list-view .virtual-flow .clipped-container .sheet .list-cell {
     -fx-border-color: rgba(0, 0, 0, 0.08);
 }
@@ -2025,6 +2058,10 @@
     -fx-text-fill: rgba(255, 255, 255, 0.9);
     -fx-font-size: 1.0769em;
     -fx-font-weight: bold;
+}
+
+.chat-list-cell-root-compact {
+    -fx-alignment: center;
 }
 
 .light-theme .chat-name-label {
@@ -2754,6 +2791,15 @@
 }
 
 /* Traceroute визуализация */
+.traceroute-window-root {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 0;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-border-radius: 0;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.32), 18, 0, 0, 6);
+}
+
 .traceroute-hop-name {
     -fx-font-size: 0.7692em;
     -fx-text-fill: rgba(255, 255, 255, 0.85);

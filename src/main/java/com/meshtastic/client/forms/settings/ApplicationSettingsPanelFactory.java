@@ -1,10 +1,14 @@
 package com.meshtastic.client.forms.settings;
 
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
+import com.meshtastic.client.rpc.RpcAccessKey;
+import com.meshtastic.client.service.RemoteRpcHostService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import java.util.function.DoubleConsumer;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -17,6 +21,7 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.Slider;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 
@@ -28,6 +33,12 @@ import javafx.scene.layout.VBox;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public final class ApplicationSettingsPanelFactory {
+
+    private static final String STATUS_CONNECTED_CLASS = "remote-rpc-status-connected";
+    private static final String STATUS_CONNECTING_CLASS = "remote-rpc-status-connecting";
+    private static final String STATUS_ERROR_CLASS = "remote-rpc-status-error";
+    private static final String STATUS_DISABLED_CLASS = "remote-rpc-status-disabled";
+    private static final double MQTT_DOWNLINK_FILTER_COMBO_WIDTH = 280;
 
     private ApplicationSettingsPanelFactory() {}
 
@@ -43,19 +54,19 @@ public final class ApplicationSettingsPanelFactory {
         Label appearanceHeader = new Label(I18n.t("settings.appearance.title"));
         appearanceHeader.getStyleClass().add("section-title");
 
-        CheckBox disableEffectsCb = new CheckBox(
-            I18n.t("settings.effects.disable")
+        CheckBox enableEffectsCb = new CheckBox(
+            I18n.t("settings.effects.enable")
         );
-        disableEffectsCb.setSelected(
-            AppPreferences.isDisableEffectsEffective()
+        enableEffectsCb.setSelected(
+            AppPreferences.isVisualEffectsEnabledEffective()
         );
         if (OsDetect.isWindows10()) {
-            disableEffectsCb.setDisable(true);
+            enableEffectsCb.setDisable(true);
         }
-        disableEffectsCb
+        enableEffectsCb
             .selectedProperty()
             .addListener((obs, old, val) ->
-                AppPreferences.setDisableEffects(val)
+                AppPreferences.setVisualEffectsEnabled(val)
             );
 
         CheckBox softwareRenderingCb = new CheckBox(
@@ -112,7 +123,7 @@ public final class ApplicationSettingsPanelFactory {
             appearanceHeader,
             typographyGroup,
             createLanguageSettingRow(),
-            disableEffectsCb,
+            enableEffectsCb,
             softwareRenderingCb,
             minimizeToTrayCb,
             restartNote
@@ -161,6 +172,7 @@ public final class ApplicationSettingsPanelFactory {
         VBox integrationsGroup = new VBox(
             8,
             integrationsHeader,
+            createMqttDownlinkFilterSettingRow(),
             checkUpdatesCb,
             jfrDiagnosticsCb,
             diagnosticsNote
@@ -176,6 +188,218 @@ public final class ApplicationSettingsPanelFactory {
                 integrationsGroup
             );
         return panel;
+    }
+
+    /**
+     * Creates the Remote RPC settings panel.
+     *
+     * @return JavaFX panel for MeshApp Host RPC and External RPC Router settings
+     */
+    public static VBox createRemoteRpcSettingsPanel() {
+        VBox panel = createRemoteRpcSettingRow();
+        panel.setPadding(new Insets(15));
+        return panel;
+    }
+
+    private static VBox createRemoteRpcSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.remoteRpc.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(I18n.t("settings.remoteRpc.description"));
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        CheckBox enabledBox = new CheckBox(I18n.t("settings.remoteRpc.enabled"));
+        enabledBox.setSelected(AppPreferences.isRemoteRpcServerEnabled());
+        CheckBox routerEnabledBox = new CheckBox(I18n.t("settings.remoteRpc.router.enabled"));
+        routerEnabledBox.setSelected(AppPreferences.isRemoteRpcRouterEnabled());
+
+        TextField bindField = new TextField(AppPreferences.getRemoteRpcServerBindAddress());
+        bindField.setPrefColumnCount(14);
+        TextField portField = new TextField(Integer.toString(AppPreferences.getRemoteRpcServerPort()));
+        portField.setPrefColumnCount(6);
+        portField.setMaxWidth(90);
+        portField.setTextFormatter(new TextFormatter<>(change -> {
+            String text = change.getControlNewText();
+            return text.matches("\\d{0,5}") ? change : null;
+        }));
+        TextField keyField = new TextField(AppPreferences.getRemoteRpcAccessKey());
+        keyField.setPrefColumnCount(30);
+        Label routerServerLabel = new Label(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST + ":"
+                + ConnectionEntry.CLOUD_RPC_ROUTER_PORT);
+        routerServerLabel.getStyleClass().add("muted-note-label");
+
+        Button generateButton = new Button(I18n.t("settings.remoteRpc.generateKey"));
+        generateButton.setOnAction(event -> keyField.setText(RpcAccessKey.generate().value()));
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("remote-rpc-status-text");
+        statusLabel.setWrapText(true);
+
+        Label statusIndicator = new Label("\u25CF");
+        statusIndicator.getStyleClass().add("remote-rpc-status-dot");
+        RemoteRpcStatusControls statusControls = new RemoteRpcStatusControls(
+                statusIndicator,
+                statusLabel
+        );
+        updateRemoteRpcStatus(statusControls);
+        installRemoteRpcStatusListener(statusControls);
+
+        Button applyButton = new Button(I18n.t("settings.remoteRpc.apply"));
+        applyButton.setOnAction(event -> {
+            int port = parsePortOrDefault(portField.getText());
+            portField.setText(Integer.toString(port));
+            applyButton.setDisable(true);
+            AppPreferences.setRemoteRpcServerEnabled(enabledBox.isSelected());
+            AppPreferences.setRemoteRpcServerBindAddress(bindField.getText());
+            AppPreferences.setRemoteRpcServerPort(port);
+            AppPreferences.setRemoteRpcAccessKey(keyField.getText());
+            AppPreferences.setRemoteRpcRouterEnabled(routerEnabledBox.isSelected());
+            AppPreferences.setRemoteRpcRouterServer(ConnectionEntry.CLOUD_RPC_ROUTER_SERVER);
+            Thread worker = new Thread(() -> {
+                try {
+                    RemoteRpcHostService.getInstance().applyPreferences();
+                } finally {
+                    Platform.runLater(() -> {
+                        updateRemoteRpcStatus(statusControls);
+                        applyButton.setDisable(false);
+                    });
+                }
+            }, "remote-rpc-settings-apply");
+            worker.setDaemon(true);
+            worker.start();
+        });
+
+        HBox bindRow = new HBox(
+                8,
+                new Label(I18n.t("settings.remoteRpc.bindAddress")),
+                bindField,
+                new Label(I18n.t("settings.remoteRpc.port")),
+                portField
+        );
+        bindRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox keyRow = new HBox(
+                8,
+                new Label(I18n.t("settings.remoteRpc.key")),
+                keyField,
+                generateButton
+        );
+        keyRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox routerRow = new HBox(
+                8,
+                routerEnabledBox,
+                routerServerLabel
+        );
+        routerRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox actionRow = new HBox(8, enabledBox, applyButton);
+        actionRow.setAlignment(Pos.CENTER_LEFT);
+
+        HBox statusRow = new HBox(8, statusIndicator, statusLabel);
+        statusRow.setAlignment(Pos.CENTER_LEFT);
+        statusRow.getStyleClass().add("remote-rpc-status-row");
+
+        return new VBox(8, titleLabel, descriptionLabel, bindRow, keyRow, routerRow, actionRow, statusRow);
+    }
+
+    private static int parsePortOrDefault(String text) {
+        try {
+            int port = Integer.parseInt(text != null ? text.trim() : "");
+            return port >= 1 && port <= 65_535 ? port : AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
+        } catch (NumberFormatException e) {
+            return AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
+        }
+    }
+
+    private static void updateRemoteRpcStatus(RemoteRpcStatusControls controls) {
+        RemoteRpcHostService service = RemoteRpcHostService.getInstance();
+        applyRemoteRpcStatusStyle(controls.statusIndicator(), remoteRpcStatusKind(service));
+        if (service.isRunning()) {
+            String direct = I18n.t("settings.remoteRpc.status.running", service.getPort());
+            String router = routerStatusText(service);
+            controls.statusLabel().setText(router.isBlank() ? direct : direct + "\n" + router);
+            return;
+        }
+        String error = service.getLastError();
+        String direct = error == null || error.isBlank()
+                ? I18n.t("settings.remoteRpc.status.stopped")
+                : I18n.t("settings.remoteRpc.status.error", error);
+        String router = routerStatusText(service);
+        controls.statusLabel().setText(router.isBlank() ? direct : direct + "\n" + router);
+    }
+
+    private static String routerStatusText(RemoteRpcHostService service) {
+        if (!AppPreferences.isRemoteRpcRouterEnabled()) {
+            return I18n.t("settings.remoteRpc.router.status.disabled");
+        }
+        if (service.isRouterConnected()) {
+            return I18n.t("settings.remoteRpc.router.status.connected");
+        }
+        String error = service.getLastRouterError();
+        return error == null || error.isBlank()
+                ? I18n.t("settings.remoteRpc.router.status.connecting")
+                : I18n.t("settings.remoteRpc.router.status.error", error);
+    }
+
+    private static RemoteRpcStatusKind remoteRpcStatusKind(RemoteRpcHostService service) {
+        if (AppPreferences.isRemoteRpcRouterEnabled()) {
+            if (service.isRouterConnected()) {
+                return RemoteRpcStatusKind.CONNECTED;
+            }
+            String routerError = service.getLastRouterError();
+            return routerError == null || routerError.isBlank()
+                    ? RemoteRpcStatusKind.CONNECTING
+                    : RemoteRpcStatusKind.ERROR;
+        }
+        if (!service.isRunning()) {
+            String error = service.getLastError();
+            return error == null || error.isBlank()
+                    ? RemoteRpcStatusKind.DISABLED
+                    : RemoteRpcStatusKind.ERROR;
+        }
+        return RemoteRpcStatusKind.CONNECTED;
+    }
+
+    private static void applyRemoteRpcStatusStyle(Label statusIndicator, RemoteRpcStatusKind statusKind) {
+        statusIndicator.getStyleClass().removeAll(
+                STATUS_CONNECTED_CLASS,
+                STATUS_CONNECTING_CLASS,
+                STATUS_ERROR_CLASS,
+                STATUS_DISABLED_CLASS
+        );
+        switch (statusKind) {
+            case CONNECTED -> statusIndicator.getStyleClass().add(STATUS_CONNECTED_CLASS);
+            case CONNECTING -> statusIndicator.getStyleClass().add(STATUS_CONNECTING_CLASS);
+            case ERROR -> statusIndicator.getStyleClass().add(STATUS_ERROR_CLASS);
+            case DISABLED -> statusIndicator.getStyleClass().add(STATUS_DISABLED_CLASS);
+        }
+    }
+
+    private static void installRemoteRpcStatusListener(RemoteRpcStatusControls controls) {
+        RemoteRpcHostService service = RemoteRpcHostService.getInstance();
+        Runnable listener = () -> Platform.runLater(() -> {
+            if (controls.statusLabel().getScene() != null) {
+                updateRemoteRpcStatus(controls);
+            }
+        });
+        service.addStatusListener(listener);
+        controls.statusLabel().sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (oldScene != null && newScene == null) {
+                service.removeStatusListener(listener);
+            }
+        });
+    }
+
+    private enum RemoteRpcStatusKind {
+        CONNECTED,
+        CONNECTING,
+        ERROR,
+        DISABLED
+    }
+
+    private record RemoteRpcStatusControls(Label statusIndicator, Label statusLabel) {
     }
 
     private static VBox createMemoryLimitSettingRow() {
@@ -274,6 +498,38 @@ public final class ApplicationSettingsPanelFactory {
         );
     }
 
+    private static VBox createMqttDownlinkFilterSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.mqttFilter.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(
+            I18n.t("settings.mqttFilter.description")
+        );
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        ComboBox<AppPreferences.MqttDownlinkFilterMode> filterBox =
+            new ComboBox<>(
+                FXCollections.observableArrayList(
+                    AppPreferences.MqttDownlinkFilterMode.values()
+                )
+            );
+        filterBox.setButtonCell(createMqttDownlinkFilterModeCell());
+        filterBox.setCellFactory(ignored -> createMqttDownlinkFilterModeCell());
+        filterBox.setMinWidth(MQTT_DOWNLINK_FILTER_COMBO_WIDTH);
+        filterBox.setPrefWidth(MQTT_DOWNLINK_FILTER_COMBO_WIDTH);
+        filterBox
+            .getSelectionModel()
+            .select(AppPreferences.getMqttDownlinkFilterMode());
+        filterBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue != null) {
+                AppPreferences.setMqttDownlinkFilterMode(newValue);
+            }
+        });
+
+        return new VBox(6, titleLabel, descriptionLabel, filterBox);
+    }
+
     private static ListCell<I18n.LanguageOption> createLanguageCell() {
         return new ListCell<>() {
             @Override
@@ -284,6 +540,23 @@ public final class ApplicationSettingsPanelFactory {
                         ? null
                         : I18n.t(item.displayKey())
                 );
+            }
+        };
+    }
+
+    private static ListCell<AppPreferences.MqttDownlinkFilterMode> createMqttDownlinkFilterModeCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(
+                AppPreferences.MqttDownlinkFilterMode item,
+                boolean empty
+            ) {
+                super.updateItem(item, empty);
+                String text = empty || item == null
+                    ? null
+                    : I18n.t(item.displayKey());
+                setText(text);
+                setTooltip(text == null ? null : new Tooltip(text));
             }
         };
     }

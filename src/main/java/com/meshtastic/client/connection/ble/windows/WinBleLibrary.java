@@ -123,7 +123,7 @@ public interface WinBleLibrary extends Library {
      * Callback invoked when a BLE device is discovered during scanning.
      */
     interface DeviceCallback extends Callback {
-        void callback(String address, String name, int rssi);
+        void callback(Pointer address, Pointer name, int rssi);
     }
 
     /**

@@ -15,6 +15,10 @@ import java.util.UUID;
  */
 public class ConnectionEntry {
 
+    public static final String CLOUD_RPC_ROUTER_DISPLAY_HOST = "cloud.meshapp.privatepractice.app";
+    public static final String CLOUD_RPC_ROUTER_SERVER = "wss://" + CLOUD_RPC_ROUTER_DISPLAY_HOST;
+    public static final int CLOUD_RPC_ROUTER_PORT = 443;
+
     private String id;
     private String name;
     private ProtocolType protocol;
@@ -26,6 +30,8 @@ public class ConnectionEntry {
     private SerialModemLineMode serialModemLineMode;
     private String bleAddress;
     private String bleDeviceName;
+    private RemoteRpcConnectionMode remoteRpcMode;
+    private String remoteAccessKey;
     private String nodeId;
     private boolean autoconnect;
     private transient boolean connected;
@@ -67,11 +73,43 @@ public class ConnectionEntry {
         this.bleDeviceName = bleDeviceName;
     }
 
+    /** Constructor for direct MeshApp RPC connections. */
+    public static ConnectionEntry remoteRpc(String name, String host, int port, String accessKey) {
+        return remoteRpc(name, host, port, accessKey, RemoteRpcConnectionMode.DIRECT);
+    }
+
+    /** Constructor for MeshApp RPC connections. */
+    public static ConnectionEntry remoteRpc(String name,
+                                            String host,
+                                            int port,
+                                            String accessKey,
+                                            RemoteRpcConnectionMode mode) {
+        ConnectionEntry entry = new ConnectionEntry();
+        entry.protocol = ProtocolType.REMOTE_RPC;
+        entry.type = ConnectionType.REMOTE_RPC;
+        entry.name = name;
+        entry.remoteRpcMode = mode != null ? mode : RemoteRpcConnectionMode.DIRECT;
+        entry.host = entry.remoteRpcMode == RemoteRpcConnectionMode.ROUTER ? CLOUD_RPC_ROUTER_SERVER : host;
+        entry.port = entry.remoteRpcMode == RemoteRpcConnectionMode.ROUTER ? CLOUD_RPC_ROUTER_PORT : port;
+        entry.remoteAccessKey = accessKey;
+        return entry;
+    }
+
+    /** Constructor for External RPC Router client connections. */
+    public static ConnectionEntry remoteRpcRouter(String name, String server, int port, String accessKey) {
+        return remoteRpc(name, CLOUD_RPC_ROUTER_SERVER, CLOUD_RPC_ROUTER_PORT, accessKey, RemoteRpcConnectionMode.ROUTER);
+    }
+
     /**
      * Returns the effective connection type.
      * Legacy entries with {@code type == null} are treated as TCP.
      */
     public ConnectionType getEffectiveType() {
+        if (type == ConnectionType.REMOTE_RPC
+                || protocol == ProtocolType.REMOTE_RPC
+                || (remoteAccessKey != null && !remoteAccessKey.isBlank())) {
+            return ConnectionType.REMOTE_RPC;
+        }
         return type != null ? type : ConnectionType.TCP;
     }
 
@@ -80,6 +118,9 @@ public class ConnectionEntry {
      * Legacy entries with {@code protocol == null} are treated as Meshtastic.
      */
     public ProtocolType getEffectiveProtocol() {
+        if (getEffectiveType() == ConnectionType.REMOTE_RPC) {
+            return ProtocolType.REMOTE_RPC;
+        }
         return protocol != null ? protocol : ProtocolType.MESHTASTIC;
     }
 
@@ -125,6 +166,11 @@ public class ConnectionEntry {
      * @param protocol protocol type to store in the connection profile
      */
     public void setProtocol(ProtocolType protocol) {
+        if (this.type == ConnectionType.REMOTE_RPC || protocol == ProtocolType.REMOTE_RPC) {
+            this.protocol = ProtocolType.REMOTE_RPC;
+            this.type = ConnectionType.REMOTE_RPC;
+            return;
+        }
         this.protocol = protocol;
     }
 
@@ -134,6 +180,9 @@ public class ConnectionEntry {
 
     public void setType(ConnectionType type) {
         this.type = type;
+        if (type == ConnectionType.REMOTE_RPC) {
+            this.protocol = ProtocolType.REMOTE_RPC;
+        }
     }
 
     public String getHost() {
@@ -195,6 +244,26 @@ public class ConnectionEntry {
 
     public void setBleDeviceName(String bleDeviceName) {
         this.bleDeviceName = bleDeviceName;
+    }
+
+    public String getRemoteAccessKey() {
+        return remoteAccessKey;
+    }
+
+    public void setRemoteAccessKey(String remoteAccessKey) {
+        this.remoteAccessKey = remoteAccessKey;
+    }
+
+    public RemoteRpcConnectionMode getRemoteRpcMode() {
+        return remoteRpcMode;
+    }
+
+    public void setRemoteRpcMode(RemoteRpcConnectionMode remoteRpcMode) {
+        this.remoteRpcMode = remoteRpcMode;
+    }
+
+    public RemoteRpcConnectionMode getEffectiveRemoteRpcMode() {
+        return remoteRpcMode != null ? remoteRpcMode : RemoteRpcConnectionMode.DIRECT;
     }
 
     public String getNodeId() {

@@ -1,5 +1,8 @@
 package com.meshtastic.client.update;
 
+import com.meshtastic.client.notification.MacOsNotificationBroker;
+import com.meshtastic.client.notification.MacOsNotificationService;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.management.ManagementFactory;
@@ -40,9 +43,16 @@ public final class SelfUpdateLauncher {
             return false;
         }
 
+        MacOsNotificationBroker.Server notificationBroker = null;
         try {
             String currentVersion = ensurePayload(plan.get());
-            Process process = startPayload(plan.get(), currentVersion, args);
+            notificationBroker = startMacOsNotificationBroker().orElse(null);
+            Process process = startPayload(
+                    plan.get(),
+                    currentVersion,
+                    args,
+                    notificationBroker == null ? null : notificationBroker.endpoint()
+            );
             int exitCode = process.waitFor();
             System.exit(exitCode);
             return true;
@@ -52,6 +62,10 @@ public final class SelfUpdateLauncher {
         } catch (Exception e) {
             e.printStackTrace(System.err);
             return false;
+        } finally {
+            if (notificationBroker != null) {
+                notificationBroker.close();
+            }
         }
     }
 
@@ -124,6 +138,13 @@ public final class SelfUpdateLauncher {
     }
 
     static Process startPayload(PayloadPlan plan, String currentVersion, String[] args) throws IOException {
+        return startPayload(plan, currentVersion, args, null);
+    }
+
+    static Process startPayload(PayloadPlan plan,
+                                String currentVersion,
+                                String[] args,
+                                MacOsNotificationBroker.Endpoint notificationBroker) throws IOException {
         Path versionDir = plan.versionDir(currentVersion);
         Path libDir = payloadLibDir(versionDir);
         Path fxDir = Files.isDirectory(libDir.resolve("fx"))
@@ -170,7 +191,28 @@ public final class SelfUpdateLauncher {
         if (plan.launcher() != null && !plan.launcher().isBlank()) {
             childEnv.put(SelfUpdateEnvironment.ENV_LAUNCHER, plan.launcher());
         }
+        if (notificationBroker != null) {
+            childEnv.put(MacOsNotificationBroker.ENV_PORT,
+                    Integer.toString(notificationBroker.port()));
+            childEnv.put(MacOsNotificationBroker.ENV_TOKEN, notificationBroker.token());
+        }
         return builder.start();
+    }
+
+    private static Optional<MacOsNotificationBroker.Server> startMacOsNotificationBroker() {
+        if (!isMacOs()) {
+            return Optional.empty();
+        }
+        try {
+            MacOsNotificationService service = new MacOsNotificationService();
+            if (!service.isNativeAvailable()) {
+                return Optional.empty();
+            }
+            return Optional.of(MacOsNotificationBroker.start(service));
+        } catch (Throwable t) {
+            System.err.println("macOS notification broker unavailable: " + t);
+            return Optional.empty();
+        }
     }
 
     static Optional<PackagedApp> detectPackagedApp(Properties properties) {
@@ -540,6 +582,12 @@ public final class SelfUpdateLauncher {
     private static boolean isFlatpak(Map<String, String> env) {
         return firstNonBlank(env.get("FLATPAK_ID"), env.get("FLATPAK_APP_ID")) != null
                 || "flatpak".equalsIgnoreCase(firstNonBlank(env.get("container")));
+    }
+
+    private static boolean isMacOs() {
+        return System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .contains("mac");
     }
 
     private static boolean isEnabled(String value) {

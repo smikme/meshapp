@@ -1,5 +1,6 @@
 package com.meshtastic.client.forms;
 
+import com.google.gson.JsonElement;
 import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.components.NodeDetailPanel;
 import com.meshtastic.client.components.chat.ChatBotCommandHelper;
@@ -11,6 +12,9 @@ import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteNodeJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.FavoriteNodeService;
 import com.meshtastic.client.service.IgnoredNodeService;
@@ -49,13 +53,17 @@ import org.meshtastic.proto.MeshProtos;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -76,6 +84,7 @@ public class FormMap extends Form {
 
     private static final int RECENT_TRACE_LIMIT = 20;
     private static final int TRACE_NODE_CACHE_LIMIT = 2_000;
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
     private static final double DOWNLOAD_PROGRESS_WIDTH = 180;
     private static final double STATUS_LEGEND_WIDTH = 260;
     private static final Pattern TRACE_SEGMENT_PATTERN = Pattern.compile(" →(-?\\d+[.,]\\d+)dB→ | → ");
@@ -106,6 +115,7 @@ public class FormMap extends Form {
     private final Button downloadButton = new Button(I18n.t("map.downloadArea"));
 
     private DeviceState state;
+    private RemoteRpcState remoteRpcState;
     private int localNodeNum;
     private boolean autoFitPending = !AppPreferences.hasMapView();
     private boolean includeUnknownNames;
@@ -124,6 +134,10 @@ public class FormMap extends Form {
     private final Map<Long, ParsedTrace> selectedTraces = new LinkedHashMap<>();
     private List<ParsedTrace> recentTraces = List.of();
     private Map<String, NodeData> currentMarkerNodes = Map.of();
+    private List<NodeData> remoteNodeSnapshot = List.of();
+    private String remoteOwnerNodeId = "";
+    private final Map<String, Boolean> remoteFavoriteFlags = new HashMap<>();
+    private final Map<String, Boolean> remoteIgnoredFlags = new HashMap<>();
     private boolean suppressSearchSuggestions;
 
     private final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
@@ -1362,16 +1376,27 @@ public class FormMap extends Form {
     private void rebindState() {
         DeviceState oldState = state;
         DeviceState newState = null;
+        RemoteRpcState newRemoteRpcState = null;
         int newLocalNodeNum = 0;
 
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = manager.getSelectedConnectionEntry();
         if (entry != null && entry.isConnected()) {
-            DeviceState candidate = manager.getDeviceState(entry.getId());
-            if (candidate != null) {
-                newState = candidate;
-                newLocalNodeNum = candidate.getMyNodeNum();
+            ProtocolRuntime<?> runtime = manager.getProtocolRuntime(entry.getId());
+            if (runtime != null && runtime.getState() instanceof RemoteRpcState remoteState) {
+                newRemoteRpcState = remoteState;
+            } else {
+                DeviceState candidate = manager.getDeviceState(entry.getId());
+                if (candidate != null) {
+                    newState = candidate;
+                    newLocalNodeNum = candidate.getMyNodeNum();
+                }
             }
+        }
+
+        if (oldState == newState && remoteRpcState == newRemoteRpcState) {
+            reloadMarkers();
+            return;
         }
 
         if (oldState != null && oldState != newState) {
@@ -1382,7 +1407,12 @@ public class FormMap extends Form {
         }
 
         state = newState;
+        remoteRpcState = newRemoteRpcState;
         localNodeNum = newLocalNodeNum;
+        remoteNodeSnapshot = List.of();
+        remoteOwnerNodeId = "";
+        remoteFavoriteFlags.clear();
+        remoteIgnoredFlags.clear();
         reloadMarkers();
     }
 
@@ -1392,9 +1422,51 @@ public class FormMap extends Form {
      * filters would otherwise hide it.
      */
     private void reloadMarkers() {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState != null) {
+            reloadRemoteMarkers(rpcState);
+            return;
+        }
+        renderMarkers(collectMapNodes());
+    }
+
+    private void reloadRemoteMarkers(RemoteRpcState rpcState) {
+        rpcState.client()
+                .call("node.list",
+                        RemoteNodeJson.listParams(showFavoritesOnly, showIgnoredOnly),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", errorMessage(error)));
+                        renderMarkers(remoteNodeSnapshot);
+                        return;
+                    }
+                    applyRemoteNodeSnapshot(result);
+                    renderMarkers(remoteNodeSnapshot);
+                }));
+    }
+
+    private void applyRemoteNodeSnapshot(JsonElement result) {
+        remoteOwnerNodeId = RemoteNodeJson.ownerNodeId(result);
+        remoteFavoriteFlags.clear();
+        remoteFavoriteFlags.putAll(RemoteNodeJson.parseFavoriteFlags(result));
+        remoteIgnoredFlags.clear();
+        remoteIgnoredFlags.putAll(RemoteNodeJson.parseIgnoredFlags(result));
+        remoteNodeSnapshot = RemoteNodeJson.parseNodes(result);
+        localNodeNum = remoteNodeSnapshot.stream()
+                .filter(node -> remoteOwnerNodeId.equals(node.getNodeId()))
+                .map(NodeData::getNodeNum)
+                .findFirst()
+                .orElse(0);
+    }
+
+    private void renderMarkers(List<NodeData> nodes) {
         List<MapMarker> markers = new ArrayList<>();
         Map<String, NodeData> markerNodes = new LinkedHashMap<>();
-        for (NodeData node : collectMapNodes()) {
+        for (NodeData node : nodes) {
             if (!hasCoordinate(node)) {
                 continue;
             }
@@ -1421,7 +1493,7 @@ public class FormMap extends Form {
         mapView.setMarkers(markers);
         refreshSelectedTraceOverlay(false);
         fitNodesButton.setDisable(markers.isEmpty());
-        NodeData myNode = state != null ? state.getNodeDb().get(localNodeNum) : null;
+        NodeData myNode = resolveLocalNode();
         myNodeButton.setDisable(!hasCoordinate(myNode));
         if (autoFitPending && !markers.isEmpty()) {
             autoFitPending = false;
@@ -1445,7 +1517,11 @@ public class FormMap extends Form {
         }
 
         NodeCacheService.getInstance().enrichFromCache(node);
-        NodeDetailPanel.showForNode(state, node);
+        if (remoteRpcState != null) {
+            NodeDetailPanel.showForRemoteNode(remoteRpcState, node);
+        } else {
+            NodeDetailPanel.showForNode(state, node);
+        }
         statusLabel.setText(I18n.t("map.marker.opened", nodeTitle(node)));
     }
 
@@ -1472,6 +1548,9 @@ public class FormMap extends Form {
      * when needed, from favorite or ignored node caches.
      */
     private List<NodeData> collectMapNodes() {
+        if (remoteRpcState != null) {
+            return remoteNodeSnapshot;
+        }
         if (state == null && !showFavoritesOnly && !showIgnoredOnly) {
             return List.of();
         }
@@ -1516,6 +1595,15 @@ public class FormMap extends Form {
         if (hideOffline && node.getLastHeard() > 0 && (now - node.getLastHeard()) > 7200) {
             return false;
         }
+        if (remoteRpcState != null) {
+            if (showFavoritesOnly && !remoteFavoriteFlags.getOrDefault(node.getNodeId(), false)) {
+                return false;
+            }
+            if (showDirectOnly && !node.isDirectNeighbor()) {
+                return false;
+            }
+            return !showIgnoredOnly || remoteIgnoredFlags.getOrDefault(node.getNodeId(), false);
+        }
         String ownerNodeId = currentOwnerNodeId();
         if (showFavoritesOnly
                 && (ownerNodeId.isBlank() || !FavoriteNodeService.getInstance().isFavorite(node.getNodeId(), ownerNodeId))) {
@@ -1532,12 +1620,12 @@ public class FormMap extends Form {
      * Centers the map on the local node coordinates.
      */
     private void centerOnMyNode() {
-        if (state == null) {
+        if (state == null && remoteRpcState == null) {
             statusLabel.setText(I18n.t("map.myNode.noConnection"));
             return;
         }
 
-        NodeData myNode = state.getNodeDb().get(localNodeNum);
+        NodeData myNode = resolveLocalNode();
         if (!hasCoordinate(myNode)) {
             statusLabel.setText(I18n.t("map.myNode.noCoordinates"));
             return;
@@ -1594,6 +1682,9 @@ public class FormMap extends Form {
      * Returns the owner nodeId of the current connection for message-history isolation.
      */
     private String currentOwnerNodeId() {
+        if (remoteRpcState != null) {
+            return remoteOwnerNodeId;
+        }
         if (state != null && state.getOwnerNodeId() != null) {
             return state.getOwnerNodeId();
         }
@@ -1603,6 +1694,30 @@ public class FormMap extends Form {
         }
         String ownerNodeId = ConnectionManager.getInstance().getOwnerNodeId(entry.getId());
         return ownerNodeId != null && !ownerNodeId.isBlank() && !"?".equals(ownerNodeId) ? ownerNodeId : "";
+    }
+
+    private NodeData resolveLocalNode() {
+        if (remoteRpcState != null) {
+            return remoteNodeSnapshot.stream()
+                    .filter(node -> node.getNodeNum() == localNodeNum
+                            || (!remoteOwnerNodeId.isBlank() && remoteOwnerNodeId.equals(node.getNodeId())))
+                    .findFirst()
+                    .orElse(null);
+        }
+        return state != null ? state.getNodeDb().get(localNodeNum) : null;
+    }
+
+    private static String errorMessage(Throwable error) {
+        Throwable current = error;
+        while (current instanceof CompletionException || current instanceof ExecutionException) {
+            Throwable cause = current.getCause();
+            if (cause == null) {
+                break;
+            }
+            current = cause;
+        }
+        String message = current != null ? current.getMessage() : null;
+        return message == null || message.isBlank() ? String.valueOf(error) : message;
     }
 
     /**

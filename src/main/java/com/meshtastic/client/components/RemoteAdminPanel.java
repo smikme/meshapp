@@ -18,8 +18,12 @@ import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.service.LocalRemoteAdminBackend;
+import com.meshtastic.client.service.RemoteAdminBackend;
 import com.meshtastic.client.service.RemoteAdminService;
 import com.meshtastic.client.service.RemoteAdminSession;
+import com.meshtastic.client.service.RpcRemoteAdminBackend;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
@@ -73,7 +77,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     private static final double MIN_WINDOW_WIDTH = 680;
     private static final double MIN_WINDOW_HEIGHT = 520;
 
-    private final RemoteAdminService remoteAdminService;
+    private final RemoteAdminBackend remoteAdminBackend;
     private final ConfigHelpPopupController configHelpPopupController = new ConfigHelpPopupController();
     private final String targetDisplayName;
     private final TextField searchField = new TextField();
@@ -106,12 +110,16 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
      * @param handler protocol handler used for ADMIN_APP packets
      */
     public RemoteAdminPanel(DeviceState localState, NodeData targetNode, ProtocolHandler handler) {
+        this(targetNode, new LocalRemoteAdminBackend(handler, localState, targetNode));
+    }
+
+    private RemoteAdminPanel(NodeData targetNode, RemoteAdminBackend remoteAdminBackend) {
         setPrefSize(WINDOW_WIDTH, WINDOW_HEIGHT);
         setMinSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
         setMaxHeight(Double.MAX_VALUE);
         getStyleClass().addAll("packet-monitor-root", "modal-side-panel");
 
-        this.remoteAdminService = new RemoteAdminService(handler, localState, targetNode);
+        this.remoteAdminBackend = remoteAdminBackend;
         this.configTree = ConfigPanelFactory.createConfigTree(
                 configHelpPopupController,
                 this::syncRepeatedEditorSlots);
@@ -190,60 +198,60 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
                         delayedCommandButton(
                                 I18n.t("remoteAdmin.command.reboot"),
                                 "/icons/restart-radio.svg",
-                                () -> remoteAdminService.reboot(5),
+                                () -> remoteAdminBackend.reboot(5),
                                 I18n.t("remoteAdmin.command.cancelReboot"),
                                 "/icons/ide-stop.svg",
-                                () -> remoteAdminService.reboot(0)),
+                                () -> remoteAdminBackend.reboot(0)),
                         delayedCommandButton(
                                 I18n.t("remoteAdmin.command.shutdown"),
                                 "/icons/shutdown-radio.svg",
-                                () -> remoteAdminService.shutdown(5),
+                                () -> remoteAdminBackend.shutdown(5),
                                 I18n.t("remoteAdmin.command.cancelShutdown"),
                                 "/icons/ide-stop.svg",
-                                () -> remoteAdminService.shutdown(0)),
+                                () -> remoteAdminBackend.shutdown(0)),
                         commandButton(I18n.t("remoteAdmin.command.syncTime"), "/icons/sync-time.svg",
                                 () -> runCommand(I18n.t("remoteAdmin.command.syncTime"),
-                                        () -> remoteAdminService.syncTime(System.currentTimeMillis() / 1000))),
+                                        () -> remoteAdminBackend.syncTime(System.currentTimeMillis() / 1000))),
                         commandButton(I18n.t("remoteAdmin.command.refreshStatus"), "/icons/refresh.svg",
                                 this::refreshConnectionStatus)),
                 commandGroup(I18n.t("remoteAdmin.section.maintenance"),
                         commandButton(I18n.t("remoteAdmin.command.backupFlash"), "/icons/save-config.svg",
                                 () -> runCommand(I18n.t("remoteAdmin.command.backupFlash"),
-                                        () -> remoteAdminService.backupPreferences(
+                                        () -> remoteAdminBackend.backupPreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.FLASH))),
                         commandButton(I18n.t("remoteAdmin.command.backupSd"), "/icons/save-config.svg",
                                 () -> runCommand(I18n.t("remoteAdmin.command.backupSd"),
-                                        () -> remoteAdminService.backupPreferences(
+                                        () -> remoteAdminBackend.backupPreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.SD))),
                         commandButton(I18n.t("remoteAdmin.command.restoreFlash"), "/icons/load-config.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.restoreFlash"),
-                                        () -> remoteAdminService.restorePreferences(
+                                        () -> remoteAdminBackend.restorePreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.FLASH), true)),
                         commandButton(I18n.t("remoteAdmin.command.restoreSd"), "/icons/load-config.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.restoreSd"),
-                                        () -> remoteAdminService.restorePreferences(
+                                        () -> remoteAdminBackend.restorePreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.SD), true)),
                         commandButton(I18n.t("remoteAdmin.command.removeBackupFlash"), "/icons/clear.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.removeBackupFlash"),
-                                        () -> remoteAdminService.removeBackupPreferences(
+                                        () -> remoteAdminBackend.removeBackupPreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.FLASH), true)),
                         commandButton(I18n.t("remoteAdmin.command.removeBackupSd"), "/icons/clear.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.removeBackupSd"),
-                                        () -> remoteAdminService.removeBackupPreferences(
+                                        () -> remoteAdminBackend.removeBackupPreferences(
                                                 AdminProtos.AdminMessage.BackupLocation.SD), true))),
                 commandGroup(I18n.t("remoteAdmin.section.danger"),
                         commandButton(I18n.t("remoteAdmin.command.resetNodeDb"), "/icons/database.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.resetNodeDb"),
-                                        () -> remoteAdminService.resetNodeDb(true), true)),
+                                        () -> remoteAdminBackend.resetNodeDb(true), true)),
                         commandButton(I18n.t("remoteAdmin.command.factoryResetConfig"), "/icons/toast_warning.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.factoryResetConfig"),
-                                        remoteAdminService::factoryResetConfig, true)),
+                                        remoteAdminBackend::factoryResetConfig, true)),
                         commandButton(I18n.t("remoteAdmin.command.factoryResetDevice"), "/icons/toast_error.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.factoryResetDevice"),
-                                        remoteAdminService::factoryResetDevice, true)),
+                                        remoteAdminBackend::factoryResetDevice, true)),
                         commandButton(I18n.t("remoteAdmin.command.enterDfuMode"), "/icons/ide-bug.svg",
                                 () -> confirmAndRun(I18n.t("remoteAdmin.command.enterDfuMode"),
-                                        remoteAdminService::enterDfuMode, true))));
+                                        remoteAdminBackend::enterDfuMode, true))));
         content.setPadding(new Insets(10, 0, 0, 0));
 
         ScrollPane scrollPane = new ScrollPane(content);
@@ -284,12 +292,30 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         modal.setOnHidden(panel::close);
     }
 
+    public static void showForRemoteNode(RemoteRpcState rpcState, NodeData node) {
+        if (!Platform.isFxApplicationThread()) {
+            Platform.runLater(() -> showForRemoteNode(rpcState, node));
+            return;
+        }
+        if (rpcState == null || rpcState.client() == null || !rpcState.client().isOpen() || node == null) {
+            return;
+        }
+        ModalPane modal = ModalPane.getInstance();
+        if (modal == null) {
+            return;
+        }
+        RemoteAdminPanel panel = new RemoteAdminPanel(node, new RpcRemoteAdminBackend(rpcState, node));
+        panel.modalPane = modal;
+        modal.show(panel, false, false);
+        modal.setOnHidden(panel::close);
+    }
+
     /**
-     * Releases the remote admin service owned by this panel.
+     * Releases the remote admin backend owned by this panel.
      */
     @Override
     public void close() {
-        remoteAdminService.close();
+        remoteAdminBackend.close();
     }
 
     private void closeAndHide() {
@@ -334,7 +360,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     }
 
     private void showSectionCatalog() {
-        loadedSession = remoteAdminService.session();
+        loadedSession = remoteAdminBackend.session();
         rebuildTree(loadedSession, false);
         statusLabel.setText(I18n.t("remoteAdmin.status.sectionsReady"));
         queryStatusLabel.setText(I18n.t("remoteAdmin.status.noSectionsRequested"));
@@ -407,26 +433,26 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         statusLabel.setText(I18n.t("remoteAdmin.status.sending"));
         CompletableFuture<Void> saveFuture = CompletableFuture.completedFuture(null);
         if (changes.ownerModified()) {
-            saveFuture = saveFuture.thenCompose(ignored -> remoteAdminService.saveOwner(
+            saveFuture = saveFuture.thenCompose(ignored -> remoteAdminBackend.saveOwner(
                     changes.longName(),
                     changes.shortName(),
                     changes.isLicensed()));
         }
         if (changes.positionModified()) {
             if (changes.latitude() == 0 && changes.longitude() == 0 && changes.altitude() == 0) {
-                saveFuture = saveFuture.thenCompose(ignored -> remoteAdminService.removeFixedPosition());
+                saveFuture = saveFuture.thenCompose(ignored -> remoteAdminBackend.removeFixedPosition());
             } else {
-                saveFuture = saveFuture.thenCompose(ignored -> remoteAdminService.setFixedPosition(
+                saveFuture = saveFuture.thenCompose(ignored -> remoteAdminBackend.setFixedPosition(
                         changes.latitude(),
                         changes.longitude(),
                         changes.altitude()));
             }
         }
         if (changes.ringtoneModified()) {
-            saveFuture = saveFuture.thenCompose(ignored -> remoteAdminService.setRingtone(changes.ringtone()));
+            saveFuture = saveFuture.thenCompose(ignored -> remoteAdminBackend.setRingtone(changes.ringtone()));
         }
         if (changes.hasPacketConfigChanges()) {
-            saveFuture = saveFuture.thenCompose(ignored -> remoteAdminService.saveConfigChanges(
+            saveFuture = saveFuture.thenCompose(ignored -> remoteAdminBackend.saveConfigChanges(
                     changes.configs(),
                     changes.moduleConfigs(),
                     changes.channels()));
@@ -547,11 +573,11 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     }
 
     private void requestMissingConfigSection(AdminProtos.AdminMessage.ConfigType type, String displayName) {
-        requestMissingSection(displayName, () -> remoteAdminService.requestConfigSection(type));
+        requestMissingSection(displayName, () -> remoteAdminBackend.requestConfigSection(type));
     }
 
     private void requestMissingModuleSection(AdminProtos.AdminMessage.ModuleConfigType type, String displayName) {
-        requestMissingSection(displayName, () -> remoteAdminService.requestModuleConfigSection(type));
+        requestMissingSection(displayName, () -> remoteAdminBackend.requestModuleConfigSection(type));
     }
 
     private void requestMissingSection(String displayName, Supplier<CompletableFuture<Void>> request) {
@@ -755,7 +781,7 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         commandStatusLabel.setText(I18n.t(
                 "remoteAdmin.status.commandSending",
                 I18n.t("remoteAdmin.command.refreshStatus")));
-        remoteAdminService.refreshConnectionStatus().whenComplete((adminMessage, error) ->
+        remoteAdminBackend.refreshConnectionStatus().whenComplete((adminMessage, error) ->
                 Platform.runLater(() -> {
                     setBusy(false);
                     if (error != null) {

@@ -6,6 +6,7 @@ import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -79,9 +80,13 @@ public class WinBle implements BlePlatform {
         // The passkey callback lifts BLE pairing into the Java/UI layer, as Linux does.
         // WinRT knows when a PIN is required; the app answers through a dialog.
         passkeyCallback = address -> {
-            Consumer<String> handler = passkeyRequestHandler;
-            if (handler != null && address != null) {
-                handler.accept(address);
+            try {
+                Consumer<String> handler = passkeyRequestHandler;
+                if (handler != null && address != null) {
+                    handler.accept(address);
+                }
+            } catch (Throwable t) {
+                log.warn("Windows BLE passkey callback failed", t);
             }
         };
         lib.meshble_set_passkey_request_callback(passkeyCallback);
@@ -96,20 +101,32 @@ public class WinBle implements BlePlatform {
         lib.meshble_set_profile(profile.nativeCode());
 
         // Static callback — prevent GC
-        scanCallback = (address, name, rssi) -> {
-            Consumer<BleDevice> consumer = scanConsumer;
-            if (consumer != null && address != null) {
-                String deviceName = (name != null) ? name : "Unknown";
-                consumer.accept(new BleDevice(address, deviceName, rssi, profile.protocolType()));
+        scanCallback = (addressPtr, namePtr, rssi) -> {
+            try {
+                Consumer<BleDevice> consumer = scanConsumer;
+                String address = utf8String(addressPtr);
+                if (consumer != null && address != null) {
+                    String name = utf8String(namePtr);
+                    String deviceName = (name != null && !name.isBlank()) ? name : "Unknown";
+                    consumer.accept(new BleDevice(address, deviceName, rssi, profile.protocolType()));
+                }
+            } catch (Throwable t) {
+                log.warn("Windows BLE scan callback failed", t);
             }
         };
 
         int result = lib.meshble_start_scan(scanCallback);
         if (result != 0) {
-            log.error("BLE scan не удалось запустить: error={}", result);
+            String message = "BLE scan не удалось запустить: error=" + result;
+            log.error(message);
+            throw new IllegalStateException(message);
         } else {
             log.info("BLE сканирование запущено");
         }
+    }
+
+    private static String utf8String(com.sun.jna.Pointer pointer) {
+        return pointer == null ? null : pointer.getString(0, StandardCharsets.UTF_8.name());
     }
 
     @Override
@@ -128,36 +145,44 @@ public class WinBle implements BlePlatform {
 
         // Setup data callback (static, prevent GC)
         dataCallback = (dataPtr, length) -> {
-            Consumer<byte[]> listener = fromRadioListener;
-            if (listener != null && dataPtr != null && length > 0) {
-                byte[] bytes = dataPtr.getByteArray(0, length);
-                listener.accept(bytes);
+            try {
+                Consumer<byte[]> listener = fromRadioListener;
+                if (listener != null && dataPtr != null && length > 0) {
+                    byte[] bytes = dataPtr.getByteArray(0, length);
+                    listener.accept(bytes);
+                }
+            } catch (Throwable t) {
+                log.warn("Windows BLE data callback failed", t);
             }
         };
-        lib.meshble_set_from_radio_listener(dataCallback);
 
         // Setup state callback (static, prevent GC)
         stateCallback = (state, errorMsg) -> {
-            Consumer<BleState> sl = stateListener;
-            switch (state) {
-                case 0 -> { // connected
-                    connected = true;
-                    if (sl != null) { sl.accept(new BleState.Connected()); }
+            try {
+                Consumer<BleState> sl = stateListener;
+                switch (state) {
+                    case 0 -> { // connected
+                        connected = true;
+                        if (sl != null) { sl.accept(new BleState.Connected()); }
+                    }
+                    case 1 -> { // disconnected
+                        connected = false;
+                        stopPolling();
+                        if (sl != null) { sl.accept(new BleState.Disconnected()); }
+                    }
+                    case 2 -> { // error
+                        connected = false;
+                        stopPolling();
+                        String msg = errorMsg != null ? errorMsg : "BLE error";
+                        if (sl != null) { sl.accept(new BleState.Error(msg, null)); }
+                    }
+                    default -> { /* unknown state code */ }
                 }
-                case 1 -> { // disconnected
-                    connected = false;
-                    stopPolling();
-                    if (sl != null) { sl.accept(new BleState.Disconnected()); }
-                }
-                case 2 -> { // error
-                    connected = false;
-                    stopPolling();
-                    String msg = errorMsg != null ? errorMsg : "BLE error";
-                    if (sl != null) { sl.accept(new BleState.Error(msg, null)); }
-                }
-                default -> { /* unknown state code */ }
+            } catch (Throwable t) {
+                log.warn("Windows BLE state callback failed", t);
             }
         };
+        lib.meshble_set_from_radio_listener(dataCallback);
         lib.meshble_set_state_listener(stateCallback);
 
         // Blocking connect

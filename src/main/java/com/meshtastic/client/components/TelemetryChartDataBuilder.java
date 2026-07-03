@@ -3,6 +3,7 @@ package com.meshtastic.client.components;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.utils.BatteryLevelEstimator;
+import com.meshtastic.client.utils.RxQualityCalculator;
 import javafx.scene.chart.XYChart;
 
 import java.util.IntSummaryStatistics;
@@ -229,16 +230,15 @@ final class TelemetryChartDataBuilder {
         return new ChartPayload(t(TITLE_RX_KEY), List.of(
                 series(t(SERIES_GOOD_RX_KEY), metrics.stream()
                         .filter(metric -> metric.received() > 0)
-                        .map(metric -> dataPoint(metric.timestamp(),
-                                (metric.received() - metric.bad() - metric.duplicate()) / metric.received() * 100.0))
+                        .map(metric -> dataPoint(metric.timestamp(), rxPercentages(metric).good()))
                         .toList()),
                 series(t(SERIES_BAD_RX_KEY), metrics.stream()
                         .filter(metric -> metric.received() > 0)
-                        .map(metric -> dataPoint(metric.timestamp(), metric.bad() / metric.received() * 100.0))
+                        .map(metric -> dataPoint(metric.timestamp(), rxPercentages(metric).bad()))
                         .toList()),
                 series(t(SERIES_DUPE_RX_KEY), metrics.stream()
                         .filter(metric -> metric.received() > 0)
-                        .map(metric -> dataPoint(metric.timestamp(), metric.duplicate() / metric.received() * 100.0))
+                        .map(metric -> dataPoint(metric.timestamp(), rxPercentages(metric).duplicate()))
                         .toList())
         ));
     }
@@ -520,23 +520,22 @@ final class TelemetryChartDataBuilder {
     }
 
     private static RxMetric createRxMetric(TelemetryEntry previous, TelemetryEntry current) {
-        int received = current.getNumPacketsRx() - previous.getNumPacketsRx();
-        int bad = current.getNumPacketsRxBad() - previous.getNumPacketsRxBad();
-        int duplicate = current.getNumRxDupe() - previous.getNumRxDupe();
-        return received < 0
-                ? new RxMetric(current.getTimestamp(), current.getNumPacketsRx(), current.getNumPacketsRxBad(), current.getNumRxDupe())
-                : new RxMetric(current.getTimestamp(), received, bad, duplicate);
+        return new RxMetric(
+                current.getTimestamp(),
+                counterDelta(previous.getNumPacketsRx(), current.getNumPacketsRx()),
+                counterDelta(previous.getNumPacketsRxBad(), current.getNumPacketsRxBad()),
+                counterDelta(previous.getNumRxDupe(), current.getNumRxDupe())
+        );
     }
 
     private static TxMetric createTxMetric(TelemetryEntry previous, TelemetryEntry current) {
-        int transmitted = current.getNumPacketsTx() - previous.getNumPacketsTx();
-        int dropped = current.getNumTxDropped() - previous.getNumTxDropped();
-        int relayed = current.getNumTxRelay() - previous.getNumTxRelay();
-        int canceled = current.getNumTxRelayCanceled() - previous.getNumTxRelayCanceled();
-        return transmitted < 0
-                ? new TxMetric(current.getTimestamp(), current.getNumPacketsTx(), current.getNumTxDropped(),
-                current.getNumTxRelay(), current.getNumTxRelayCanceled())
-                : new TxMetric(current.getTimestamp(), transmitted, dropped, relayed, canceled);
+        return new TxMetric(
+                current.getTimestamp(),
+                counterDelta(previous.getNumPacketsTx(), current.getNumPacketsTx()),
+                counterDelta(previous.getNumTxDropped(), current.getNumTxDropped()),
+                counterDelta(previous.getNumTxRelay(), current.getNumTxRelay()),
+                counterDelta(previous.getNumTxRelayCanceled(), current.getNumTxRelayCanceled())
+        );
     }
 
     private static RxMetric sumRxMetric(long timestamp, List<RxMetric> metrics) {
@@ -546,6 +545,14 @@ final class TelemetryChartDataBuilder {
                 metrics.stream().mapToDouble(RxMetric::bad).sum(),
                 metrics.stream().mapToDouble(RxMetric::duplicate).sum()
         );
+    }
+
+    private static int counterDelta(int previous, int current) {
+        return current >= previous ? current - previous : current;
+    }
+
+    private static RxQualityCalculator.Percentages rxPercentages(RxMetric metric) {
+        return RxQualityCalculator.percentages(metric.received(), metric.bad(), metric.duplicate());
     }
 
     private static TxMetric sumTxMetric(long timestamp, List<TxMetric> metrics) {

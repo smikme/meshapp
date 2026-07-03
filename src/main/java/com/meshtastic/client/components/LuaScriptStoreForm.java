@@ -2,8 +2,9 @@ package com.meshtastic.client.components;
 
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.lua.LuaScriptEvent;
-import com.meshtastic.client.lua.LuaScriptRuntimeService;
 import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.lua.LuaScriptStoreService;
 import com.meshtastic.client.modal.ModalPane;
@@ -39,8 +40,7 @@ import java.util.concurrent.CompletionException;
  */
 public final class LuaScriptStoreForm extends VBox {
 
-    private final LuaScriptService scriptService = LuaScriptService.getInstance();
-    private final LuaScriptRuntimeService runtimeService = LuaScriptRuntimeService.getInstance();
+    private final LuaScriptDataSource scriptSource;
     private final LuaScriptStoreService storeService;
     private final Runnable onScriptsChanged;
     private final VBox cardsBox = new VBox(10);
@@ -53,11 +53,18 @@ public final class LuaScriptStoreForm extends VBox {
     private boolean disposed;
 
     public LuaScriptStoreForm(Runnable onScriptsChanged) {
-        this(new LuaScriptStoreService(), onScriptsChanged);
+        this(new LuaScriptStoreService(), LuaScriptDataSources.forCurrentConnection(), onScriptsChanged);
     }
 
     LuaScriptStoreForm(LuaScriptStoreService storeService, Runnable onScriptsChanged) {
+        this(storeService, LuaScriptDataSources.forCurrentConnection(), onScriptsChanged);
+    }
+
+    LuaScriptStoreForm(LuaScriptStoreService storeService,
+                       LuaScriptDataSource scriptSource,
+                       Runnable onScriptsChanged) {
         this.storeService = storeService;
+        this.scriptSource = scriptSource;
         this.onScriptsChanged = onScriptsChanged;
         configureLayout();
         loadScripts();
@@ -65,6 +72,7 @@ public final class LuaScriptStoreForm extends VBox {
 
     public void dispose() {
         disposed = true;
+        scriptSource.close();
     }
 
     private void configureLayout() {
@@ -263,10 +271,10 @@ public final class LuaScriptStoreForm extends VBox {
 
     private void installOrUpdate(LuaScriptStoreService.StoreScript storeScript, LuaScript installed) {
         try {
-            if (installed != null && runtimeService.isRunning(installed.getId())) {
-                runtimeService.stopScript(installed.getId(), this::ignoreRuntimeEvent);
+            if (installed != null && scriptSource.isRunning(installed.getId())) {
+                scriptSource.stopScript(installed.getId(), this::ignoreRuntimeEvent);
             }
-            LuaScriptService.ScriptImportResult result = scriptService.importScriptExport(storeScript.exportFile());
+            LuaScriptService.ScriptImportResult result = scriptSource.importScriptExport(storeScript.exportFile());
             notifyScriptsChanged();
             rebuildCards();
             Toast.show(
@@ -282,8 +290,8 @@ public final class LuaScriptStoreForm extends VBox {
         if (installed == null || !confirmDelete(installed)) {
             return;
         }
-        runtimeService.stopScript(installed.getId(), this::ignoreRuntimeEvent);
-        scriptService.deleteScript(installed.getId());
+        scriptSource.stopScript(installed.getId(), this::ignoreRuntimeEvent);
+        scriptSource.deleteScript(installed.getId());
         notifyScriptsChanged();
         rebuildCards();
         Toast.show(Toast.Type.SUCCESS, I18n.t("meshIde.store.deleted", installed.getName()));
@@ -308,7 +316,7 @@ public final class LuaScriptStoreForm extends VBox {
 
     private Map<String, LuaScript> installedScriptsByGuid() {
         Map<String, LuaScript> result = new HashMap<>();
-        for (LuaScript script : scriptService.listScripts()) {
+        for (LuaScript script : scriptSource.listScripts()) {
             String guid = normalizeGuidKey(script.getGuid());
             if (!guid.isBlank()) {
                 result.put(guid, script);

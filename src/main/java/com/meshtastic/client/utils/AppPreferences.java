@@ -1,5 +1,6 @@
 package com.meshtastic.client.utils;
 
+import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
 
 import java.util.Collections;
@@ -26,6 +27,7 @@ public class AppPreferences {
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
     public static final String KEY_NATIVE_WINDOW = "nativeWindow";
     public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
+    public static final String KEY_ENABLE_EFFECTS = "enableEffects";
     public static final String KEY_DISABLE_EFFECTS = "disableEffects";
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
@@ -61,12 +63,60 @@ public class AppPreferences {
     public static final String KEY_MAP_NIGHT_MODE = "mapNightMode";
     public static final String KEY_MAP_TILE_DIRECTORY = "mapTileDirectory";
     public static final String KEY_TELEMETRY_DOCK_LAYOUT = "telemetryDockLayout";
+    public static final String KEY_REMOTE_RPC_SERVER_ENABLED = "remoteRpcServerEnabled";
+    public static final String KEY_REMOTE_RPC_SERVER_BIND_ADDRESS = "remoteRpcServerBindAddress";
+    public static final String KEY_REMOTE_RPC_SERVER_PORT = "remoteRpcServerPort";
+    public static final String KEY_REMOTE_RPC_ACCESS_KEY = "remoteRpcAccessKey";
+    public static final String KEY_REMOTE_RPC_ROUTER_ENABLED = "remoteRpcRouterEnabled";
+    public static final String KEY_REMOTE_RPC_ROUTER_SERVER = "remoteRpcRouterServer";
+    public static final String KEY_MQTT_DOWNLINK_FILTER_MODE = "mqttDownlinkFilterMode";
 
     public static final int DEFAULT_MEMORY_LIMIT_MB = 512;
     public static final int MIN_MEMORY_LIMIT_MB = 128;
     public static final int MAX_MEMORY_LIMIT_MB = 65536;
+    public static final int DEFAULT_REMOTE_RPC_SERVER_PORT = 44030;
 
     private static Preferences state;
+
+    public enum MqttDownlinkFilterMode {
+        NO_FILTER("none", "settings.mqttFilter.mode.none"),
+        FILTERED("filtered", "settings.mqttFilter.mode.filtered"),
+        FILTERED_WITH_ENCRYPTED(
+            "filtered_with_encrypted",
+            "settings.mqttFilter.mode.filteredWithEncrypted"
+        );
+
+        private final String preferenceValue;
+        private final String displayKey;
+
+        MqttDownlinkFilterMode(String preferenceValue, String displayKey) {
+            this.preferenceValue = preferenceValue;
+            this.displayKey = displayKey;
+        }
+
+        public String preferenceValue() {
+            return preferenceValue;
+        }
+
+        public String displayKey() {
+            return displayKey;
+        }
+
+        static MqttDownlinkFilterMode fromPreferenceValue(String value) {
+            if (value == null || value.isBlank()) {
+                return NO_FILTER;
+            }
+            for (MqttDownlinkFilterMode mode : values()) {
+                if (
+                    mode.preferenceValue.equals(value) ||
+                    mode.name().equalsIgnoreCase(value)
+                ) {
+                    return mode;
+                }
+            }
+            return NO_FILTER;
+        }
+    }
 
     public static void init() {
         state = Preferences.userRoot().node(PREFERENCES_ROOT_PATH);
@@ -115,16 +165,38 @@ public class AppPreferences {
         state().putBoolean(KEY_DISABLE_TRANSPARENCY, value);
     }
 
+    public static boolean isVisualEffectsEnabled() {
+        String value = state().get(KEY_ENABLE_EFFECTS, null);
+        if (value != null) {
+            return Boolean.parseBoolean(value);
+        }
+
+        String legacyDisabledValue = state().get(KEY_DISABLE_EFFECTS, null);
+        if (legacyDisabledValue != null) {
+            return !Boolean.parseBoolean(legacyDisabledValue);
+        }
+
+        return false;
+    }
+
+    public static boolean isVisualEffectsEnabledEffective() {
+        return isVisualEffectsEnabled() && !OsDetect.isWindows10();
+    }
+
+    public static void setVisualEffectsEnabled(boolean value) {
+        state().putBoolean(KEY_ENABLE_EFFECTS, value);
+    }
+
     public static boolean isDisableEffects() {
-        return state().getBoolean(KEY_DISABLE_EFFECTS, false);
+        return !isVisualEffectsEnabled();
     }
 
     public static boolean isDisableEffectsEffective() {
-        return isDisableEffects() || OsDetect.isWindows10();
+        return !isVisualEffectsEnabledEffective();
     }
 
     public static void setDisableEffects(boolean value) {
-        state().putBoolean(KEY_DISABLE_EFFECTS, value);
+        setVisualEffectsEnabled(!value);
     }
 
     public static boolean isSoftwareRendering() {
@@ -157,6 +229,86 @@ public class AppPreferences {
 
     public static void setJfrDiagnosticsEnabled(boolean value) {
         state().putBoolean(KEY_JFR_DIAGNOSTICS, value);
+    }
+
+    public static boolean isRemoteRpcServerEnabled() {
+        return state().getBoolean(KEY_REMOTE_RPC_SERVER_ENABLED, false);
+    }
+
+    public static void setRemoteRpcServerEnabled(boolean enabled) {
+        state().putBoolean(KEY_REMOTE_RPC_SERVER_ENABLED, enabled);
+        flushState();
+    }
+
+    public static String getRemoteRpcServerBindAddress() {
+        return state().get(KEY_REMOTE_RPC_SERVER_BIND_ADDRESS, "127.0.0.1");
+    }
+
+    public static void setRemoteRpcServerBindAddress(String value) {
+        state().put(KEY_REMOTE_RPC_SERVER_BIND_ADDRESS,
+                value == null || value.isBlank() ? "127.0.0.1" : value.trim());
+        flushState();
+    }
+
+    public static int getRemoteRpcServerPort() {
+        int port = state().getInt(KEY_REMOTE_RPC_SERVER_PORT, DEFAULT_REMOTE_RPC_SERVER_PORT);
+        return port >= 1 && port <= 65_535 ? port : DEFAULT_REMOTE_RPC_SERVER_PORT;
+    }
+
+    public static void setRemoteRpcServerPort(int port) {
+        state().putInt(KEY_REMOTE_RPC_SERVER_PORT,
+                port >= 1 && port <= 65_535 ? port : DEFAULT_REMOTE_RPC_SERVER_PORT);
+        flushState();
+    }
+
+    public static String getRemoteRpcAccessKey() {
+        return state().get(KEY_REMOTE_RPC_ACCESS_KEY, "");
+    }
+
+    public static void setRemoteRpcAccessKey(String value) {
+        if (value == null || value.isBlank()) {
+            state().remove(KEY_REMOTE_RPC_ACCESS_KEY);
+        } else {
+            state().put(KEY_REMOTE_RPC_ACCESS_KEY, value.trim());
+        }
+        flushState();
+    }
+
+    public static boolean isRemoteRpcRouterEnabled() {
+        return state().getBoolean(KEY_REMOTE_RPC_ROUTER_ENABLED, false);
+    }
+
+    public static void setRemoteRpcRouterEnabled(boolean enabled) {
+        state().putBoolean(KEY_REMOTE_RPC_ROUTER_ENABLED, enabled);
+        flushState();
+    }
+
+    public static String getRemoteRpcRouterServer() {
+        return state().get(KEY_REMOTE_RPC_ROUTER_SERVER, ConnectionEntry.CLOUD_RPC_ROUTER_SERVER);
+    }
+
+    public static void setRemoteRpcRouterServer(String value) {
+        if (value == null || value.isBlank()) {
+            state().remove(KEY_REMOTE_RPC_ROUTER_SERVER);
+        } else {
+            state().put(KEY_REMOTE_RPC_ROUTER_SERVER, value.trim());
+        }
+        flushState();
+    }
+
+    public static MqttDownlinkFilterMode getMqttDownlinkFilterMode() {
+        return MqttDownlinkFilterMode.fromPreferenceValue(
+            state().get(
+                KEY_MQTT_DOWNLINK_FILTER_MODE,
+                MqttDownlinkFilterMode.NO_FILTER.preferenceValue()
+            )
+        );
+    }
+
+    public static void setMqttDownlinkFilterMode(MqttDownlinkFilterMode mode) {
+        MqttDownlinkFilterMode safeMode = mode != null ? mode : MqttDownlinkFilterMode.NO_FILTER;
+        state().put(KEY_MQTT_DOWNLINK_FILTER_MODE, safeMode.preferenceValue());
+        flushState();
     }
 
     public static String getLanguageTag() {
@@ -482,6 +634,7 @@ public class AppPreferences {
     // ==================== SplitPane Divider Positions ====================
 
     public static final String KEY_CHAT_DIVIDER = "chatDividerPos";
+    public static final String KEY_CHAT_LIST_WIDTH = "chatListWidth";
     public static final String KEY_NODES_DIVIDER = "nodesDividerPos";
     public static final String KEY_PACKET_MONITOR_DIVIDER = "packetMonitorDividerPos";
     public static final String KEY_LUA_DEV_MAIN_DIVIDER = "luaDevMainDividerPos";
@@ -489,9 +642,21 @@ public class AppPreferences {
     public static final String KEY_LUA_DEV_INFO_DIVIDER = "luaDevInfoDividerPos";
     private static final String NODE_CHAT_SCROLL = "chatScroll";
     private static final String NODE_CHAT_NOTIFICATIONS = "chatNotifications";
+    private static final String NODE_CHAT_SELECTION = "chatSelection";
 
     public static double getChatDividerPos() { return state().getDouble(KEY_CHAT_DIVIDER, 0.35); }
     public static void setChatDividerPos(double pos) { state().putDouble(KEY_CHAT_DIVIDER, pos); }
+
+    public static double getChatListWidth(double fallback) {
+        double width = state().getDouble(KEY_CHAT_LIST_WIDTH, fallback);
+        return Double.isFinite(width) && width > 0 ? width : fallback;
+    }
+
+    public static void setChatListWidth(double width) {
+        if (Double.isFinite(width) && width > 0) {
+            state().putDouble(KEY_CHAT_LIST_WIDTH, width);
+        }
+    }
 
     public static double getNodesDividerPos() { return state().getDouble(KEY_NODES_DIVIDER, 0.38); }
     public static void setNodesDividerPos(double pos) { state().putDouble(KEY_NODES_DIVIDER, pos); }
@@ -695,6 +860,33 @@ public class AppPreferences {
         chatScrollNode().remove(composeChatScrollKey(ownerId, chatId));
     }
 
+    public static void saveSelectedChat(String connectionId, String selectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            return;
+        }
+        if (selectionId == null || selectionId.isBlank()) {
+            removeSelectedChat(connectionId);
+            return;
+        }
+        chatSelectionNode().put(connectionId, selectionId.trim());
+        flushState();
+    }
+
+    public static String loadSelectedChat(String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            return null;
+        }
+        String value = chatSelectionNode().get(connectionId, null);
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    public static void removeSelectedChat(String connectionId) {
+        if (connectionId != null && !connectionId.isBlank()) {
+            chatSelectionNode().remove(connectionId);
+            flushState();
+        }
+    }
+
     public static boolean isChatMuted(String ownerId, String chatId) {
         return chatNotificationsNode().getBoolean(composeChatScrollKey(ownerId, chatId), false);
     }
@@ -727,6 +919,10 @@ public class AppPreferences {
 
     private static Preferences chatNotificationsNode() {
         return state().node(NODE_CHAT_NOTIFICATIONS);
+    }
+
+    private static Preferences chatSelectionNode() {
+        return state().node(NODE_CHAT_SELECTION);
     }
 
     private static String composeChatScrollKey(String ownerId, String chatId) {

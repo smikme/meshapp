@@ -3,8 +3,11 @@ package com.meshtastic.client.connection;
 import com.meshtastic.client.connection.ble.BleConnection;
 import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
+import com.meshtastic.client.connection.rpc.DirectRpcTransportConnection;
+import com.meshtastic.client.connection.rpc.ExternalRouterRpcTransportConnection;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
+import com.meshtastic.client.model.RemoteRpcConnectionMode;
 
 import java.util.function.Supplier;
 
@@ -44,13 +47,16 @@ public final class TransportConnectionFactory {
     public static TransportConnection create(ConnectionEntry entry,
                                              Supplier<BlePlatform> blePlatformSupplier,
                                              boolean disposeBlePlatformOnDisconnect) {
-        FrameFormat frameFormat = FrameFormat.forProtocol(entry.getEffectiveProtocol());
         return switch (entry.getEffectiveType()) {
-            case TCP -> new TcpConnection(entry.getHost(), entry.getPort(), frameFormat);
+            case TCP -> new TcpConnection(
+                    entry.getHost(),
+                    entry.getPort(),
+                    FrameFormat.forProtocol(entry.getEffectiveProtocol())
+            );
             case SERIAL -> new SerialConnection(
                     entry.getPortName(),
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE,
-                    frameFormat,
+                    FrameFormat.forProtocol(entry.getEffectiveProtocol()),
                     entry.getEffectiveSerialModemLineMode()
             );
             case BLE -> new BleConnection(
@@ -59,6 +65,15 @@ public final class TransportConnectionFactory {
                     BleProtocolProfile.forProtocol(entry.getEffectiveProtocol()),
                     disposeBlePlatformOnDisconnect
             );
+            case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
+                    ? new ExternalRouterRpcTransportConnection(
+                            ConnectionEntry.CLOUD_RPC_ROUTER_SERVER,
+                            ConnectionEntry.CLOUD_RPC_ROUTER_PORT,
+                            entry.getRemoteAccessKey())
+                    : new DirectRpcTransportConnection(
+                            entry.getHost(),
+                            entry.getPort(),
+                            entry.getRemoteAccessKey());
         };
     }
 
@@ -78,6 +93,13 @@ public final class TransportConnectionFactory {
                     entry.getBaudRate() > 0 ? entry.getBaudRate() : SerialConnection.DEFAULT_BAUD_RATE);
             case BLE -> String.format("type=BLE, address=%s, deviceName=%s",
                     safeText(entry.getBleAddress()), safeText(entry.getBleDeviceName()));
+            case REMOTE_RPC -> entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER
+                    ? String.format("type=REMOTE_RPC, mode=%s, host=%s, port=%d",
+                            entry.getEffectiveRemoteRpcMode(),
+                            ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST,
+                            ConnectionEntry.CLOUD_RPC_ROUTER_PORT)
+                    : String.format("type=REMOTE_RPC, mode=%s, host=%s, port=%d",
+                            entry.getEffectiveRemoteRpcMode(), safeText(entry.getHost()), entry.getPort());
         };
     }
 

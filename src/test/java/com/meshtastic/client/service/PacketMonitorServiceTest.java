@@ -11,9 +11,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.meshtastic.proto.MQTTProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -128,6 +130,79 @@ class PacketMonitorServiceTest {
         assertEquals("MESHCORE_COMPANION", entry.getTransportMechanism());
         assertEquals("channel message", entry.getPayloadText());
         assertArrayEquals(packet, entry.getPacketBytes());
+    }
+
+    @Test
+    void recordMqttPacketPersistsRawBrokerPayload() {
+        service.startCapture();
+        byte[] payload = "hello mqtt".getBytes(StandardCharsets.UTF_8);
+
+        service.recordMqttIncoming("mqtt-connection", "msh/test/topic", payload, true);
+
+        List<PacketLogEntry> loraEntries = service.loadAll();
+        assertEquals(0, loraEntries.size());
+        assertEquals(1, service.countAllPackets());
+
+        List<PacketLogEntry> mqttEntries = service.loadAll(new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                PacketMonitorService.TRANSPORT_MQTT,
+                null,
+                null,
+                null
+        ));
+
+        assertEquals(1, mqttEntries.size());
+        PacketLogEntry entry = mqttEntries.getFirst();
+        assertEquals(PacketLogEntry.Direction.INCOMING, entry.getDirection());
+        assertEquals("MQTT", entry.getPacketType());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, entry.getTransportMechanism());
+        assertEquals("MQTT", entry.getTransportText());
+        assertEquals("MQTT broker", entry.getFromNode());
+        assertEquals("Local node", entry.getToNode());
+        assertTrue(entry.getPayloadText().contains("topic=\"msh/test/topic\""));
+        assertTrue(entry.getPayloadText().contains("retained=true"));
+        assertTrue(entry.getPayloadText().contains("payload=text=\"hello mqtt\""));
+        assertArrayEquals(payload, entry.getPacketBytes());
+    }
+
+    @Test
+    void recordMqttPacketDescribesMeshtasticEnvelopePayload() {
+        service.startCapture();
+        MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
+                .setFrom(0x11111111)
+                .setTo(0xFFFFFFFF)
+                .setDecoded(MeshProtos.Data.newBuilder()
+                        .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                        .setPayload(ByteString.copyFromUtf8("mqtt chat"))
+                        .build())
+                .build();
+        byte[] payload = MQTTProtos.ServiceEnvelope.newBuilder()
+                .setPacket(packet)
+                .build()
+                .toByteArray();
+
+        service.recordMqttOutgoing("mqtt-connection", "msh/2/e/LongFast/!11111111", payload, false);
+
+        List<PacketLogEntry> mqttEntries = service.loadAll(new PacketMonitorService.PacketQuery(
+                null,
+                null,
+                PacketMonitorService.TRANSPORT_MQTT,
+                null,
+                null,
+                null
+        ));
+
+        assertEquals(1, mqttEntries.size());
+        PacketLogEntry entry = mqttEntries.getFirst();
+        assertEquals(PacketLogEntry.Direction.OUTGOING, entry.getDirection());
+        assertEquals("TEXT_MESSAGE_APP", entry.getPacketType());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, entry.getTransportMechanism());
+        assertEquals("286331153", entry.getFromNode());
+        assertEquals("Вещание (4294967295)", entry.getToNode());
+        assertTrue(entry.getPayloadText().contains("topic=\"msh/2/e/LongFast/!11111111\""));
+        assertTrue(entry.getPayloadText().contains("\"mqtt chat\""));
+        assertArrayEquals(packet.toByteArray(), entry.getPacketBytes());
     }
 
     @Test

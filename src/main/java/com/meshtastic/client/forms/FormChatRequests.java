@@ -6,14 +6,15 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaAutomationCommand;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.lua.LuaScriptEvent;
-import com.meshtastic.client.lua.LuaScriptRuntimeService;
-import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.lua.LuaUiBotNotice;
 import com.meshtastic.client.lua.LuaUiNodePickRequest;
 import com.meshtastic.client.lua.LuaUiNodeSelection;
 import com.meshtastic.client.modal.Toast;
+import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
@@ -125,6 +126,10 @@ abstract class FormChatRequests extends FormChatMessages {
 
     protected void sendReaction(MeshMessage msg, String emoji) {
         if (msg == null || emoji == null || emoji.isEmpty()) { return; }
+        if (remoteRpcState != null) {
+            sendRemoteReaction(msg, emoji);
+            return;
+        }
         if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return;
@@ -145,6 +150,42 @@ abstract class FormChatRequests extends FormChatMessages {
         refreshCurrentChatAfterLocalReaction();
     }
 
+    private void sendRemoteReaction(MeshMessage msg, String emoji) {
+        if (selectedChat == null || remoteRpcState == null) {
+            return;
+        }
+        if (msg.getPacketId() == 0) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.reactionUnavailableNoPacket"));
+            return;
+        }
+
+        var rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        rpcState.client()
+                .call("chat.react",
+                        RemoteChatJson.reactionParams(chatType, chatKey, msg.getPacketId(), emoji),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState
+                            || selectedChat == null
+                            || !chatItemMatches(selectedChat, requestChat)) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    MeshMessage updated = RemoteChatJson.parseResultMessage(result);
+                    if (updated != null) {
+                        scheduleMessageChangeRefresh(
+                                MessageChangeEvent.metadataChanged(chatType, chatKey, ownerNodeId, updated));
+                    }
+                }));
+    }
+
     private boolean sendReactionToSelectedChat(MeshMessage msg, String emoji) {
         return switch (selectedChat.getType()) {
             case CHANNEL -> MessageService.sendChannelReaction(
@@ -157,6 +198,9 @@ abstract class FormChatRequests extends FormChatMessages {
     protected boolean retryMessage(MeshMessage msg) {
         if (msg == null || !msg.isOutgoing() || msg.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
             return false;
+        }
+        if (remoteRpcState != null) {
+            return retryRemoteMessage(msg);
         }
         if (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
@@ -181,6 +225,60 @@ abstract class FormChatRequests extends FormChatMessages {
 
         reloadChatList();
         return true;
+    }
+
+    private boolean retryRemoteMessage(MeshMessage msg) {
+        if (selectedChat == null || remoteRpcState == null) {
+            return false;
+        }
+        var rpcState = remoteRpcState;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        int previousPacketId = msg.getPacketId();
+        MeshMessage.DeliveryStatus previousStatus = msg.getStatus();
+        String previousErrorReason = msg.getErrorReason();
+
+        msg.setStatus(MeshMessage.DeliveryStatus.SENDING);
+        msg.setErrorReason(null);
+
+        rpcState.client()
+                .call("chat.retry",
+                        RemoteChatJson.retryParams(chatType, chatKey, msg.getDbId(), previousPacketId),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        msg.setPacketId(previousPacketId);
+                        msg.setStatus(previousStatus);
+                        msg.setErrorReason(previousErrorReason);
+                        refreshRetriedRemoteMessage(chatType, chatKey, ownerNodeId, msg);
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    MeshMessage retried = RemoteChatJson.parseResultMessage(result);
+                    if (retried == null) {
+                        reloadChatList();
+                        return;
+                    }
+                    refreshRetriedRemoteMessage(chatType, chatKey, ownerNodeId, retried);
+                    reloadChatList();
+                }));
+        return true;
+    }
+
+    private void refreshRetriedRemoteMessage(String chatType,
+                                             String chatKey,
+                                             String ownerNodeId,
+                                             MeshMessage message) {
+        if (selectedChat == null
+                || !Objects.equals(chatType, currentChatType())
+                || !Objects.equals(chatKey, currentChatKey())) {
+            return;
+        }
+        scheduleMessageChangeRefresh(MessageChangeEvent.statusChanged(chatType, chatKey, ownerNodeId, message));
     }
 
     private boolean canRetryTarget(MeshMessage msg) {
@@ -210,7 +308,9 @@ abstract class FormChatRequests extends FormChatMessages {
         if (command == null || !command.isCommand()) {
             return false;
         }
-        if (selectedChat == null || state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)) {
+        if (selectedChat == null
+                || (remoteRpcState == null
+                && (state == null || (protocolHandler == null && meshCoreCompanionRuntime == null)))) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
             return false;
         }
@@ -221,7 +321,13 @@ abstract class FormChatRequests extends FormChatMessages {
     }
 
     private boolean runLuaAutomationCommand(ChatBotCommandHelper.ParsedBotCommand command) {
-        Optional<LuaScript> script = LuaScriptService.getInstance().findScript(command.scriptId());
+        Optional<LuaScript> script;
+        try {
+            script = luaScripts().findScript(command.scriptId());
+        } catch (RuntimeException e) {
+            Toast.show(Toast.Type.ERROR, e.getMessage());
+            return false;
+        }
         if (script.isEmpty()
                 || !script.get().isEnabled()
                 || script.get().getBotType() != LuaScript.BotType.AUTOMATION_BOT) {
@@ -243,11 +349,16 @@ abstract class FormChatRequests extends FormChatMessages {
                 command.arguments(),
                 command.argumentTokens(),
                 script.get().getId() + ":command:" + System.nanoTime());
-        LuaScriptRuntimeService.getInstance().runAutomationCommand(
-                script.get(),
-                luaCommand,
-                event -> handleLuaAutomationEvent(chatType, chatKey, event),
-                this::handleLuaNodePickRequest);
+        try {
+            luaScripts().runAutomationCommand(
+                    script.get(),
+                    luaCommand,
+                    event -> handleLuaAutomationEvent(chatType, chatKey, event),
+                    this::handleLuaNodePickRequest);
+        } catch (RuntimeException e) {
+            Toast.show(Toast.Type.ERROR, e.getMessage());
+            return false;
+        }
         return true;
     }
 
@@ -293,7 +404,7 @@ abstract class FormChatRequests extends FormChatMessages {
     }
 
     private void deliverLuaNodeSelection(LuaUiNodePickRequest request, NodeData node) {
-        LuaScriptRuntimeService.getInstance().deliverNodeSelection(
+        luaScripts().deliverNodeSelection(
                 request.scriptId(),
                 node != null
                         ? LuaUiNodeSelection.selected(request, node)

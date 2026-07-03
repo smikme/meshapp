@@ -1,6 +1,7 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ChatItem;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -12,7 +13,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javafx.application.Platform;
+import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
+import javafx.scene.layout.HBox;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -52,9 +60,34 @@ class ChatListCellTest {
 
             cell.updateItem(chat, false);
             assertNotNull(cell.getContextMenu());
+            assertTrue(cell.getContextMenu().getItems().stream()
+                    .map(MenuItem::getText)
+                    .anyMatch(I18n.t("chat.menu.clearHistory")::equals));
 
             cell.updateItem(null, true);
             assertNull(cell.getContextMenu());
+            return null;
+        });
+    }
+
+    @Test
+    void compactCellShowsOnlyAvatarAndUnreadBadge() {
+        onFxThread(() -> {
+            ChatListCell cell = new ChatListCell(item -> {}, item -> {}, item -> {}, true);
+            ChatItem chat = ChatItem.fromDirectMessage("!peer1", null, List.of(), 5, false);
+
+            cell.updateItem(chat, false);
+
+            assertNotNull(cell.getTooltip());
+            assertTrue(cell.getGraphic() instanceof HBox);
+            HBox root = (HBox) cell.getGraphic();
+            assertEquals(1, root.getChildren().size());
+            assertFalse(hasStyleClass(root, "chat-name-label"));
+            assertFalse(hasStyleClass(root, "chat-preview-label"));
+            Label unreadBadge = findLabelByStyleClass(root, "chat-unread-badge");
+            assertNotNull(unreadBadge);
+            assertEquals("5", unreadBadge.getText());
+            assertTrue(unreadBadge.isVisible());
             return null;
         });
     }
@@ -72,6 +105,27 @@ class ChatListCellTest {
         Method method = ChatListCell.class.getDeclaredMethod("previewFits", String.class, double.class);
         method.setAccessible(true);
         return (boolean) method.invoke(cell, text, width);
+    }
+
+    private static boolean hasStyleClass(Node node, String styleClass) {
+        return node.getStyleClass().contains(styleClass)
+                || node instanceof Parent parent
+                && parent.getChildrenUnmodifiable().stream()
+                        .anyMatch(child -> hasStyleClass(child, styleClass));
+    }
+
+    private static Label findLabelByStyleClass(Node node, String styleClass) {
+        if (node instanceof Label label && label.getStyleClass().contains(styleClass)) {
+            return label;
+        }
+        if (!(node instanceof Parent parent)) {
+            return null;
+        }
+        return parent.getChildrenUnmodifiable().stream()
+                .map(child -> findLabelByStyleClass(child, styleClass))
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElse(null);
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {

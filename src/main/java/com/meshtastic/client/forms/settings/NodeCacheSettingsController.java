@@ -47,6 +47,7 @@ public final class NodeCacheSettingsController {
     public VBox createPanel() {
         VBox panel = new VBox(8);
         panel.setPadding(new Insets(5));
+        panel.setMaxHeight(Double.MAX_VALUE);
 
         Button importButton = new Button(
             I18n.t("settings.cache.importOneMesh")
@@ -61,6 +62,7 @@ public final class NodeCacheSettingsController {
 
         cacheTable = new TableView<>(cacheData);
         cacheTable.setFixedCellSize(28);
+        cacheTable.setMaxHeight(Double.MAX_VALUE);
         cacheTable
             .getColumns()
             .addAll(List.of(

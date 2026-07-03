@@ -2,10 +2,14 @@ package com.meshtastic.client.forms;
 
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.ChatDbKey;
+import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.MessageReaction;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.utils.AppPreferences;
 
@@ -47,6 +51,10 @@ abstract class FormChatMessages extends FormChatUi {
      */
     protected void loadInitialMessages(boolean restoreSavedState) {
         if (selectedChat == null) { return; }
+        if (remoteRpcState != null) {
+            loadRemoteInitialMessages(restoreSavedState);
+            return;
+        }
         pendingStatusLabels.clear();
         suspendScrollStateSync();
 
@@ -101,6 +109,66 @@ abstract class FormChatMessages extends FormChatUi {
         latestKnownDbId = newestLoadedDbId;
     }
 
+    private void loadRemoteInitialMessages(boolean restoreSavedState) {
+        RemoteRpcState rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        if (rpcState == null || requestChat == null) {
+            return;
+        }
+        pendingStatusLabels.clear();
+        suspendScrollStateSync();
+
+        rpcState.client()
+                .call("chat.messages",
+                        RemoteChatJson.chatMessagesParams(
+                                currentChatType(), currentChatKey(), PAGE_SIZE, 0, 0),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    try {
+                        if (!isRemoteChatRequestCurrent(rpcState, requestChat)) {
+                            return;
+                        }
+                        if (error != null) {
+                            Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                            return;
+                        }
+                        applyRemoteInitialMessages(requestChat, RemoteChatJson.parseMessages(result), restoreSavedState);
+                    } finally {
+                        resumeScrollStateSyncLater();
+                    }
+                }));
+    }
+
+    private void applyRemoteInitialMessages(ChatItem requestChat,
+                                            List<MeshMessage> messages,
+                                            boolean restoreSavedState) {
+        String loadedChatKey = chatScrollCacheKey(requestChat);
+        clearLoadedMessageState();
+        loadedChatScrollCacheKey = loadedChatKey;
+        messageContainer.getChildren().clear();
+        for (MeshMessage msg : messages) {
+            appendLoadedMessageRow(msg);
+        }
+
+        updateLoadedBoundsAfterInitialLoad(messages);
+        allHistoryLoaded = messages.size() < PAGE_SIZE;
+        allNewerHistoryLoaded = true;
+        loadingOlderMessages = false;
+        loadingNewerMessages = false;
+        newMessageWhileScrolled = 0;
+        updateScrollDownBadge();
+        requestMessageViewportLayout();
+
+        if (restoreSavedState && restoreSavedScrollPosition()) {
+            openingChatUnreadCount = 0;
+            refreshUnreadTailIndicatorLater();
+            return;
+        }
+        positionInitialMessages(openingChatUnreadCount);
+        openingChatUnreadCount = 0;
+        refreshMessageSearchResults(false);
+    }
+
     protected void jumpToLatestMessages() {
         if (selectedChat == null) {
             return;
@@ -116,6 +184,10 @@ abstract class FormChatMessages extends FormChatUi {
      */
     protected void loadOlderMessages() {
         if (allHistoryLoaded || loadingOlderMessages || selectedChat == null) { return; }
+        if (remoteRpcState != null) {
+            loadRemoteOlderMessages();
+            return;
+        }
         loadingOlderMessages = true;
         ChatScrollState viewportAnchor = captureViewportAnchor();
         suspendScrollStateSync();
@@ -148,6 +220,10 @@ abstract class FormChatMessages extends FormChatUi {
 
     protected void loadNewerMessages() {
         if (allNewerHistoryLoaded || loadingNewerMessages || selectedChat == null) { return; }
+        if (remoteRpcState != null) {
+            loadRemoteNewerMessages();
+            return;
+        }
         loadingNewerMessages = true;
         ChatScrollState viewportAnchor = captureViewportAnchor();
         suspendScrollStateSync();
@@ -189,6 +265,10 @@ abstract class FormChatMessages extends FormChatUi {
      */
     protected void refreshCurrentChat() {
         if (selectedChat == null) { return; }
+        if (remoteRpcState != null) {
+            refreshRemoteCurrentChat();
+            return;
+        }
         boolean wasAtLiveTail = formVisible && isAtLiveTail();
         ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail ? captureViewportAnchor() : null;
         String chatType = currentChatType();
@@ -222,6 +302,10 @@ abstract class FormChatMessages extends FormChatUi {
         if (selectedChat == null || events == null || events.isEmpty()) {
             return;
         }
+        if (remoteRpcState != null) {
+            processRemoteMessageChangeEvents(events);
+            return;
+        }
 
         long startedNanos = System.nanoTime();
         boolean fallbackRefresh = false;
@@ -245,11 +329,204 @@ abstract class FormChatMessages extends FormChatUi {
         }
     }
 
+    private void processRemoteMessageChangeEvents(List<MessageChangeEvent> events) {
+        int skippedEvents = 0;
+        for (MessageChangeEvent event : events) {
+            if (event == null || event.kind() == MessageChangeEvent.Kind.UNKNOWN) {
+                skippedEvents++;
+                continue;
+            }
+            if (!isRemoteMessageChangeForCurrentChat(event)) {
+                continue;
+            }
+            boolean applied = switch (event.kind()) {
+                case NEW_MESSAGE -> appendRemoteIncomingMessage(event);
+                case STATUS_CHANGED -> refreshMessageStatus(event);
+                case METADATA_CHANGED -> refreshMessageMetadata(event);
+                case REACTION_CHANGED, DELETE, UNKNOWN -> false;
+            };
+            if (!applied) {
+                skippedEvents++;
+            }
+        }
+        if (skippedEvents > 0 && log.isDebugEnabled()) {
+            log.debug("Skipped {} incomplete remote chat live events without reloading message history", skippedEvents);
+        }
+    }
+
     private boolean isMessageChangeForCurrentChat(MessageChangeEvent event) {
         return event.hasChatScope()
                 && Objects.equals(event.ownerNodeId(), currentOwnerNodeId())
                 && Objects.equals(event.chatType(), currentChatType())
                 && Objects.equals(event.chatKey(), currentChatKey());
+    }
+
+    private boolean isRemoteMessageChangeForCurrentChat(MessageChangeEvent event) {
+        return event != null
+                && Objects.equals(event.ownerNodeId(), currentOwnerNodeId())
+                && Objects.equals(event.chatType(), currentChatType())
+                && Objects.equals(event.chatKey(), currentChatKey());
+    }
+
+    private boolean appendRemoteIncomingMessage(MessageChangeEvent event) {
+        MeshMessage message = event.message();
+        if (message == null || message.getDbId() <= 0) {
+            return false;
+        }
+
+        MeshMessage loaded = findLoadedMessage(event);
+        if (loaded != null) {
+            copyLoadedMessageMetadata(loaded, message);
+            if (!sameReactions(loaded.getReactions(), message.getReactions())) {
+                loaded.setReactions(message.getReactions());
+            }
+            refreshRenderedMessageRow(loaded);
+            return true;
+        }
+
+        boolean wasAtLiveTail = formVisible && isAtLiveTail();
+        ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail ? captureViewportAnchor() : null;
+        handleNewMessages(List.of(message), preservedScrollState, wasAtLiveTail);
+        refreshMessageSearchResults(false);
+        return true;
+    }
+
+    private void loadRemoteOlderMessages() {
+        RemoteRpcState rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        if (rpcState == null || requestChat == null) {
+            return;
+        }
+        loadingOlderMessages = true;
+        ChatScrollState viewportAnchor = captureViewportAnchor();
+        suspendScrollStateSync();
+
+        rpcState.client()
+                .call("chat.messages",
+                        RemoteChatJson.chatMessagesParams(
+                                currentChatType(), currentChatKey(), PAGE_SIZE, oldestLoadedDbId, 0),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    boolean current = isRemoteChatRequestCurrent(rpcState, requestChat);
+                    try {
+                        if (!current) {
+                            return;
+                        }
+                        if (error != null) {
+                            Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                            return;
+                        }
+                        List<MeshMessage> older = RemoteChatJson.parseMessages(result);
+                        if (older.isEmpty()) {
+                            allHistoryLoaded = true;
+                            return;
+                        }
+                        prependOlderMessages(older);
+                        allHistoryLoaded = older.size() < PAGE_SIZE;
+                        trimLoadedWindowFromBottomIfNeeded();
+                        requestMessageViewportLayout();
+                        restoreViewportAnchorLater(viewportAnchor);
+                    } finally {
+                        if (current) {
+                            loadingOlderMessages = false;
+                            refreshUnreadTailIndicator();
+                        }
+                        resumeScrollStateSyncLater();
+                    }
+                }));
+    }
+
+    private void loadRemoteNewerMessages() {
+        RemoteRpcState rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        if (rpcState == null || requestChat == null) {
+            return;
+        }
+        loadingNewerMessages = true;
+        ChatScrollState viewportAnchor = captureViewportAnchor();
+        suspendScrollStateSync();
+
+        rpcState.client()
+                .call("chat.messages",
+                        RemoteChatJson.chatMessagesParams(
+                                currentChatType(), currentChatKey(), PAGE_SIZE, 0, newestLoadedDbId),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    boolean current = isRemoteChatRequestCurrent(rpcState, requestChat);
+                    try {
+                        if (!current) {
+                            return;
+                        }
+                        if (error != null) {
+                            Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                            return;
+                        }
+                        List<MeshMessage> newer = RemoteChatJson.parseMessages(result);
+                        if (newer.isEmpty()) {
+                            allNewerHistoryLoaded = newestLoadedDbId >= latestKnownDbId;
+                            return;
+                        }
+                        appendNewerMessages(newer);
+                        trimLoadedWindowFromTopIfNeeded();
+                        allNewerHistoryLoaded = newer.size() < PAGE_SIZE;
+                        if (allNewerHistoryLoaded) {
+                            latestKnownDbId = newestLoadedDbId;
+                        } else {
+                            latestKnownDbId = Math.max(latestKnownDbId, newestLoadedDbId);
+                        }
+                        requestMessageViewportLayout();
+                        restoreViewportAnchorLater(viewportAnchor);
+                    } finally {
+                        if (current) {
+                            loadingNewerMessages = false;
+                            refreshUnreadTailIndicator();
+                        }
+                        resumeScrollStateSyncLater();
+                    }
+                }));
+    }
+
+    private void refreshRemoteCurrentChat() {
+        RemoteRpcState rpcState = remoteRpcState;
+        ChatItem requestChat = selectedChat;
+        if (rpcState == null || requestChat == null) {
+            return;
+        }
+        boolean wasAtLiveTail = formVisible && isAtLiveTail();
+        ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail ? captureViewportAnchor() : null;
+
+        rpcState.client()
+                .call("chat.messages",
+                        RemoteChatJson.chatMessagesParams(
+                                currentChatType(), currentChatKey(), PAGE_SIZE, 0, latestKnownDbId),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (!isRemoteChatRequestCurrent(rpcState, requestChat)) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    List<MeshMessage> newMsgs = RemoteChatJson.parseMessages(result);
+                    if (newMsgs.isEmpty()) {
+                        allNewerHistoryLoaded = true;
+                        latestKnownDbId = Math.max(latestKnownDbId, newestLoadedDbId);
+                        return;
+                    }
+                    handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
+                    refreshMessageSearchResults(false);
+                    if (formVisible) {
+                        refreshLoadedMessageRows(false);
+                    }
+                }));
+    }
+
+    private boolean isRemoteChatRequestCurrent(RemoteRpcState rpcState, ChatItem requestChat) {
+        return rpcState == remoteRpcState
+                && requestChat != null
+                && selectedChat != null
+                && chatItemMatches(selectedChat, requestChat);
     }
 
     private boolean applyMessageChangeEvent(MessageChangeEvent event) {
@@ -326,11 +603,15 @@ abstract class FormChatMessages extends FormChatUi {
         }
         if (updated != null) {
             copyLoadedMessageMetadata(message, updated);
+            if (!sameReactions(message.getReactions(), updated.getReactions())) {
+                message.setReactions(updated.getReactions());
+            }
         }
 
         MessageBubbleFactory.RenderedMessageRow rendered = loadedRenderedMessageRows.get(message.getDbId());
         if (rendered != null) {
             bubbleFactory.refreshRenderedMetadata(rendered, message);
+            bubbleFactory.refreshRenderedReactions(rendered, message);
             requestMessageViewportLayoutLater();
         }
         return true;
@@ -551,11 +832,15 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     static boolean copyLoadedMessageMetadata(MeshMessage loaded, MeshMessage updated) {
-        if (loaded == null || updated == null || loaded.getPacketId() != updated.getPacketId()) {
+        if (loaded == null || updated == null || !isSameLoadedMessage(loaded, updated)) {
             return false;
         }
 
         boolean changed = false;
+        if (loaded.getPacketId() != updated.getPacketId()) {
+            loaded.setPacketId(updated.getPacketId());
+            changed = true;
+        }
         if (loaded.getStatus() != updated.getStatus()) {
             loaded.setStatus(updated.getStatus());
             changed = true;
@@ -570,6 +855,10 @@ abstract class FormChatMessages extends FormChatUi {
         }
         if (!Objects.equals(loaded.getReplyText(), updated.getReplyText())) {
             loaded.setReplyText(updated.getReplyText());
+            changed = true;
+        }
+        if (loaded.isReplyToOutgoing() != updated.isReplyToOutgoing()) {
+            loaded.setReplyToOutgoing(updated.isReplyToOutgoing());
             changed = true;
         }
         if (loaded.getHopStart() != updated.getHopStart()) {
@@ -597,6 +886,13 @@ abstract class FormChatMessages extends FormChatUi {
             changed = true;
         }
         return changed;
+    }
+
+    private static boolean isSameLoadedMessage(MeshMessage loaded, MeshMessage updated) {
+        if (loaded.getDbId() > 0 && updated.getDbId() > 0) {
+            return loaded.getDbId() == updated.getDbId();
+        }
+        return loaded.getPacketId() != 0 && loaded.getPacketId() == updated.getPacketId();
     }
 
     /**
@@ -713,7 +1009,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected Set<Long> attachReactions(List<MeshMessage> messages) {
-        if (messages == null || messages.isEmpty() || selectedChat == null) {
+        if (remoteRpcState != null || messages == null || messages.isEmpty() || selectedChat == null) {
             return Set.of();
         }
         MessageDbService db = MessageDbService.getInstance();
@@ -759,6 +1055,13 @@ abstract class FormChatMessages extends FormChatUi {
 
     protected void refreshLoadedMessageRows(boolean force) {
         if (loadedMessages.isEmpty() || selectedChat == null) {
+            return;
+        }
+
+        if (remoteRpcState != null) {
+            if (force) {
+                rebuildLoadedMessageRows();
+            }
             return;
         }
 
@@ -1098,7 +1401,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void ensureMessageLoaded(long dbId) {
-        if (selectedChat == null || dbId <= 0 || loadedMessageRows.containsKey(dbId)) {
+        if (remoteRpcState != null || selectedChat == null || dbId <= 0 || loadedMessageRows.containsKey(dbId)) {
             return;
         }
 
@@ -1146,6 +1449,9 @@ abstract class FormChatMessages extends FormChatUi {
     protected int getUnreadCount(ChatItem item) {
         if (item == null) {
             return 0;
+        }
+        if (remoteRpcState != null) {
+            return item.getUnreadCount();
         }
 
         ChatDbKey key = ChatDbKey.from(item);

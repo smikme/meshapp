@@ -7,6 +7,11 @@ import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.PacketLogEntry;
 import com.meshtastic.client.model.PacketTreeNode;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemotePacketMonitorJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.rpc.RpcEventListener;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.PacketMonitorService;
 import com.meshtastic.client.themes.ThemeManager;
@@ -63,6 +68,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -72,8 +78,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Standalone monitor window for LoRa mesh packets.
@@ -113,18 +124,20 @@ public final class PacketMonitorWindow {
     private static final double PACKET_TABLE_COMPACT_COLUMN_MIN_WIDTH = 72;
     private static final double PACKET_TABLE_PAYLOAD_MIN_WIDTH = 260;
     private static final double PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH = 140;
+    private static final int MAX_PENDING_LIVE_PACKET_EVENTS = 512;
     private static final DateTimeFormatter PACKET_EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
     private static final DateTimeFormatter PACKET_EXPORT_FILTER_DATE =
             DateTimeFormatter.ofPattern("dd.MM.yyyy");
     private static final DateTimeFormatter PACKET_EXPORT_FILTER_DATE_TIME =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
 
     static record RouteFilterSelection(PacketLogEntry.Direction direction, String transportMechanism) {}
 
     private static PacketMonitorWindow instance;
 
-    private final PacketMonitorService packetMonitorService;
+    private final PacketMonitorDataSource packetMonitorSource;
     private final ExecutorService exportExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "packet-monitor-export");
         thread.setDaemon(true);
@@ -132,6 +145,10 @@ public final class PacketMonitorWindow {
     });
     private final ObservableList<PacketLogEntry> packetItems = FXCollections.observableArrayList();
     private final ObservableList<String> packetTypeFilters = FXCollections.observableArrayList(filterAllTypes());
+    private final Queue<PacketLogEntry> pendingLivePackets = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingLivePacketCount = new AtomicInteger();
+    private final AtomicBoolean livePacketFlushQueued = new AtomicBoolean();
+    private final AtomicBoolean livePacketQueueOverflowed = new AtomicBoolean();
     private final BooleanProperty suppressPacketTableTooltips = new SimpleBooleanProperty(false);
     private final ChangeListener<Number> packetTableScrollListener =
             (obs, oldValue, newValue) -> handlePacketTableScroll(
@@ -142,7 +159,7 @@ public final class PacketMonitorWindow {
     private final PacketMonitorService.Listener packetListener = new PacketMonitorService.Listener() {
         @Override
         public void onPacketLogged(PacketLogEntry entry) {
-            Platform.runLater(() -> handlePacketLogged(entry));
+            enqueueLivePacket(entry);
         }
 
         @Override
@@ -207,11 +224,23 @@ public final class PacketMonitorWindow {
     private volatile boolean exportInProgress;
 
     private PacketMonitorWindow() {
-        this.packetMonitorService = PacketMonitorService.getInstance();
+        this.packetMonitorSource = createPacketMonitorSource();
         createStage();
-        packetMonitorService.addListener(packetListener);
+        packetMonitorSource.addListener(packetListener);
         reloadCurrentFrame(true, true);
         updateToolbarState();
+    }
+
+    private PacketMonitorDataSource createPacketMonitorSource() {
+        ConnectionManager manager = ConnectionManager.getInstance();
+        ConnectionEntry entry = manager.getSelectedConnectionEntry();
+        if (entry != null && entry.isConnected()) {
+            ProtocolRuntime<?> runtime = manager.getProtocolRuntime(entry.getId());
+            if (runtime != null && runtime.getState() instanceof RemoteRpcState remoteState) {
+                return new RemotePacketMonitorDataSource(remoteState);
+            }
+        }
+        return new LocalPacketMonitorDataSource(PacketMonitorService.getInstance());
     }
 
     /**
@@ -395,19 +424,19 @@ public final class PacketMonitorWindow {
                 I18n.t("packetMonitor.action.start"),
                 I18n.t("packetMonitor.action.start.tooltip"),
                 "/icons/play.svg",
-                packetMonitorService::startCapture
+                packetMonitorSource::startCapture
         );
         btnStop = createToolbarButton(
                 I18n.t("packetMonitor.action.stop"),
                 I18n.t("packetMonitor.action.stop.tooltip"),
                 "/icons/pause.svg",
-                packetMonitorService::stopCapture
+                packetMonitorSource::stopCapture
         );
         btnClear = createToolbarButton(
                 I18n.t("packetMonitor.action.clear"),
                 I18n.t("packetMonitor.action.clear.tooltip"),
                 "/icons/clear.svg",
-                packetMonitorService::clear
+                packetMonitorSource::clear
         );
         toolBar.getItems().addAll(
                 btnStart,
@@ -973,7 +1002,7 @@ public final class PacketMonitorWindow {
             long packetIdToKeep = preserveViewedPacket ? viewedPacketId : -1L;
             refreshTypeFilters();
             PacketMonitorService.PacketPage page =
-                    packetMonitorService.loadLatestPage(buildCurrentQuery(), PAGE_SIZE);
+                    packetMonitorSource.loadLatestPage(buildCurrentQuery(), PAGE_SIZE);
             applyLoadedPage(page,
                     packetIdToKeep,
                     clearDetailsIfSelectionLost,
@@ -998,7 +1027,7 @@ public final class PacketMonitorWindow {
         try {
             int anchorIndex = estimateFirstVisibleRow();
             PacketMonitorService.PacketPage page =
-                    packetMonitorService.loadOlderPage(
+                    packetMonitorSource.loadOlderPage(
                             buildCurrentQuery(),
                             PacketMonitorService.PageCursor.fromEntry(packetItems.getLast()),
                             PAGE_SHIFT
@@ -1027,7 +1056,7 @@ public final class PacketMonitorWindow {
         try {
             int anchorIndex = estimateFirstVisibleRow();
             PacketMonitorService.PacketPage page =
-                    packetMonitorService.loadNewerPage(
+                    packetMonitorSource.loadNewerPage(
                             buildCurrentQuery(),
                             PacketMonitorService.PageCursor.fromEntry(packetItems.getFirst()),
                             PAGE_SHIFT
@@ -1138,7 +1167,7 @@ public final class PacketMonitorWindow {
 
         String previousSelection = getActiveTypeFilterSelection();
         List<String> refreshedOptions = buildTypeFilterOptions(
-                packetMonitorService.loadPacketTypes(buildTypeOptionsQuery()),
+                packetMonitorSource.loadPacketTypes(buildTypeOptionsQuery()),
                 previousSelection);
         String restoredSelection = resolveTypeFilterSelection(previousSelection, refreshedOptions);
         suppressFilterReload = true;
@@ -1153,7 +1182,7 @@ public final class PacketMonitorWindow {
     }
 
     private void updateToolbarState() {
-        boolean captureEnabled = packetMonitorService.isCaptureEnabled();
+        boolean captureEnabled = packetMonitorSource.isCaptureEnabled();
         btnStart.setDisable(captureEnabled);
         btnStop.setDisable(!captureEnabled);
         btnClear.setDisable(exportInProgress || totalStoredPacketCount == 0);
@@ -1181,6 +1210,72 @@ public final class PacketMonitorWindow {
         if (searchField != null) {
             searchField.setDisable(exportInProgress);
         }
+    }
+
+    private void enqueueLivePacket(PacketLogEntry entry) {
+        if (entry == null) {
+            return;
+        }
+        if (!livePacketQueueOverflowed.get()) {
+            int queued = pendingLivePacketCount.incrementAndGet();
+            if (queued <= MAX_PENDING_LIVE_PACKET_EVENTS) {
+                pendingLivePackets.add(entry);
+            } else {
+                pendingLivePacketCount.decrementAndGet();
+                pendingLivePackets.clear();
+                pendingLivePacketCount.set(0);
+                livePacketQueueOverflowed.set(true);
+            }
+        }
+        scheduleLivePacketFlush();
+    }
+
+    private void scheduleLivePacketFlush() {
+        if (livePacketFlushQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::flushLivePacketEvents);
+        }
+    }
+
+    private void flushLivePacketEvents() {
+        try {
+            if (livePacketQueueOverflowed.getAndSet(false)) {
+                pendingLivePackets.clear();
+                pendingLivePacketCount.set(0);
+                reconcileLivePacketsFromStore();
+                return;
+            }
+
+            PacketLogEntry entry;
+            while ((entry = pendingLivePackets.poll()) != null) {
+                pendingLivePacketCount.updateAndGet(value -> Math.max(0, value - 1));
+                handlePacketLogged(entry);
+                if (livePacketQueueOverflowed.get()) {
+                    break;
+                }
+            }
+        } finally {
+            livePacketFlushQueued.set(false);
+            if ((pendingLivePacketCount.get() > 0 || livePacketQueueOverflowed.get())
+                    && livePacketFlushQueued.compareAndSet(false, true)) {
+                Platform.runLater(this::flushLivePacketEvents);
+            }
+        }
+    }
+
+    private void reconcileLivePacketsFromStore() {
+        refreshTypeFilters();
+        totalStoredPacketCount = packetMonitorSource.countAllPackets();
+        matchingPacketCount = packetMonitorSource.countMatchingPackets(buildCurrentQuery());
+
+        if (packetItems.isEmpty() || (isTableNearTop() && !currentPageHasNewer)) {
+            reloadCurrentFrame(true, false);
+            return;
+        }
+
+        latestFrameDirty = matchingPacketCount > packetItems.size();
+        currentPageHasNewer = latestFrameDirty;
+        currentPageHasOlder = matchingPacketCount > packetItems.size();
+        updateToolbarState();
     }
 
     /**
@@ -1559,6 +1654,10 @@ public final class PacketMonitorWindow {
         return I18n.t("packetMonitor.filter.route.outgoing");
     }
 
+    static String filterAllMqtt() {
+        return I18n.t("packetMonitor.filter.route.allMqtt");
+    }
+
     static String filterAllTypes() {
         return I18n.t("packetMonitor.filter.type.all");
     }
@@ -1574,6 +1673,15 @@ public final class PacketMonitorWindow {
 
     private static boolean isOutgoingRouteSelection(String value) {
         return matchesLocalizedOption(value, filterOutgoing(), "Исходящие", "Outgoing");
+    }
+
+    private static boolean isAllMqttRouteSelection(String value) {
+        return matchesLocalizedOption(
+                value,
+                filterAllMqtt(),
+                "Все MQTT (входящие/исходящие)",
+                "All MQTT (incoming/outgoing)"
+        );
     }
 
     private static boolean isAllTypesSelection(String value) {
@@ -1600,7 +1708,8 @@ public final class PacketMonitorWindow {
         return List.of(
                 filterAllRoutes(),
                 filterIncoming(),
-                filterOutgoing()
+                filterOutgoing(),
+                filterAllMqtt()
         );
     }
 
@@ -1613,6 +1722,9 @@ public final class PacketMonitorWindow {
         }
         if (isOutgoingRouteSelection(selectedRoute)) {
             return new RouteFilterSelection(PacketLogEntry.Direction.OUTGOING, null);
+        }
+        if (isAllMqttRouteSelection(selectedRoute)) {
+            return new RouteFilterSelection(null, PacketMonitorService.TRANSPORT_MQTT);
         }
         return new RouteFilterSelection(null, null);
     }
@@ -1958,7 +2070,7 @@ public final class PacketMonitorWindow {
             return;
         }
         PacketMonitorService.PacketQuery query = buildCurrentQuery();
-        int totalToExport = packetMonitorService.countMatchingPackets(query);
+        int totalToExport = packetMonitorSource.countMatchingPackets(query);
         if (totalToExport == 0) {
             Toast.show(Toast.Type.INFO, I18n.t("packetMonitor.toast.exportEmpty"));
             return;
@@ -1986,7 +2098,7 @@ public final class PacketMonitorWindow {
             return;
         }
         PacketMonitorService.PacketQuery query = buildCurrentQuery();
-        int totalToExport = packetMonitorService.countMatchingPackets(query);
+        int totalToExport = packetMonitorSource.countMatchingPackets(query);
         if (totalToExport == 0) {
             Toast.show(Toast.Type.INFO, I18n.t("packetMonitor.toast.exportEmpty"));
             return;
@@ -2036,7 +2148,7 @@ public final class PacketMonitorWindow {
             PacketDebugFormatter.PacketCollectionJsonExportState initialState,
             long totalToExport) throws IOException {
         final PacketDebugFormatter.PacketCollectionJsonExportState[] stateHolder = {initialState};
-        packetMonitorService.forEachMatchingBatch(query, PACKET_EXPORT_BATCH_SIZE, batch -> {
+        packetMonitorSource.forEachMatchingBatch(query, PACKET_EXPORT_BATCH_SIZE, batch -> {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Packet export interrupted");
             }
@@ -2082,7 +2194,7 @@ public final class PacketMonitorWindow {
             PacketDebugFormatter.PacketCollectionCsvExportState initialState,
             long totalToExport) throws IOException {
         final PacketDebugFormatter.PacketCollectionCsvExportState[] stateHolder = {initialState};
-        packetMonitorService.forEachMatchingBatch(query, PACKET_EXPORT_BATCH_SIZE, batch -> {
+        packetMonitorSource.forEachMatchingBatch(query, PACKET_EXPORT_BATCH_SIZE, batch -> {
             if (Thread.currentThread().isInterrupted()) {
                 throw new IOException("Packet export interrupted");
             }
@@ -2222,11 +2334,266 @@ public final class PacketMonitorWindow {
         }
     }
 
+    private interface PacketMonitorDataSource {
+        boolean isCaptureEnabled();
+
+        void startCapture();
+
+        void stopCapture();
+
+        void clear();
+
+        void addListener(PacketMonitorService.Listener listener);
+
+        void removeListener(PacketMonitorService.Listener listener);
+
+        PacketMonitorService.PacketPage loadLatestPage(PacketMonitorService.PacketQuery query, int limit);
+
+        PacketMonitorService.PacketPage loadOlderPage(PacketMonitorService.PacketQuery query,
+                                                      PacketMonitorService.PageCursor cursor,
+                                                      int limit);
+
+        PacketMonitorService.PacketPage loadNewerPage(PacketMonitorService.PacketQuery query,
+                                                      PacketMonitorService.PageCursor cursor,
+                                                      int limit);
+
+        List<String> loadPacketTypes(PacketMonitorService.PacketQuery query);
+
+        int countAllPackets();
+
+        int countMatchingPackets(PacketMonitorService.PacketQuery query);
+
+        long forEachMatchingBatch(PacketMonitorService.PacketQuery query,
+                                  int batchSize,
+                                  PacketMonitorService.PacketBatchConsumer consumer) throws IOException;
+    }
+
+    private static final class LocalPacketMonitorDataSource implements PacketMonitorDataSource {
+        private final PacketMonitorService service;
+
+        private LocalPacketMonitorDataSource(PacketMonitorService service) {
+            this.service = service;
+        }
+
+        @Override
+        public boolean isCaptureEnabled() {
+            return service.isCaptureEnabled();
+        }
+
+        @Override
+        public void startCapture() {
+            service.startCapture();
+        }
+
+        @Override
+        public void stopCapture() {
+            service.stopCapture();
+        }
+
+        @Override
+        public void clear() {
+            service.clear();
+        }
+
+        @Override
+        public void addListener(PacketMonitorService.Listener listener) {
+            service.addListener(listener);
+        }
+
+        @Override
+        public void removeListener(PacketMonitorService.Listener listener) {
+            service.removeListener(listener);
+        }
+
+        @Override
+        public PacketMonitorService.PacketPage loadLatestPage(PacketMonitorService.PacketQuery query, int limit) {
+            return service.loadLatestPage(query, limit);
+        }
+
+        @Override
+        public PacketMonitorService.PacketPage loadOlderPage(PacketMonitorService.PacketQuery query,
+                                                             PacketMonitorService.PageCursor cursor,
+                                                             int limit) {
+            return service.loadOlderPage(query, cursor, limit);
+        }
+
+        @Override
+        public PacketMonitorService.PacketPage loadNewerPage(PacketMonitorService.PacketQuery query,
+                                                             PacketMonitorService.PageCursor cursor,
+                                                             int limit) {
+            return service.loadNewerPage(query, cursor, limit);
+        }
+
+        @Override
+        public List<String> loadPacketTypes(PacketMonitorService.PacketQuery query) {
+            return service.loadPacketTypes(query);
+        }
+
+        @Override
+        public int countAllPackets() {
+            return service.countAllPackets();
+        }
+
+        @Override
+        public int countMatchingPackets(PacketMonitorService.PacketQuery query) {
+            return service.countMatchingPackets(query);
+        }
+
+        @Override
+        public long forEachMatchingBatch(PacketMonitorService.PacketQuery query,
+                                         int batchSize,
+                                         PacketMonitorService.PacketBatchConsumer consumer) throws IOException {
+            return service.forEachMatchingBatch(query, batchSize, consumer);
+        }
+    }
+
+    private static final class RemotePacketMonitorDataSource implements PacketMonitorDataSource {
+        private final RemoteRpcState rpcState;
+        private final RpcEventListener rpcEventListener = this::handleRemoteEvent;
+        private volatile PacketMonitorService.Listener listener;
+        private volatile boolean captureEnabled;
+
+        private RemotePacketMonitorDataSource(RemoteRpcState rpcState) {
+            this.rpcState = rpcState;
+            this.captureEnabled = RemotePacketMonitorJson.captureEnabled(
+                    call("packetMonitor.captureState", new com.google.gson.JsonObject()));
+        }
+
+        @Override
+        public boolean isCaptureEnabled() {
+            return captureEnabled;
+        }
+
+        @Override
+        public void startCapture() {
+            captureEnabled = RemotePacketMonitorJson.captureEnabled(
+                    call("packetMonitor.start", new com.google.gson.JsonObject()));
+        }
+
+        @Override
+        public void stopCapture() {
+            captureEnabled = RemotePacketMonitorJson.captureEnabled(
+                    call("packetMonitor.stop", new com.google.gson.JsonObject()));
+        }
+
+        @Override
+        public void clear() {
+            call("packetMonitor.clear", new com.google.gson.JsonObject());
+        }
+
+        @Override
+        public void addListener(PacketMonitorService.Listener listener) {
+            this.listener = listener;
+            rpcState.client().addEventListener(rpcEventListener);
+        }
+
+        @Override
+        public void removeListener(PacketMonitorService.Listener listener) {
+            rpcState.client().removeEventListener(rpcEventListener);
+            if (this.listener == listener) {
+                this.listener = null;
+            }
+        }
+
+        @Override
+        public PacketMonitorService.PacketPage loadLatestPage(PacketMonitorService.PacketQuery query, int limit) {
+            return RemotePacketMonitorJson.parsePage(call("packetMonitor.page",
+                    RemotePacketMonitorJson.pageParams("latest", query, null, limit)));
+        }
+
+        @Override
+        public PacketMonitorService.PacketPage loadOlderPage(PacketMonitorService.PacketQuery query,
+                                                             PacketMonitorService.PageCursor cursor,
+                                                             int limit) {
+            return RemotePacketMonitorJson.parsePage(call("packetMonitor.page",
+                    RemotePacketMonitorJson.pageParams("older", query, cursor, limit)));
+        }
+
+        @Override
+        public PacketMonitorService.PacketPage loadNewerPage(PacketMonitorService.PacketQuery query,
+                                                             PacketMonitorService.PageCursor cursor,
+                                                             int limit) {
+            return RemotePacketMonitorJson.parsePage(call("packetMonitor.page",
+                    RemotePacketMonitorJson.pageParams("newer", query, cursor, limit)));
+        }
+
+        @Override
+        public List<String> loadPacketTypes(PacketMonitorService.PacketQuery query) {
+            return RemotePacketMonitorJson.parseTypes(call("packetMonitor.types",
+                    RemotePacketMonitorJson.queryParams(query)));
+        }
+
+        @Override
+        public int countAllPackets() {
+            return RemotePacketMonitorJson.totalCount(call("packetMonitor.counts",
+                    RemotePacketMonitorJson.queryParams(null)));
+        }
+
+        @Override
+        public int countMatchingPackets(PacketMonitorService.PacketQuery query) {
+            return RemotePacketMonitorJson.matchingCount(call("packetMonitor.counts",
+                    RemotePacketMonitorJson.queryParams(query)));
+        }
+
+        @Override
+        public long forEachMatchingBatch(PacketMonitorService.PacketQuery query,
+                                         int batchSize,
+                                         PacketMonitorService.PacketBatchConsumer consumer) throws IOException {
+            long processed = 0;
+            PacketMonitorService.PageCursor cursor = null;
+            String request = "latest";
+            while (true) {
+                PacketMonitorService.PacketPage page = RemotePacketMonitorJson.parsePage(call("packetMonitor.page",
+                        RemotePacketMonitorJson.pageParams(request, query, cursor, batchSize)));
+                if (page.entries().isEmpty()) {
+                    return processed;
+                }
+                consumer.accept(page.entries());
+                processed += page.entries().size();
+                if (page.entries().size() < batchSize || !page.hasOlder()) {
+                    return processed;
+                }
+                cursor = PacketMonitorService.PageCursor.fromEntry(page.entries().getLast());
+                request = "older";
+            }
+        }
+
+        private com.google.gson.JsonElement call(String method, com.google.gson.JsonObject params) {
+            try {
+                return rpcState.client().call(method, params, REMOTE_RPC_TIMEOUT).join();
+            } catch (CompletionException e) {
+                throw new IllegalStateException(RemoteChatJson.errorMessage(e), e);
+            }
+        }
+
+        private void handleRemoteEvent(String event, com.google.gson.JsonElement payload) {
+            PacketMonitorService.Listener currentListener = listener;
+            if (currentListener == null) {
+                return;
+            }
+            switch (event) {
+                case "packet.monitor.logged" -> {
+                    PacketLogEntry entry = RemotePacketMonitorJson.parseEventEntry(payload);
+                    if (entry != null) {
+                        currentListener.onPacketLogged(entry);
+                    }
+                }
+                case "packet.monitor.capture" -> {
+                    captureEnabled = RemotePacketMonitorJson.captureEnabled(payload);
+                    currentListener.onCaptureStateChanged(captureEnabled);
+                }
+                case "packet.monitor.cleared" -> currentListener.onCleared();
+                default -> {
+                }
+            }
+        }
+    }
+
     /**
      * Releases window-level resources and unregisters the singleton window.
      */
     private void dispose() {
-        packetMonitorService.removeListener(packetListener);
+        packetMonitorSource.removeListener(packetListener);
         exportExecutor.shutdownNow();
         if (stage != null && stage.getScene() != null) {
             ThemeManager.unregisterScene(stage.getScene());

@@ -48,6 +48,24 @@ class LuaCompletionEngineTest {
     }
 
     @Test
+    void completesReactionCallbackFields() {
+        LuaCompletionEngine.CompletionResult result = complete("""
+                function on_reaction(reaction)
+                    reaction.target_|
+                end
+                """);
+
+        assertItemsContain(result, "target_packet_id");
+    }
+
+    @Test
+    void completesChatReactFunction() {
+        LuaCompletionEngine.CompletionResult result = complete("mesh.chat.re|");
+
+        assertItemsContain(result, "react(msg, emoji)");
+    }
+
+    @Test
     void completesMessageHopFields() {
         LuaCompletionEngine.CompletionResult result = complete("""
                 function on_message(msg)
@@ -334,6 +352,17 @@ class LuaCompletionEngineTest {
         assertItemsContain(snapshotResult, "configs");
         assertItemsContain(snapshotResult, "module_configs");
         assertItemsContain(snapshotResult, "query_statuses");
+    }
+
+    @Test
+    void completesNodeFlagApi() {
+        LuaCompletionEngine.CompletionResult apiResult = complete("""
+                mesh.node.|
+                """);
+        assertItemsContain(apiResult, "set_favorite_node(target)");
+        assertItemsContain(apiResult, "remove_favorite_node(target)");
+        assertItemsContain(apiResult, "set_ignored_node(target)");
+        assertItemsContain(apiResult, "remove_ignored_node(target)");
     }
 
     @Test

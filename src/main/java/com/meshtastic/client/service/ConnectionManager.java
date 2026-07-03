@@ -109,10 +109,30 @@ public final class ConnectionManager {
             if (loaded != null) {
                 entries.clear();
                 entries.addAll(loaded);
+                if (normalizeLoadedEntries()) {
+                    save();
+                }
             }
         } catch (Exception e) {
             log.error("Failed to load connections from {}", configPath, e);
         }
+    }
+
+    private boolean normalizeLoadedEntries() {
+        boolean changed = false;
+        for (ConnectionEntry entry : entries) {
+            if (entry.getEffectiveType() == ConnectionType.REMOTE_RPC) {
+                if (entry.getType() != ConnectionType.REMOTE_RPC) {
+                    entry.setType(ConnectionType.REMOTE_RPC);
+                    changed = true;
+                }
+                if (entry.getProtocol() != ProtocolType.REMOTE_RPC) {
+                    entry.setProtocol(ProtocolType.REMOTE_RPC);
+                    changed = true;
+                }
+            }
+        }
+        return changed;
     }
 
     /**
@@ -1181,6 +1201,11 @@ public final class ConnectionManager {
             }
             case TCP, SERIAL -> {
                 // MeshCore Companion can run on byte streams when the endpoint carries raw Companion packets.
+            }
+            case REMOTE_RPC -> {
+                if (requestedProtocol != ProtocolType.REMOTE_RPC) {
+                    throw new ConnectionException(I18n.t("connection.error.remoteRpcProtocolRequired"));
+                }
             }
         }
     }

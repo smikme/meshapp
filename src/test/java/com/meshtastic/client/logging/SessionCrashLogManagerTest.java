@@ -57,6 +57,8 @@ class SessionCrashLogManagerTest {
                     assertEquals(1, pendingDirs.size());
                     assertEquals("unexpected shutdown",
                             Files.readString(pendingDirs.getFirst().resolve(SessionCrashLogManager.ACTIVE_LOG_NAME)));
+                    assertTrue(Files.readString(pendingDirs.getFirst().resolve(SessionCrashLogManager.FATAL_MARKER_FILE_NAME))
+                            .contains("\"type\": \"abnormal-exit\""));
                 }
             } else {
                 assertEquals(1, pending.size());

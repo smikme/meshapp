@@ -47,6 +47,10 @@ import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -58,10 +62,15 @@ public class FormLogs extends Form {
     private static final String ICON_PAUSE = "/icons/pause.svg";
     private static final String ICON_PLAY = "/icons/play.svg";
     private static final int MAX_VISIBLE_LOG_ENTRIES = 5_000;
+    private static final int MAX_PENDING_LIVE_LOG_ENTRIES = 512;
     private static final DateTimeFormatter EXPORT_FILE_TIME =
             DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
     private final ObservableList<LogEntry> logData = FXCollections.observableArrayList();
+    private final Queue<LogEntry> pendingLiveLogEntries = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingLiveLogCount = new AtomicInteger();
+    private final AtomicBoolean liveLogFlushQueued = new AtomicBoolean();
+    private final AtomicBoolean liveLogQueueOverflowed = new AtomicBoolean();
     private final Object logViewStateLock = new Object();
     private boolean logViewUpdatesPaused;
     private boolean logBufferChangedWhilePaused;
@@ -243,6 +252,7 @@ public class FormLogs extends Form {
     @Override
     public void formClose() {
         UiLogAppender.clearLiveListener();
+        clearPendingLiveLogEntries();
     }
 
     private void installLiveLogListener() {
@@ -256,7 +266,69 @@ public class FormLogs extends Form {
                 return;
             }
         }
-        Platform.runLater(() -> appendLogEntry(entry));
+        enqueueLiveLogEntry(entry);
+    }
+
+    private void enqueueLiveLogEntry(LogEntry entry) {
+        if (entry == null) {
+            return;
+        }
+        if (!liveLogQueueOverflowed.get()) {
+            int queued = pendingLiveLogCount.incrementAndGet();
+            if (queued <= MAX_PENDING_LIVE_LOG_ENTRIES) {
+                pendingLiveLogEntries.add(entry);
+            } else {
+                pendingLiveLogCount.decrementAndGet();
+                clearPendingLiveLogEntries();
+                liveLogQueueOverflowed.set(true);
+            }
+        }
+        scheduleLiveLogFlush();
+    }
+
+    private void scheduleLiveLogFlush() {
+        if (liveLogFlushQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::flushLiveLogEntries);
+        }
+    }
+
+    private void flushLiveLogEntries() {
+        try {
+            synchronized (logViewStateLock) {
+                if (logViewUpdatesPaused || rebuildingLogView) {
+                    clearPendingLiveLogEntries();
+                    logBufferChangedWhilePaused = true;
+                    return;
+                }
+            }
+
+            if (liveLogQueueOverflowed.getAndSet(false)) {
+                clearPendingLiveLogEntries();
+                reloadVisibleLogsFromBuffer();
+                return;
+            }
+
+            LogEntry entry;
+            while ((entry = pendingLiveLogEntries.poll()) != null) {
+                pendingLiveLogCount.updateAndGet(value -> Math.max(0, value - 1));
+                appendLogEntry(entry);
+                if (liveLogQueueOverflowed.get()) {
+                    break;
+                }
+            }
+        } finally {
+            liveLogFlushQueued.set(false);
+            if ((pendingLiveLogCount.get() > 0 || liveLogQueueOverflowed.get())
+                    && liveLogFlushQueued.compareAndSet(false, true)) {
+                Platform.runLater(this::flushLiveLogEntries);
+            }
+        }
+    }
+
+    private void clearPendingLiveLogEntries() {
+        pendingLiveLogEntries.clear();
+        pendingLiveLogCount.set(0);
+        liveLogQueueOverflowed.set(false);
     }
 
     private void appendLogEntry(LogEntry entry) {

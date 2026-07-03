@@ -142,6 +142,7 @@ final class TerminalDisplayFormatter {
             case TCP -> "tcp " + safe(entry.getHost()) + ":" + entry.getPort();
             case SERIAL -> "serial " + safe(entry.getPortName()) + " @" + entry.getBaudRate();
             case BLE -> "ble " + safe(entry.getBleAddress());
+            case REMOTE_RPC -> "rpc " + safe(entry.getHost()) + ":" + entry.getPort();
         };
     }
 

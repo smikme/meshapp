@@ -174,6 +174,7 @@ public enum BleProtocolProfile {
             case MESHTASTIC -> MESHTASTIC;
             case MESHCORE_KISS -> MESHTASTIC;
             case MESHCORE_COMPANION -> MESHCORE_COMPANION;
+            case REMOTE_RPC -> throw new IllegalArgumentException("Remote RPC is not a BLE protocol");
         };
     }
 }

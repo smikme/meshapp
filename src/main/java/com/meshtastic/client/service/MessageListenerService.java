@@ -260,6 +260,7 @@ public class MessageListenerService implements FromRadioListener {
             } catch (Throwable t) {
                 log.error("Notification error", t);
             }
+            RemoteRpcHostService.getInstance().publishIncomingMessage(msg, "dm", fromNodeId);
         } else {
             msg.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
             String chatKey = String.valueOf(channel);
@@ -274,6 +275,7 @@ public class MessageListenerService implements FromRadioListener {
             } catch (Throwable t) {
                 log.error("Notification error", t);
             }
+            RemoteRpcHostService.getInstance().publishIncomingMessage(msg, "channel", String.valueOf(channel));
         }
 
         // Show the unread dot on the Chats icon.
@@ -417,18 +419,21 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
+        String chatType = channelMessage ? "channel" : "dm";
+        String chatKey = channelMessage ? String.valueOf(packet.getChannel()) : fromNodeId;
         if (channelMessage) {
             MessageDbService.getInstance().saveReaction(
-                    reaction, "channel", String.valueOf(packet.getChannel()), ownerNodeId);
+                    reaction, chatType, chatKey, ownerNodeId);
         } else {
-            MessageDbService.getInstance().saveReaction(reaction, "dm", fromNodeId, ownerNodeId);
+            MessageDbService.getInstance().saveReaction(reaction, chatType, chatKey, ownerNodeId);
         }
 
         deviceState.fireMessageChange(MessageChangeEvent.reactionChanged(
-                channelMessage ? "channel" : "dm",
-                channelMessage ? String.valueOf(packet.getChannel()) : fromNodeId,
+                chatType,
+                chatKey,
                 ownerNodeId,
                 data.getReplyId()));
+        RemoteRpcHostService.getInstance().publishChatChanged(chatType, chatKey, data.getReplyId());
         deviceState.fireMessageListeners();
     }
 
@@ -561,6 +566,10 @@ public class MessageListenerService implements FromRadioListener {
                 reactionScope.chatKey(),
                 reactionScope.ownerNodeId(),
                 reactionScope.targetPacketId()));
+        RemoteRpcHostService.getInstance().publishChatChanged(
+                reactionScope.chatType(),
+                reactionScope.chatKey(),
+                reactionScope.targetPacketId());
     }
 
     private static String chatType(MeshMessage message) {

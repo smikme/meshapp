@@ -48,6 +48,32 @@ public final class ChatItem {
     }
 
     /**
+     * Creates a chat item from a remote RPC snapshot.
+     */
+    public static ChatItem remote(ChatType type,
+                                  String displayName,
+                                  String avatarText,
+                                  String avatarColor,
+                                  String lastMessageText,
+                                  long lastMessageTime,
+                                  int unreadCount,
+                                  int channelIndex,
+                                  String peerNodeId,
+                                  boolean muted) {
+        return new ChatItem(
+                type,
+                UnicodeTextUtils.sanitize(displayName),
+                UnicodeTextUtils.sanitize(avatarText),
+                avatarColor,
+                truncate(lastMessageText),
+                lastMessageTime,
+                Math.max(0, unreadCount),
+                channelIndex,
+                peerNodeId,
+                muted);
+    }
+
+    /**
      * Creates a channel chat item using the last message from an in-memory list.
      *
      * @param channel channel containing name and index

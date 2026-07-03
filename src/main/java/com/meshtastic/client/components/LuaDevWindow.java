@@ -11,12 +11,12 @@ import com.meshtastic.client.lua.LuaDebugSnapshot;
 import com.meshtastic.client.lua.LuaDebugVariable;
 import com.meshtastic.client.lua.LuaCompletionEngine;
 import com.meshtastic.client.lua.LuaEditorIndentation;
-import com.meshtastic.client.lua.LuaExtensionManager;
 import com.meshtastic.client.lua.LuaFunctionIndex;
 import com.meshtastic.client.lua.LuaScript;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
 import com.meshtastic.client.lua.LuaScriptEvent;
 import com.meshtastic.client.lua.LuaScriptRuntimeService;
-import com.meshtastic.client.lua.LuaScriptService;
 import com.meshtastic.client.platform.NativeMacOsWindowControl;
 import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
@@ -146,8 +146,8 @@ public final class LuaDevWindow {
 
     private static LuaDevWindow instance;
 
-    private final LuaScriptService scriptService = LuaScriptService.getInstance();
-    private final LuaScriptRuntimeService runtimeService = LuaScriptRuntimeService.getInstance();
+    private final LuaScriptDataSource scriptSource = LuaScriptDataSources.forCurrentConnection();
+    private final LuaScriptRuntimeService syntaxRuntimeService = LuaScriptRuntimeService.getInstance();
     private final LuaCompletionEngine completionEngine = new LuaCompletionEngine();
     private final ObservableList<KvRow> kvRows = FXCollections.observableArrayList();
     private final ObservableList<DebugVarRow> debugRows = FXCollections.observableArrayList();
@@ -788,6 +788,7 @@ public final class LuaDevWindow {
                 stage.hide();
             }
         } finally {
+            scriptSource.close();
             nativeEffectsApplied = false;
             instance = null;
         }
@@ -2275,10 +2276,10 @@ public final class LuaDevWindow {
             saveCurrentScriptSafely();
         }
         LuaScript script = scriptId > 0
-                ? scriptService.findScript(scriptId).orElse(null)
-                : scriptService.listScripts().stream().findFirst().orElse(null);
+                ? scriptSource.findScript(scriptId).orElse(null)
+                : scriptSource.listScripts().stream().findFirst().orElse(null);
         if (script == null) {
-            script = scriptService.createScript();
+            script = scriptSource.createScript();
         }
         if (currentScript == null || currentScript.getId() != script.getId()) {
             loadScript(script);
@@ -2301,7 +2302,7 @@ public final class LuaDevWindow {
         refreshKvRows();
         recreateLineGraphics();
         updateButtons();
-        setStatus(runtimeService.isRunning(script.getId())
+        setStatus(scriptSource.isRunning(script.getId())
                 ? I18n.t("meshIde.dev.status.scriptRunning")
                 : I18n.t("meshIde.dev.status.ready"));
     }
@@ -2311,7 +2312,7 @@ public final class LuaDevWindow {
             return false;
         }
         try {
-            LuaScript saved = scriptService.saveScript(
+            LuaScript saved = scriptSource.saveScript(
                     currentScript.getId(),
                     currentScript.getName(),
                     codeArea.getText(),
@@ -2336,7 +2337,7 @@ public final class LuaDevWindow {
             return;
         }
         saveCurrentScriptSafely();
-        String error = runtimeService.checkSyntax(codeArea.getText(), currentScript.getName());
+        String error = syntaxRuntimeService.checkSyntax(codeArea.getText(), currentScript.getName());
         if (error == null) {
             setStatus(I18n.t("meshIde.dev.status.syntaxOk"));
             appendConsole(I18n.t("meshIde.dev.status.syntaxOk"));
@@ -2369,11 +2370,7 @@ public final class LuaDevWindow {
         consoleArea.clear();
         clearDebugState();
         appendConsole(I18n.t("meshIde.dev.status.run", currentScript.getName()));
-        if (currentScript.getBotType() == LuaScript.BotType.EXTENSION) {
-            LuaExtensionManager.getInstance().runExtension(currentScript.getId(), this::handleRuntimeEvent);
-        } else {
-            runtimeService.runScript(currentScript, this::handleRuntimeEvent);
-        }
+        scriptSource.runScript(currentScript, this::handleRuntimeEvent);
         updateButtons();
     }
 
@@ -2385,14 +2382,7 @@ public final class LuaDevWindow {
         consoleArea.clear();
         clearDebugState();
         appendConsole(I18n.t("meshIde.dev.status.debug", currentScript.getName()));
-        if (currentScript.getBotType() == LuaScript.BotType.EXTENSION) {
-            LuaExtensionManager.getInstance().debugExtension(
-                    currentScript.getId(),
-                    new HashSet<>(currentBreakpoints),
-                    this::handleRuntimeEvent);
-        } else {
-            runtimeService.debugScript(currentScript, new HashSet<>(currentBreakpoints), this::handleRuntimeEvent);
-        }
+        scriptSource.debugScript(currentScript, new HashSet<>(currentBreakpoints), this::handleRuntimeEvent);
         updateButtons();
     }
 
@@ -2400,7 +2390,7 @@ public final class LuaDevWindow {
         if (currentScript == null) {
             return;
         }
-        runtimeService.debugContinue(currentScript.getId());
+        scriptSource.debugContinue(currentScript.getId());
         updateButtons();
     }
 
@@ -2408,7 +2398,7 @@ public final class LuaDevWindow {
         if (currentScript == null) {
             return;
         }
-        runtimeService.debugStep(currentScript.getId());
+        scriptSource.debugStep(currentScript.getId());
         updateButtons();
     }
 
@@ -2416,10 +2406,10 @@ public final class LuaDevWindow {
         if (currentScript == null) {
             return;
         }
-        runtimeService.stopScript(currentScript.getId(), this::handleRuntimeEvent);
+        scriptSource.stopScript(currentScript.getId(), this::handleRuntimeEvent);
         clearDebugState();
         updateButtons();
-        scriptService.findScript(currentScript.getId()).ifPresent(script -> currentScript = script);
+        scriptSource.findScript(currentScript.getId()).ifPresent(script -> currentScript = script);
     }
 
     private void handleRuntimeEvent(LuaScriptEvent event) {
@@ -2441,7 +2431,7 @@ public final class LuaDevWindow {
             } else if (event.type() == LuaScriptEvent.Type.STARTED) {
                 setStatus(I18n.t("meshIde.dev.status.scriptRunning"));
             } else if (event.type() == LuaScriptEvent.Type.DEBUG_PAUSED) {
-                runtimeService.debugSnapshot(event.scriptId()).ifPresent(this::showDebugSnapshot);
+                scriptSource.debugSnapshot(event.scriptId()).ifPresent(this::showDebugSnapshot);
                 setStatus(I18n.t("meshIde.dev.status.debugPaused"));
             } else if (event.type() == LuaScriptEvent.Type.DEBUG_RESUMED) {
                 currentDebugLine = -1;
@@ -2461,7 +2451,7 @@ public final class LuaDevWindow {
             kvRows.clear();
             return;
         }
-        kvRows.setAll(scriptService.listKv(currentScript.getId()).entrySet().stream()
+        kvRows.setAll(scriptSource.listKv(currentScript.getId()).entrySet().stream()
                 .map(entry -> new KvRow(entry.getKey(), entry.getValue()))
                 .toList());
     }
@@ -2542,8 +2532,8 @@ public final class LuaDevWindow {
 
     private void updateButtons() {
         boolean hasScript = currentScript != null;
-        boolean running = hasScript && runtimeService.isRunning(currentScript.getId());
-        boolean paused = hasScript && runtimeService.isPaused(currentScript.getId());
+        boolean running = hasScript && scriptSource.isRunning(currentScript.getId());
+        boolean paused = hasScript && scriptSource.isPaused(currentScript.getId());
         kvButton.setDisable(!hasScript);
         if (kvRefreshButton != null) {
             kvRefreshButton.setDisable(!hasScript);

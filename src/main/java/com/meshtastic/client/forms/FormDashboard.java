@@ -1,15 +1,22 @@
 package com.meshtastic.client.forms;
 
+import com.google.gson.JsonElement;
 import com.meshtastic.client.components.TelemetryChartPanel;
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
+import com.meshtastic.client.protocol.ProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.protocol.rpc.RemoteTelemetryJson;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.system.Form;
 import com.meshtastic.client.utils.BatteryLevelEstimator;
+import com.meshtastic.client.utils.RxQualityCalculator;
 import com.meshtastic.client.utils.SystemForm;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -29,6 +36,7 @@ import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -50,6 +58,7 @@ public class FormDashboard extends Form {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yy HH:mm");
     private static final int PAGE_SIZE = 100;
+    private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
 
     private TelemetryChartPanel chartPanel;
     private Label logCountLabel;
@@ -63,6 +72,8 @@ public class FormDashboard extends Form {
     private int loadedCount;
 
     private DeviceState state;
+    private RemoteRpcState remoteRpcState;
+    private String remoteNodeId = "";
     private boolean formVisible;
 
     private final ChangeListener<Number> logTableScrollListener = (obs, oldValue, newValue) -> {
@@ -88,6 +99,11 @@ public class FormDashboard extends Form {
         // --- Telemetry chart, using the shared component ---
         chartPanel = new TelemetryChartPanel();
         chartPanel.setOnDataRefreshed(this::onChartDataRefreshed);
+        chartPanel.setOnPeriodChanged(() -> {
+            if (formVisible && remoteRpcState != null) {
+                refreshRemote();
+            }
+        });
         VBox.setVgrow(chartPanel, Priority.ALWAYS);
 
         VBox chartTab = new VBox(chartPanel);
@@ -136,6 +152,8 @@ public class FormDashboard extends Form {
     public void formClose() {
         formVisible = false;
         state = null;
+        remoteRpcState = null;
+        remoteNodeId = "";
         chartPanel.unbind();
         clearLogData();
     }
@@ -152,17 +170,34 @@ public class FormDashboard extends Form {
     private void rebindState() {
         var mgr = ConnectionManager.getInstance();
         ConnectionEntry entry = mgr.getSelectedConnectionEntry();
-        DeviceState newState = entry != null && entry.isConnected()
-                ? mgr.getDeviceState(entry.getId())
-                : null;
+        DeviceState newState = null;
+        RemoteRpcState newRemoteRpcState = null;
+        if (entry != null && entry.isConnected()) {
+            ProtocolRuntime<?> runtime = mgr.getProtocolRuntime(entry.getId());
+            if (runtime != null && runtime.getState() instanceof RemoteRpcState remoteState) {
+                newRemoteRpcState = remoteState;
+            } else {
+                newState = mgr.getDeviceState(entry.getId());
+            }
+        }
 
         this.state = newState;
+        this.remoteRpcState = newRemoteRpcState;
+        if (newRemoteRpcState == null) {
+            this.remoteNodeId = "";
+        }
         refresh();
     }
 
     // ==================== Data Refresh ====================
 
     private void refresh() {
+        if (remoteRpcState != null) {
+            chartPanel.unbind();
+            refreshRemote();
+            return;
+        }
+
         // No connection: do not show stale data.
         if (state == null || state.getMyNodeNum() == 0) {
             chartPanel.unbind();
@@ -174,6 +209,39 @@ public class FormDashboard extends Form {
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
         String myNodeId = myNode != null ? myNode.getNodeId() : String.format("!%08x", state.getMyNodeNum());
         chartPanel.bind(state, myNodeId);
+    }
+
+    private void refreshRemote() {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState == null) {
+            return;
+        }
+        long now = System.currentTimeMillis() / 1000;
+        long selectedPeriod = chartPanel.getSelectedPeriodSeconds();
+        long sinceEpoch = selectedPeriod > 0 ? now - selectedPeriod : 0;
+        long maxFutureTs = now + 300;
+        rpcState.client()
+                .call("telemetry.dashboard",
+                        RemoteTelemetryJson.dashboardParams(remoteNodeId, sinceEpoch, maxFutureTs),
+                        REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> Platform.runLater(() -> {
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        clearLogData();
+                        return;
+                    }
+                    applyRemoteTelemetrySnapshot(result);
+                }));
+    }
+
+    private void applyRemoteTelemetrySnapshot(JsonElement result) {
+        remoteNodeId = RemoteTelemetryJson.nodeId(result);
+        List<TelemetryEntry> entries = RemoteTelemetryJson.parseEntries(result);
+        List<TelemetryEntry> qualityEntries = RemoteTelemetryJson.parseQualityEntries(result);
+        chartPanel.showSnapshot(entries, qualityEntries);
     }
 
     private void clearLogData() {
@@ -395,10 +463,14 @@ public class FormDashboard extends Form {
             this.airUtil = String.format("%.1f%%", e.getAirUtilTx());
 
             if (e.getNumPacketsRx() > 0) {
-                double total = e.getNumPacketsRx();
-                this.goodRx = String.format("%.1f%%", (total - e.getNumPacketsRxBad() - e.getNumRxDupe()) / total * 100.0);
-                this.badRx = String.format("%.1f%%", e.getNumPacketsRxBad() / total * 100.0);
-                this.dupeRx = String.format("%.1f%%", e.getNumRxDupe() / total * 100.0);
+                RxQualityCalculator.Percentages percentages = RxQualityCalculator.percentages(
+                        e.getNumPacketsRx(),
+                        e.getNumPacketsRxBad(),
+                        e.getNumRxDupe()
+                );
+                this.goodRx = String.format("%.1f%%", percentages.good());
+                this.badRx = String.format("%.1f%%", percentages.bad());
+                this.dupeRx = String.format("%.1f%%", percentages.duplicate());
             } else {
                 this.goodRx = "—";
                 this.badRx = "—";

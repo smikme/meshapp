@@ -1,5 +1,7 @@
 package com.meshtastic.client.forms;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.meshtastic.client.components.chat.ChannelPropertiesDialog;
 import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.CreateChannelDialog;
@@ -9,11 +11,14 @@ import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteChatJson;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.MessageListenerService;
@@ -23,9 +28,16 @@ import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.Separator;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -55,11 +67,12 @@ abstract class FormChatData extends FormChatRequests {
     private record ActiveConnection(DeviceState state,
                                     ProtocolHandler handler,
                                     MeshCoreCompanionProtocolRuntime meshCoreRuntime,
+                                    RemoteRpcState remoteRpcState,
                                     String connectionId) {}
 
     protected void updateInputEnabled() {
-        boolean canSend = state != null
-                && (protocolHandler != null || meshCoreCompanionRuntime != null)
+        boolean canSend = (remoteRpcState != null
+                || (state != null && (protocolHandler != null || meshCoreCompanionRuntime != null)))
                 && selectedChat != null;
         chatInputBar.setInputEnabled(canSend);
     }
@@ -73,9 +86,10 @@ abstract class FormChatData extends FormChatRequests {
         var mgr = ConnectionManager.getInstance();
         ActiveConnection activeConnection = findActiveConnection(mgr);
         DeviceState newState = activeConnection.state();
+        RemoteRpcState newRemoteRpcState = activeConnection.remoteRpcState();
         String newConnectionId = activeConnection.connectionId();
         boolean connectionChanged = !Objects.equals(newConnectionId, this.boundConnectionId);
-        boolean stateChanged = newState != this.state || connectionChanged;
+        boolean stateChanged = newState != this.state || newRemoteRpcState != this.remoteRpcState || connectionChanged;
 
         if (!stateChanged) {
             refreshReadCounts();
@@ -88,10 +102,12 @@ abstract class FormChatData extends FormChatRequests {
             saveCurrentChatScrollState();
             rememberSelectedChatForBoundConnection();
         }
+        closeLuaScriptDataSource();
         unbindPreviousState();
         this.state = newState;
         this.protocolHandler = activeConnection.handler();
         this.meshCoreCompanionRuntime = activeConnection.meshCoreRuntime();
+        this.remoteRpcState = newRemoteRpcState;
         this.boundConnectionId = newConnectionId;
         if (connectionChanged) {
             selectedChat = null;
@@ -123,15 +139,25 @@ abstract class FormChatData extends FormChatRequests {
                     runtime instanceof MeshCoreCompanionProtocolRuntime companionRuntime
                             ? companionRuntime
                             : null;
-            return new ActiveConnection(candidateState, mgr.getProtocolHandler(entry.getId()), meshRuntime, entry.getId());
+            RemoteRpcState rpcState = runtime != null && runtime.getState() instanceof RemoteRpcState remoteState
+                    ? remoteState
+                    : null;
+            return new ActiveConnection(candidateState, mgr.getProtocolHandler(entry.getId()), meshRuntime, rpcState, entry.getId());
         }
-        return new ActiveConnection(null, null, null, null);
+        return new ActiveConnection(null, null, null, null, null);
     }
 
     private void unbindPreviousState() {
         if (state != null) {
             state.removeMessageChangeListener(messageChangeListener);
         }
+        if (remoteRpcState != null && remoteChatEventListener != null) {
+            remoteRpcState.client().removeEventListener(remoteChatEventListener);
+            remoteChatEventListener = null;
+        }
+        remoteNodeFavoriteFlags.clear();
+        remoteNodeIgnoredFlags.clear();
+        pendingRemoteReadKeys.clear();
     }
 
     private void bindStateDependentComponents(DeviceState newState) {
@@ -144,6 +170,10 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     private void refreshReadCounts() {
+        if (remoteRpcState != null) {
+            lastReadCounts.clear();
+            return;
+        }
         lastReadCounts.clear();
         lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
     }
@@ -163,6 +193,46 @@ abstract class FormChatData extends FormChatRequests {
         if (state != null) {
             state.addMessageChangeListener(messageChangeListener);
         }
+        if (remoteRpcState != null) {
+            remoteChatEventListener = (event, payload) -> {
+                if ("message.incoming".equals(event)) {
+                    scheduleRemoteMessageRefresh(payload, MessageChangeEvent.Kind.NEW_MESSAGE);
+                } else if ("message.status".equals(event)) {
+                    scheduleRemoteMessageRefresh(payload, MessageChangeEvent.Kind.STATUS_CHANGED);
+                } else if ("message.changed".equals(event)) {
+                    scheduleRemoteMessageRefresh(payload, MessageChangeEvent.Kind.METADATA_CHANGED);
+                }
+            };
+            remoteRpcState.client().addEventListener(remoteChatEventListener);
+        }
+    }
+
+    private void scheduleRemoteMessageRefresh(JsonElement payload, MessageChangeEvent.Kind kind) {
+        JsonObject object = payload != null && payload.isJsonObject()
+                ? payload.getAsJsonObject()
+                : new JsonObject();
+        MeshMessage message = RemoteChatJson.parseResultMessage(object);
+        String chatType = stringField(object, "chatType");
+        String chatKey = stringField(object, "chatKey");
+        if (message == null || chatType.isBlank() || chatKey.isBlank()) {
+            scheduleMessageChangeRefresh(MessageChangeEvent.unknown());
+            return;
+        }
+        scheduleMessageChangeRefresh(switch (kind) {
+            case NEW_MESSAGE -> MessageChangeEvent.newMessage(chatType, chatKey, currentOwnerNodeId(), message);
+            case STATUS_CHANGED -> MessageChangeEvent.statusChanged(chatType, chatKey, currentOwnerNodeId(), message);
+            case METADATA_CHANGED -> MessageChangeEvent.metadataChanged(chatType, chatKey, currentOwnerNodeId(), message);
+            default -> MessageChangeEvent.unknown();
+        });
+    }
+
+    private static String stringField(JsonObject object, String field) {
+        JsonElement element = object != null ? object.get(field) : null;
+        if (element == null || element.isJsonNull() || !element.isJsonPrimitive()) {
+            return "";
+        }
+        String value = element.getAsString();
+        return value == null ? "" : value.trim();
     }
 
     protected void reopenSelectedChatIfPossible() {
@@ -170,14 +240,14 @@ abstract class FormChatData extends FormChatRequests {
             return;
         }
 
-        if (state == null) {
+        if (state == null && remoteRpcState == null) {
             clearLoadedMessageState();
             detailPane.getChildren().clear();
             detailPane.getChildren().add(placeholderBox);
             return;
         }
 
-        if (selectedChat == null) {
+        if (selectedChat == null && selectedChatForBoundConnection() == null) {
             clearLoadedMessageState();
             detailPane.getChildren().clear();
             detailPane.getChildren().add(placeholderBox);
@@ -185,13 +255,18 @@ abstract class FormChatData extends FormChatRequests {
             return;
         }
 
+        ChatSelection savedSelection = selectedChatForBoundConnection();
+        ChatItem currentSelection = selectedChat;
         ChatItem matched = chatListView.getItems().stream()
-                .filter(item -> chatItemMatches(item, selectedChat))
+                .filter(item -> currentSelection != null
+                        ? chatItemMatches(item, currentSelection)
+                        : chatItemMatchesSelection(item, savedSelection))
                 .findFirst()
                 .orElse(null);
 
         if (matched == null) {
             closeChat();
+            clearSelectedChatForBoundConnection();
             return;
         }
 
@@ -206,6 +281,10 @@ abstract class FormChatData extends FormChatRequests {
 
     protected void reloadChatList() {
         if (state == null) {
+            if (remoteRpcState != null) {
+                reloadRemoteChatList();
+                return;
+            }
             chatItems.clear();
             protocolHandler = null;
             meshCoreCompanionRuntime = null;
@@ -219,7 +298,29 @@ abstract class FormChatData extends FormChatRequests {
         items.addAll(loadDirectChatItems(db, ownerId));
 
         applyChatItemsPreservingSelection(items);
-        DrawerManager.setChatUnreadDot(chatItems.stream().anyMatch(chat -> chat.getUnreadCount() > 0));
+        clearChatUnreadDotIfFormVisible();
+    }
+
+    private void reloadRemoteChatList() {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState == null) {
+            chatItems.clear();
+            return;
+        }
+        rpcState.client()
+                .call("chat.list", new JsonObject(), REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> javafx.application.Platform.runLater(() -> {
+                    if (error != null || rpcState != remoteRpcState) {
+                        if (error != null) {
+                            Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        }
+                        return;
+                    }
+                    List<ChatItem> items = RemoteChatJson.parseChatItems(result);
+                    applyChatItemsPreservingSelection(items);
+                    clearChatUnreadDotIfFormVisible();
+                    reopenVisibleSelectedChatIfNeeded();
+                }));
     }
 
     private List<ChatItem> loadChannelChatItems(MessageDbService db, String ownerId) {
@@ -244,6 +345,14 @@ abstract class FormChatData extends FormChatRequests {
         Map<String, MeshMessage> lastMessages = db.getLastMessagePerChat("dm", ownerId);
         Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers(ownerId));
         dmPeers.addAll(state.getAllDirectMessages().keySet());
+        ChatSelection savedSelection = selectedChatForBoundConnection();
+        if (savedSelection != null
+                && savedSelection.type() == ChatItem.ChatType.DIRECT_MESSAGE
+                && savedSelection.peerNodeId() != null
+                && !savedSelection.peerNodeId().isBlank()) {
+            dmPeers.add(savedSelection.peerNodeId());
+            db.ensureChatThread("dm", savedSelection.peerNodeId(), ownerId);
+        }
 
         List<ChatItem> items = new ArrayList<>();
         for (String peerNodeId : dmPeers) {
@@ -292,6 +401,7 @@ abstract class FormChatData extends FormChatRequests {
     private void clearUnavailableChatSelection() {
         if (selectedChat != null) {
             closeChat();
+            clearSelectedChatForBoundConnection();
         } else {
             clearSelectedChatForBoundConnection();
             clearLoadedMessageState();
@@ -349,15 +459,120 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     /**
+     * Confirms and clears the local message history for a channel or DM.
+     */
+    protected void confirmClearChatHistory(ChatItem item) {
+        if (item == null) {
+            return;
+        }
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
+            return;
+        }
+        ModalPane pane = ModalPane.getInstance();
+        if (pane == null) {
+            return;
+        }
+        pane.show(buildClearHistoryConfirmationPanel(item, () -> clearChatHistory(item)));
+    }
+
+    private VBox buildClearHistoryConfirmationPanel(ChatItem item, Runnable onConfirm) {
+        VBox panel = new VBox(8);
+        panel.setPadding(new Insets(20, 30, 20, 30));
+        panel.setPrefWidth(380);
+        panel.setMaxWidth(380);
+        panel.setMaxHeight(Double.MAX_VALUE);
+        panel.getStyleClass().add("modal-side-panel");
+
+        String displayName = UnicodeTextUtils.sanitizeForJavaFxDisplay(item.getDisplayName());
+        Label titleLabel = new Label(I18n.t("chat.confirm.clearHistory.title", displayName));
+        titleLabel.getStyleClass().add("dialog-title");
+
+        Label messageLabel = new Label(I18n.t("chat.confirm.clearHistory.message"));
+        messageLabel.setWrapText(true);
+
+        CheckBox acknowledgeCheckBox = new CheckBox(I18n.t("chat.confirm.clearHistory.acknowledge"));
+        acknowledgeCheckBox.setWrapText(true);
+
+        Button cancelButton = new Button(I18n.t("common.cancel"));
+        cancelButton.setOnAction(e -> Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide));
+
+        Button confirmButton = new Button(I18n.t("chat.confirm.clearHistory.action"));
+        confirmButton.getStyleClass().add("accent");
+        confirmButton.disableProperty().bind(acknowledgeCheckBox.selectedProperty().not());
+        confirmButton.setOnAction(e -> {
+            Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide);
+            onConfirm.run();
+        });
+
+        HBox buttonRow = new HBox(10, cancelButton, confirmButton);
+        buttonRow.setAlignment(Pos.CENTER_RIGHT);
+        buttonRow.setPadding(new Insets(10, 0, 0, 0));
+
+        panel.getChildren().addAll(
+                titleLabel,
+                new Separator(),
+                messageLabel,
+                acknowledgeCheckBox,
+                buttonRow);
+        return panel;
+    }
+
+    private void clearChatHistory(ChatItem item) {
+        if (item == null) {
+            return;
+        }
+
+        MessageDbService db = MessageDbService.getInstance();
+        ChatDbKey key = ChatDbKey.from(item);
+        String ownerId = currentOwnerNodeId();
+
+        savedChatScrollStates.remove(chatScrollCacheKey(item));
+        AppPreferences.removeChatScrollState(ownerId, key.scrollStateKey());
+
+        db.deleteChat(key.dbType(), key.dbKey(), ownerId);
+        lastReadCounts.remove(key.readKey());
+        preserveChatListItemAfterHistoryClear(db, key, ownerId, item);
+
+        if (isChatDetailOpenFor(item)) {
+            closeMessageSearch(false);
+            openingChatUnreadCount = 0;
+            loadInitialMessages(false);
+            refreshMessageSearchResults(false);
+        }
+
+        reloadChatList();
+    }
+
+    private void preserveChatListItemAfterHistoryClear(MessageDbService db,
+                                                       ChatDbKey key,
+                                                       String ownerId,
+                                                       ChatItem item) {
+        if (item.getType() != ChatItem.ChatType.DIRECT_MESSAGE) {
+            return;
+        }
+        db.ensureChatThread(key.dbType(), key.dbKey(), ownerId);
+        if (state != null) {
+            state.ensureDirectMessageThread(item.getPeerNodeId());
+        }
+    }
+
+    /**
      * Deletes a channel on the device or removes a direct chat locally.
      */
     protected void deleteChat(ChatItem item) {
         if (item == null) {
             return;
         }
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
+            return;
+        }
         MessageDbService db = MessageDbService.getInstance();
         ChatDbKey key = ChatDbKey.from(item);
         String chatId = key.scrollStateKey();
+        boolean wasSelected = selectedChat != null && chatItemMatches(selectedChat, item);
+        boolean wasSavedSelection = chatItemMatchesSelection(item, selectedChatForBoundConnection());
         savedChatScrollStates.remove(chatScrollCacheKey(item));
         AppPreferences.removeChatScrollState(currentOwnerNodeId(), chatId);
 
@@ -366,8 +581,11 @@ abstract class FormChatData extends FormChatRequests {
             case DIRECT_MESSAGE -> deleteDirectChat(db, item, key);
         }
 
-        if (selectedChat != null && chatItemMatches(selectedChat, item)) {
+        if (wasSelected) {
             closeChat();
+        }
+        if (wasSelected || wasSavedSelection) {
+            clearSelectedChatForBoundConnection();
         }
 
         reloadChatList();
@@ -393,11 +611,16 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         db.deleteChat(key.dbType(), key.dbKey(), currentOwnerNodeId());
+        db.deleteChatThread(key.dbType(), key.dbKey(), currentOwnerNodeId());
         lastReadCounts.remove(key.readKey());
     }
 
     /** Confirms and deletes one message. */
     protected void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {
+        if (remoteRpcState != null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.remoteManagementUnavailable"));
+            return;
+        }
         String preview = msg.getText();
         preview = UnicodeTextUtils.truncateWithSuffix(preview, 40, "…");
         ModalPane.showConfirm(
@@ -529,6 +752,10 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     protected void markAsRead(ChatItem item) {
+        if (remoteRpcState != null) {
+            markRemoteChatAsRead(item);
+            return;
+        }
         ChatDbKey key = ChatDbKey.from(item);
         MessageDbService db = MessageDbService.getInstance();
         String ownerId = currentOwnerNodeId();
@@ -541,6 +768,43 @@ abstract class FormChatData extends FormChatRequests {
         reloadChatList();
         if (state != null) {
             state.fireMessageListeners();
+        }
+    }
+
+    private void markRemoteChatAsRead(ChatItem item) {
+        RemoteRpcState rpcState = remoteRpcState;
+        if (rpcState == null || item == null) {
+            return;
+        }
+        ChatDbKey key = ChatDbKey.from(item);
+        String requestKey = key.readKey();
+        if (!pendingRemoteReadKeys.add(requestKey)) {
+            return;
+        }
+        JsonObject params = new JsonObject();
+        params.addProperty("chatType", key.dbType());
+        params.addProperty("chatKey", key.dbKey());
+        rpcState.client()
+                .call("chat.markRead", params, REMOTE_RPC_TIMEOUT)
+                .whenComplete((result, error) -> javafx.application.Platform.runLater(() -> {
+                    pendingRemoteReadKeys.remove(requestKey);
+                    if (rpcState != remoteRpcState) {
+                        return;
+                    }
+                    if (error != null) {
+                        Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
+                        return;
+                    }
+                    List<ChatItem> items = RemoteChatJson.parseChatItems(result);
+                    applyChatItemsPreservingSelection(items);
+                    clearChatUnreadDotIfFormVisible();
+                    refreshUnreadTailIndicatorLater();
+                }));
+    }
+
+    private void clearChatUnreadDotIfFormVisible() {
+        if (formVisible) {
+            DrawerManager.setChatUnreadDot(false);
         }
     }
 

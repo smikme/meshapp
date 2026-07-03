@@ -13,7 +13,12 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime;
+import com.meshtastic.client.protocol.rpc.RemoteRpcState;
+import com.meshtastic.client.lua.LuaScriptDataSource;
+import com.meshtastic.client.lua.LuaScriptDataSources;
+import com.meshtastic.client.rpc.RpcEventListener;
 import com.meshtastic.client.system.Form;
+import com.meshtastic.client.utils.AppPreferences;
 
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
@@ -39,8 +44,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -61,6 +68,8 @@ abstract class FormChatBase extends Form {
     protected static final int PAGE_SIZE = 50;
     protected static final int MAX_WINDOW_PAGES = 3;
     protected static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
+    protected static final int MAX_PENDING_MESSAGE_CHANGE_EVENTS = 512;
+    protected static final java.time.Duration REMOTE_RPC_TIMEOUT = java.time.Duration.ofSeconds(15);
     protected static final String WINDOWS_HIT_TEST_BACKGROUND = "-fx-background-color: rgba(0,0,0,0.004);";
 
     // === Left pane: chat list ===
@@ -108,11 +117,18 @@ abstract class FormChatBase extends Form {
     protected DeviceState state;
     protected ProtocolHandler protocolHandler;
     protected MeshCoreCompanionProtocolRuntime meshCoreCompanionRuntime;
+    protected RemoteRpcState remoteRpcState;
     /** Connection id currently bound to the chat form. */
     protected String boundConnectionId;
+    protected LuaScriptDataSource luaScriptDataSource;
+    protected String luaScriptDataSourceKey;
+    protected RpcEventListener remoteChatEventListener;
+    protected final Map<String, Boolean> remoteNodeFavoriteFlags = new ConcurrentHashMap<>();
+    protected final Map<String, Boolean> remoteNodeIgnoredFlags = new ConcurrentHashMap<>();
 
     // Unread tracking: keys such as "ch:INDEX" or "dm:NODEID" map to read-message counts.
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();
+    protected final Set<String> pendingRemoteReadKeys = new LinkedHashSet<>();
     /** Last selected channel or DM for each connection. */
     protected final Map<String, ChatSelection> selectedChatsByConnectionId = new HashMap<>();
 
@@ -177,6 +193,33 @@ abstract class FormChatBase extends Form {
         static ChatSelection from(ChatItem item) {
             return new ChatSelection(item.getType(), item.getChannelIndex(), item.getPeerNodeId());
         }
+
+        static ChatSelection fromPreference(String value) {
+            if (value == null || value.isBlank()) {
+                return null;
+            }
+            String[] parts = value.trim().split(":", 2);
+            if (parts.length != 2 || parts[1].isBlank()) {
+                return null;
+            }
+            if ("channel".equals(parts[0])) {
+                try {
+                    return new ChatSelection(ChatItem.ChatType.CHANNEL, Integer.parseInt(parts[1]), null);
+                } catch (NumberFormatException ignored) {
+                    return null;
+                }
+            }
+            if ("dm".equals(parts[0])) {
+                return new ChatSelection(ChatItem.ChatType.DIRECT_MESSAGE, -1, parts[1]);
+            }
+            return null;
+        }
+
+        String toPreference() {
+            return type == ChatItem.ChatType.CHANNEL
+                    ? "channel:" + channelIndex
+                    : "dm:" + (peerNodeId != null ? peerNodeId : "");
+        }
     }
 
     protected boolean suppressSelectionListener;
@@ -186,6 +229,8 @@ abstract class FormChatBase extends Form {
     protected final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     protected final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
     protected final Queue<MessageChangeEvent> pendingMessageChanges = new ConcurrentLinkedQueue<>();
+    protected final AtomicInteger pendingMessageChangeCount = new AtomicInteger();
+    protected final AtomicBoolean pendingMessageChangesOverflowed = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutDirty = new AtomicBoolean();
 
@@ -208,16 +253,58 @@ abstract class FormChatBase extends Form {
         Platform.runLater(this::flushQueuedMessageRefresh);
     }
 
+    protected LuaScriptDataSource luaScripts() {
+        String key = remoteRpcState != null
+                ? "rpc:" + (boundConnectionId != null ? boundConnectionId : "")
+                : "local";
+        if (luaScriptDataSource == null || !Objects.equals(luaScriptDataSourceKey, key)) {
+            closeLuaScriptDataSource();
+            luaScriptDataSource = LuaScriptDataSources.forCurrentConnection();
+            luaScriptDataSourceKey = key;
+        }
+        return luaScriptDataSource;
+    }
+
+    protected void closeLuaScriptDataSource() {
+        if (luaScriptDataSource != null) {
+            try {
+                luaScriptDataSource.close();
+            } catch (Exception ignored) {
+            }
+        }
+        luaScriptDataSource = null;
+        luaScriptDataSourceKey = null;
+    }
+
     protected void scheduleMessageChangeRefresh(MessageChangeEvent event) {
-        pendingMessageChanges.add(event != null ? event : MessageChangeEvent.unknown());
+        enqueueMessageChangeEvent(event != null ? event : MessageChangeEvent.unknown());
         scheduleMessageRefresh();
+    }
+
+    private void enqueueMessageChangeEvent(MessageChangeEvent event) {
+        if (pendingMessageChangesOverflowed.get()) {
+            return;
+        }
+
+        int queued = pendingMessageChangeCount.incrementAndGet();
+        if (queued <= MAX_PENDING_MESSAGE_CHANGE_EVENTS) {
+            pendingMessageChanges.add(event);
+            return;
+        }
+
+        pendingMessageChangeCount.decrementAndGet();
+        pendingMessageChanges.clear();
+        pendingMessageChangeCount.set(0);
+        pendingMessageChangesOverflowed.set(true);
     }
 
     protected void flushQueuedMessageRefresh() {
         messageRefreshDirty.getAndSet(false);
         List<MessageChangeEvent> events = drainPendingMessageChanges();
         if (events.isEmpty()) {
-            refreshCurrentChat();
+            if (remoteRpcState == null) {
+                refreshCurrentChat();
+            }
         } else {
             processMessageChangeEvents(events);
         }
@@ -232,7 +319,14 @@ abstract class FormChatBase extends Form {
         List<MessageChangeEvent> events = new ArrayList<>();
         MessageChangeEvent event;
         while ((event = pendingMessageChanges.poll()) != null) {
+            pendingMessageChangeCount.updateAndGet(value -> Math.max(0, value - 1));
             events.add(event);
+        }
+        if (pendingMessageChangesOverflowed.getAndSet(false)) {
+            pendingMessageChanges.clear();
+            pendingMessageChangeCount.set(0);
+            events.clear();
+            events.add(MessageChangeEvent.unknown());
         }
         return events;
     }
@@ -250,6 +344,7 @@ abstract class FormChatBase extends Form {
     protected abstract void clearLoadedMessageState();
     protected abstract void showNewChatDialog();
     protected abstract void deleteChat(ChatItem item);
+    protected abstract void confirmClearChatHistory(ChatItem item);
     protected abstract void showChannelProperties(ChatItem item);
     protected abstract void toggleChatMute(ChatItem item);
     protected abstract void loadOlderMessages();
@@ -297,7 +392,9 @@ abstract class FormChatBase extends Form {
      */
     protected void rememberSelectedChatForBoundConnection() {
         if (boundConnectionId != null && selectedChat != null) {
-            selectedChatsByConnectionId.put(boundConnectionId, ChatSelection.from(selectedChat));
+            ChatSelection selection = ChatSelection.from(selectedChat);
+            selectedChatsByConnectionId.put(boundConnectionId, selection);
+            AppPreferences.saveSelectedChat(boundConnectionId, selection.toPreference());
         }
     }
 
@@ -307,6 +404,7 @@ abstract class FormChatBase extends Form {
     protected void clearSelectedChatForBoundConnection() {
         if (boundConnectionId != null) {
             selectedChatsByConnectionId.remove(boundConnectionId);
+            AppPreferences.removeSelectedChat(boundConnectionId);
         }
     }
 
@@ -314,7 +412,18 @@ abstract class FormChatBase extends Form {
      * Returns the saved selected chat for the current connection.
      */
     protected ChatSelection selectedChatForBoundConnection() {
-        return boundConnectionId != null ? selectedChatsByConnectionId.get(boundConnectionId) : null;
+        if (boundConnectionId == null) {
+            return null;
+        }
+        ChatSelection selection = selectedChatsByConnectionId.get(boundConnectionId);
+        if (selection != null) {
+            return selection;
+        }
+        selection = ChatSelection.fromPreference(AppPreferences.loadSelectedChat(boundConnectionId));
+        if (selection != null) {
+            selectedChatsByConnectionId.put(boundConnectionId, selection);
+        }
+        return selection;
     }
 
     /**

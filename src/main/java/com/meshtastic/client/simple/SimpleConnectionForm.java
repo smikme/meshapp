@@ -7,10 +7,13 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.ConnectionType;
 import com.meshtastic.client.model.ProtocolType;
+import com.meshtastic.client.model.RemoteRpcConnectionMode;
 import com.meshtastic.client.model.SerialModemLineMode;
+import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.service.BleDeviceDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService;
 import com.meshtastic.client.service.SerialPortDiscoveryService.DiscoveredPort;
+import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -42,12 +45,18 @@ import java.util.regex.Pattern;
 public class SimpleConnectionForm extends VBox {
 
     private static final String FIELD_ERROR_STYLE_CLASS = "connection-field-error";
+    private static final int DEFAULT_TCP_PORT = 4403;
+    private static final int DEFAULT_REMOTE_RPC_PORT = AppPreferences.DEFAULT_REMOTE_RPC_SERVER_PORT;
+    private static final int DEFAULT_REMOTE_RPC_ROUTER_PORT = ConnectionEntry.CLOUD_RPC_ROUTER_PORT;
     private static final Pattern BLE_MAC_ADDRESS_PATTERN =
             Pattern.compile("(?i)^[0-9a-f]{2}(:[0-9a-f]{2}){5}$");
     private static final Pattern BLE_UUID_PATTERN =
             Pattern.compile("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
 
-    private static final List<ConnectionType> BASE_CONNECTION_TYPES = List.of(ConnectionType.TCP, ConnectionType.SERIAL);
+    private static final List<ConnectionType> BASE_CONNECTION_TYPES = List.of(
+            ConnectionType.TCP,
+            ConnectionType.SERIAL,
+            ConnectionType.REMOTE_RPC);
     private static final List<ProtocolType> STREAM_PROTOCOLS = List.of(
             ProtocolType.MESHTASTIC,
             ProtocolType.MESHCORE_KISS,
@@ -75,6 +84,10 @@ public class SimpleConnectionForm extends VBox {
     private final ValidationField hostValidation;
     private final TextField txtPort;
     private final ValidationField tcpPortValidation;
+    private final VBox remoteRpcFields;
+    private final ComboBox<String> cmbRemoteRpcMode;
+    private final TextField txtRemoteAccessKey;
+    private final ValidationField remoteAccessKeyValidation;
 
     // Serial fields
     private final VBox serialFields;
@@ -94,6 +107,7 @@ public class SimpleConnectionForm extends VBox {
     private Consumer<ConnectionEntry> onSave;
     private String savedPortName;
     private String savedBleDeviceLabel;
+    private ConnectionType lastConnectionType = ConnectionType.TCP;
     private List<DiscoveredPort> lastDiscoveredPorts = List.of();
     private final Consumer<List<DiscoveredPort>> discoveryListener = this::onPortsDiscovered;
     private final Consumer<List<BleDevice>> bleDiscoveryListener = this::onBleDevicesDiscovered;
@@ -139,6 +153,9 @@ public class SimpleConnectionForm extends VBox {
         });
         updateProtocolOptions();
         cmbType.setOnAction(e -> {
+            ConnectionType nextType = selectedConnectionType();
+            applyDefaultPortForTypeChange(lastConnectionType, nextType);
+            lastConnectionType = nextType;
             updateProtocolOptions();
             updateFieldVisibility();
         });
@@ -164,6 +181,27 @@ public class SimpleConnectionForm extends VBox {
                 new Label(I18n.t("connection.form.host")), txtHost, hostValidation.label(),
                 new Label(I18n.t("connection.form.port")), txtPort, tcpPortValidation.label()
         );
+
+        txtRemoteAccessKey = new TextField();
+        txtRemoteAccessKey.setPromptText("mra1_...");
+        remoteAccessKeyValidation = createValidationField(txtRemoteAccessKey);
+        cmbRemoteRpcMode = new ComboBox<>();
+        cmbRemoteRpcMode.getItems().addAll(
+                labelForRemoteRpcMode(RemoteRpcConnectionMode.DIRECT),
+                labelForRemoteRpcMode(RemoteRpcConnectionMode.ROUTER));
+        cmbRemoteRpcMode.setValue(labelForRemoteRpcMode(RemoteRpcConnectionMode.DIRECT));
+        cmbRemoteRpcMode.setMaxWidth(Double.MAX_VALUE);
+        cmbRemoteRpcMode.setOnAction(e -> applyDefaultRemoteRpcPortForMode());
+        remoteRpcFields = new VBox(8);
+        remoteRpcFields.getChildren().addAll(
+                new Label(I18n.t("connection.form.remoteRpcMode")),
+                cmbRemoteRpcMode,
+                new Label(I18n.t("connection.form.remoteAccessKey")),
+                txtRemoteAccessKey,
+                remoteAccessKeyValidation.label()
+        );
+        remoteRpcFields.setVisible(false);
+        remoteRpcFields.setManaged(false);
 
         // --- Serial fields ---
         cmbPort = new ComboBox<>();
@@ -256,6 +294,7 @@ public class SimpleConnectionForm extends VBox {
                 new Label(I18n.t("connection.form.connectionName")), txtName, nameValidation.label(),
                 chkAutoconnect,
                 tcpFields,
+                remoteRpcFields,
                 serialFields,
                 bleFields,
                 buttons
@@ -306,6 +345,7 @@ public class SimpleConnectionForm extends VBox {
             case TCP -> buildTcpConnectionEntry(validation, name);
             case SERIAL -> buildSerialConnectionEntry(validation, name);
             case BLE -> buildBleConnectionEntry(validation, name);
+            case REMOTE_RPC -> buildRemoteRpcConnectionEntry(validation, name);
         };
 
         if (validation.hasErrors()) {
@@ -337,6 +377,41 @@ public class SimpleConnectionForm extends VBox {
         return validation.hasErrors()
                 ? null
                 : configureCommonFields(new ConnectionEntry(name, host, port));
+    }
+
+    /**
+     * Reads and validates direct MeshApp RPC fields.
+     */
+    private ConnectionEntry buildRemoteRpcConnectionEntry(ValidationState validation, String name) {
+        RemoteRpcConnectionMode mode = selectedRemoteRpcMode();
+        boolean routerMode = mode == RemoteRpcConnectionMode.ROUTER;
+        var host = routerMode
+                ? ConnectionEntry.CLOUD_RPC_ROUTER_SERVER
+                : requiredText(
+                        validation,
+                        txtHost,
+                        hostValidation,
+                        "connection.form.validation.remoteHostRequired");
+        var port = routerMode ? ConnectionEntry.CLOUD_RPC_ROUTER_PORT : remoteRpcPort(validation, mode);
+        var accessKey = requiredText(
+                validation,
+                txtRemoteAccessKey,
+                remoteAccessKeyValidation,
+                "connection.form.validation.remoteAccessKeyRequired");
+
+        if (!accessKey.isBlank()) {
+            try {
+                RpcAccessKey.parse(accessKey);
+            } catch (IllegalArgumentException e) {
+                validation.reject(remoteAccessKeyValidation,
+                        I18n.t("connection.form.validation.remoteAccessKeyInvalid"));
+            }
+        }
+        return validation.hasErrors()
+                ? null
+                : configureCommonFields(
+                        ConnectionEntry.remoteRpc(name, host, port, accessKey, mode),
+                        ProtocolType.REMOTE_RPC);
     }
 
     /**
@@ -435,6 +510,7 @@ public class SimpleConnectionForm extends VBox {
         clearOnTextChange(txtName, nameValidation);
         clearOnTextChange(txtHost, hostValidation);
         clearOnTextChange(txtPort, tcpPortValidation);
+        clearOnTextChange(txtRemoteAccessKey, remoteAccessKeyValidation);
         clearOnTextChange(txtBaudRate, baudRateValidation);
         clearOnComboChange(cmbPort, serialPortValidation);
         clearOnComboChange(cmbBleDevice, bleDeviceValidation);
@@ -465,6 +541,7 @@ public class SimpleConnectionForm extends VBox {
                 nameValidation,
                 hostValidation,
                 tcpPortValidation,
+                remoteAccessKeyValidation,
                 serialPortValidation,
                 baudRateValidation,
                 bleDeviceValidation);
@@ -535,6 +612,22 @@ public class SimpleConnectionForm extends VBox {
             validation.reject(validationField, I18n.t(invalidMessageKey));
             return 0;
         }
+    }
+
+    private int remoteRpcPort(ValidationState validation, RemoteRpcConnectionMode mode) {
+        String value = txtPort.getText() == null ? "" : txtPort.getText().trim();
+        if (value.isBlank() && mode == RemoteRpcConnectionMode.ROUTER) {
+            return DEFAULT_REMOTE_RPC_ROUTER_PORT;
+        }
+        return boundedInt(
+                validation,
+                txtPort,
+                tcpPortValidation,
+                "connection.form.validation.remotePortRequired",
+                "connection.form.validation.remotePortInvalid",
+                "connection.form.validation.remotePortRange",
+                1,
+                65_535);
     }
 
     /**
@@ -629,17 +722,36 @@ public class SimpleConnectionForm extends VBox {
         return selectedConnectionType() == ConnectionType.BLE;
     }
 
+    private boolean isRemoteRpcMode() {
+        return selectedConnectionType() == ConnectionType.REMOTE_RPC;
+    }
+
     private void updateFieldVisibility() {
         boolean serial = isSerialMode();
         boolean ble = isBleMode();
+        boolean remoteRpc = isRemoteRpcMode();
         boolean tcp = !serial && !ble;
 
         tcpFields.setVisible(tcp);
         tcpFields.setManaged(tcp);
+        remoteRpcFields.setVisible(remoteRpc);
+        remoteRpcFields.setManaged(remoteRpc);
         serialFields.setVisible(serial);
         serialFields.setManaged(serial);
         bleFields.setVisible(ble);
         bleFields.setManaged(ble);
+
+        cmbProtocol.setDisable(remoteRpc);
+        if (remoteRpc) {
+            cmbProtocol.setValue(labelForProtocol(ProtocolType.REMOTE_RPC));
+        }
+        boolean routerMode = remoteRpc && selectedRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER;
+        txtHost.setDisable(routerMode);
+        txtPort.setDisable(routerMode);
+        if (routerMode) {
+            txtHost.setText(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST);
+            txtPort.setText(Integer.toString(ConnectionEntry.CLOUD_RPC_ROUTER_PORT));
+        }
 
         if (serial) {
             refreshPorts();
@@ -667,7 +779,20 @@ public class SimpleConnectionForm extends VBox {
         switch (entry.getEffectiveType()) {
             case TCP -> {
                 txtHost.setText(valueOrEmpty(entry.getHost()));
-                txtPort.setText(String.valueOf(entry.getPort() > 0 ? entry.getPort() : 4403));
+                txtPort.setText(String.valueOf(entry.getPort() > 0 ? entry.getPort() : DEFAULT_TCP_PORT));
+            }
+            case REMOTE_RPC -> {
+                cmbRemoteRpcMode.setValue(labelForRemoteRpcMode(entry.getEffectiveRemoteRpcMode()));
+                if (entry.getEffectiveRemoteRpcMode() == RemoteRpcConnectionMode.ROUTER) {
+                    txtHost.setText(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST);
+                    txtPort.setText(Integer.toString(ConnectionEntry.CLOUD_RPC_ROUTER_PORT));
+                } else {
+                    txtHost.setText(valueOrEmpty(entry.getHost()));
+                    txtPort.setText(String.valueOf(entry.getPort() > 0
+                            ? entry.getPort()
+                            : defaultRemoteRpcPort(entry.getEffectiveRemoteRpcMode())));
+                }
+                txtRemoteAccessKey.setText(valueOrEmpty(entry.getRemoteAccessKey()));
             }
             case SERIAL -> {
                 savedPortName = entry.getPortName();
@@ -696,12 +821,45 @@ public class SimpleConnectionForm extends VBox {
             cmbType.getItems().add(label);
         }
         cmbType.setValue(label);
+        lastConnectionType = type != null ? type : ConnectionType.TCP;
+    }
+
+    private void applyDefaultPortForTypeChange(ConnectionType previousType, ConnectionType nextType) {
+        if (previousType == nextType || txtPort == null) {
+            return;
+        }
+        String currentPort = txtPort.getText() == null ? "" : txtPort.getText().trim();
+        if (nextType == ConnectionType.REMOTE_RPC && Integer.toString(DEFAULT_TCP_PORT).equals(currentPort)) {
+            txtPort.setText(Integer.toString(DEFAULT_REMOTE_RPC_PORT));
+            return;
+        }
+        if ((nextType == ConnectionType.TCP || nextType == ConnectionType.SERIAL)
+                && Integer.toString(DEFAULT_REMOTE_RPC_PORT).equals(currentPort)) {
+            txtPort.setText(Integer.toString(DEFAULT_TCP_PORT));
+        }
+    }
+
+    private void applyDefaultRemoteRpcPortForMode() {
+        if (txtPort == null || !isRemoteRpcMode()) {
+            return;
+        }
+        String currentPort = txtPort.getText() == null ? "" : txtPort.getText().trim();
+        RemoteRpcConnectionMode mode = selectedRemoteRpcMode();
+        if (mode == RemoteRpcConnectionMode.ROUTER) {
+            txtHost.setText(ConnectionEntry.CLOUD_RPC_ROUTER_DISPLAY_HOST);
+            txtPort.setText(Integer.toString(DEFAULT_REMOTE_RPC_ROUTER_PORT));
+        } else if (mode == RemoteRpcConnectionMode.DIRECT
+                && Integer.toString(DEFAULT_REMOTE_RPC_ROUTER_PORT).equals(currentPort)) {
+            txtPort.setText(Integer.toString(DEFAULT_REMOTE_RPC_PORT));
+        }
     }
 
     private void updateProtocolOptions() {
         ProtocolType previous = selectedProtocolType();
         cmbProtocol.getItems().clear();
-        List<ProtocolType> protocolOptions = isBleMode() ? BLE_PROTOCOLS : STREAM_PROTOCOLS;
+        List<ProtocolType> protocolOptions = isRemoteRpcMode()
+                ? List.of(ProtocolType.REMOTE_RPC)
+                : isBleMode() ? BLE_PROTOCOLS : STREAM_PROTOCOLS;
         cmbProtocol.getItems().addAll(protocolOptions.stream()
                 .map(SimpleConnectionForm::labelForProtocol)
                 .toList());
@@ -709,7 +867,9 @@ public class SimpleConnectionForm extends VBox {
         if (cmbProtocol.getItems().contains(previousLabel)) {
             cmbProtocol.setValue(previousLabel);
         } else {
-            cmbProtocol.setValue(labelForProtocol(ProtocolType.MESHTASTIC));
+            cmbProtocol.setValue(labelForProtocol(isRemoteRpcMode()
+                    ? ProtocolType.REMOTE_RPC
+                    : ProtocolType.MESHTASTIC));
         }
     }
 
@@ -1025,6 +1185,25 @@ public class SimpleConnectionForm extends VBox {
         return ConnectionType.TCP;
     }
 
+    private RemoteRpcConnectionMode selectedRemoteRpcMode() {
+        String value = cmbRemoteRpcMode == null ? null : cmbRemoteRpcMode.getValue();
+        if (value == null || value.isBlank()) {
+            return RemoteRpcConnectionMode.DIRECT;
+        }
+        for (RemoteRpcConnectionMode mode : RemoteRpcConnectionMode.values()) {
+            if (labelForRemoteRpcMode(mode).equals(value)) {
+                return mode;
+            }
+        }
+        return RemoteRpcConnectionMode.DIRECT;
+    }
+
+    private static int defaultRemoteRpcPort(RemoteRpcConnectionMode mode) {
+        return mode == RemoteRpcConnectionMode.ROUTER
+                ? DEFAULT_REMOTE_RPC_ROUTER_PORT
+                : DEFAULT_REMOTE_RPC_PORT;
+    }
+
     private static String labelForConnectionType(ConnectionType type) {
         if (type == null) {
             return I18n.t("connection.type.tcp");
@@ -1033,6 +1212,7 @@ public class SimpleConnectionForm extends VBox {
             case TCP -> I18n.t("connection.type.tcp");
             case SERIAL -> I18n.t("connection.type.serial");
             case BLE -> I18n.t("connection.type.ble");
+            case REMOTE_RPC -> I18n.t("connection.type.remoteRpc");
         };
     }
 
@@ -1044,6 +1224,17 @@ public class SimpleConnectionForm extends VBox {
             case MESHTASTIC -> I18n.t("connection.protocol.meshtastic");
             case MESHCORE_KISS -> I18n.t("connection.protocol.meshcoreKiss");
             case MESHCORE_COMPANION -> I18n.t("connection.protocol.meshcoreCompanion");
+            case REMOTE_RPC -> I18n.t("connection.protocol.remoteRpc");
+        };
+    }
+
+    private static String labelForRemoteRpcMode(RemoteRpcConnectionMode mode) {
+        if (mode == null) {
+            return I18n.t("connection.remoteRpcMode.direct");
+        }
+        return switch (mode) {
+            case DIRECT -> I18n.t("connection.remoteRpcMode.direct");
+            case ROUTER -> I18n.t("connection.remoteRpcMode.router");
         };
     }
 

@@ -27,8 +27,28 @@ public final class EmojiRenderingSupport {
 
     private static final String INSTALLED_KEY = EmojiRenderingSupport.class.getName() + ".installed";
     private static final String LABELED_STATE_KEY = EmojiRenderingSupport.class.getName() + ".labeledState";
+    private static final String DISABLED_KEY = EmojiRenderingSupport.class.getName() + ".disabled";
 
     private EmojiRenderingSupport() {}
+
+    /**
+     * Leaves a labeled control on native JavaFX text rendering even when it contains emoji.
+     */
+    public static void disableFor(Labeled labeled) {
+        if (labeled == null) {
+            return;
+        }
+        labeled.getProperties().put(DISABLED_KEY, Boolean.TRUE);
+        Object storedState = labeled.getProperties().get(LABELED_STATE_KEY);
+        if (storedState instanceof LabeledState state && state.overridden) {
+            state.updating = true;
+            try {
+                restoreOriginalGraphic(labeled, state);
+            } finally {
+                state.updating = false;
+            }
+        }
+    }
 
     public static void install(Scene scene) {
         if (scene == null) {
@@ -64,6 +84,9 @@ public final class EmojiRenderingSupport {
     }
 
     private static void installLabeled(Labeled labeled) {
+        if (isDisabled(labeled)) {
+            return;
+        }
         LabeledState state = new LabeledState();
         labeled.getProperties().put(LABELED_STATE_KEY, state);
 
@@ -86,6 +109,17 @@ public final class EmojiRenderingSupport {
 
     private static void syncLabeled(Labeled labeled, LabeledState state) {
         if (state.updating) {
+            return;
+        }
+        if (isDisabled(labeled)) {
+            if (state.overridden) {
+                state.updating = true;
+                try {
+                    restoreOriginalGraphic(labeled, state);
+                } finally {
+                    state.updating = false;
+                }
+            }
             return;
         }
 
@@ -113,6 +147,10 @@ public final class EmojiRenderingSupport {
             }
         }
         return false;
+    }
+
+    private static boolean isDisabled(Labeled labeled) {
+        return Boolean.TRUE.equals(labeled.getProperties().get(DISABLED_KEY));
     }
 
     private static void applyEmojiGraphic(Labeled labeled, LabeledState state, String text) {

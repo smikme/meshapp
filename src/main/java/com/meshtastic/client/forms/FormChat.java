@@ -36,6 +36,7 @@ public class FormChat extends FormChatData {
         formVisible = true;
         scrollOperationGeneration++;
         rebindState();
+        refreshResponsiveChatLayout();
         if (selectedChat != null) {
             suspendScrollStateSync();
             try {
