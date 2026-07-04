@@ -60,6 +60,7 @@ public final class SessionCrashLogManager {
     static final String FATAL_MARKER_FILE_NAME = "fatal-marker.json";
     static final String SESSION_STATE_FILE_NAME = "session-state.json";
     static final String JFR_DUMP_FILE_NAME = "last.jfr";
+    static final String DISABLED_PROPERTY = "meshapp.sessionLog.disabled";
 
     private static final Object LOCK = new Object();
     private static final Gson GSON = new GsonBuilder()
@@ -144,6 +145,9 @@ public final class SessionCrashLogManager {
 
     public static void append(ILoggingEvent event) {
         synchronized (LOCK) {
+            if (isDisabled()) {
+                return;
+            }
             if (suspendedForTests) {
                 return;
             }
@@ -168,6 +172,10 @@ public final class SessionCrashLogManager {
                 System.err.println("[MeshApp] Failed to append session log: " + e.getMessage());
             }
         }
+    }
+
+    private static boolean isDisabled() {
+        return Boolean.getBoolean(DISABLED_PROPERTY);
     }
 
     public static void markNormalShutdown() {

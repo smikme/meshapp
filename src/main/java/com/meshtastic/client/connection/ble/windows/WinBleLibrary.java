@@ -70,6 +70,9 @@ public interface WinBleLibrary extends Library {
      */
     int meshble_connect(String address, int timeoutMs);
 
+    /** Returns the latest native BLE error detail, or {@code null}. */
+    String meshble_get_last_error();
+
     /** Disconnects from the BLE device. */
     void meshble_disconnect();
 

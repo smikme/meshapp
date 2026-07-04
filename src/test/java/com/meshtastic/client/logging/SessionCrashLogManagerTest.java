@@ -32,11 +32,13 @@ class SessionCrashLogManagerTest {
     @BeforeEach
     void setUp() {
         TestEnvironmentSupport.setUserHome(tempHome);
+        System.clearProperty(SessionCrashLogManager.DISABLED_PROPERTY);
         SessionCrashLogManager.resetForTests();
     }
 
     @AfterEach
     void tearDown() {
+        System.clearProperty(SessionCrashLogManager.DISABLED_PROPERTY);
         SessionCrashLogManager.resetForTests();
     }
 
@@ -117,6 +119,29 @@ class SessionCrashLogManagerTest {
         List<String> lines = Files.readAllLines(SessionCrashLogManager.getActiveLogPath());
         assertEquals(1, lines.size());
         assertTrue(lines.getFirst().endsWith("native error: line one\\nline two"));
+    }
+
+    @Test
+    void disabledSessionLogDoesNotTouchActiveBundleOnAppend() throws Exception {
+        Path activeLog = SessionCrashLogManager.getActiveLogPath();
+        Files.createDirectories(activeLog.getParent());
+        Files.writeString(activeLog, "parent session");
+        System.setProperty(SessionCrashLogManager.DISABLED_PROPERTY, "true");
+
+        LoggerContext context = new LoggerContext();
+        Logger logger = context.getLogger("test");
+        LoggingEvent event = new LoggingEvent(
+                SessionCrashLogManagerTest.class.getName(),
+                logger,
+                Level.INFO,
+                "helper log",
+                null,
+                null
+        );
+
+        SessionCrashLogManager.append(event);
+
+        assertEquals("parent session", Files.readString(activeLog));
     }
 
     @Test

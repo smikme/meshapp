@@ -187,6 +187,7 @@ public class WinBle implements BlePlatform {
 
         // Blocking connect
         int result = lib.meshble_connect(address, BleConstants.CONNECT_TIMEOUT_MS);
+        String lastError = nativeLastError();
 
         switch (result) {
             case 0 -> {
@@ -200,13 +201,36 @@ public class WinBle implements BlePlatform {
                     log.info("BLE notifications активны; polling не запускается");
                 }
             }
-            case -1 -> throw new ConnectionException("BLE таймаут подключения: " + address);
-            case -2 -> throw new ConnectionException("BLE устройство не найдено: " + address);
-            case -3 -> throw new ConnectionException("GATT ошибка при подключении к: " + address);
+            case -1 -> throw new ConnectionException(withNativeDetail(
+                    "BLE таймаут подключения: " + address, lastError));
+            case -2 -> throw new ConnectionException(withNativeDetail(
+                    "BLE устройство не найдено: " + address, lastError));
+            case -3 -> throw new ConnectionException(withNativeDetail(
+                    "GATT ошибка при подключении к: " + address, lastError));
             case -4 -> throw new ConnectionException(
-                    "BLE сопряжение не завершено или отклонено: " + address);
-            default -> throw new ConnectionException("BLE ошибка подключения (code=" + result + "): " + address);
+                    withNativeDetail("BLE сопряжение не завершено или отклонено: " + address, lastError));
+            default -> throw new ConnectionException(withNativeDetail(
+                    "BLE ошибка подключения (code=" + result + "): " + address, lastError));
         }
+    }
+
+    private String nativeLastError() {
+        try {
+            return lib.meshble_get_last_error();
+        } catch (RuntimeException | UnsatisfiedLinkError e) {
+            return null;
+        }
+    }
+
+    private static String withNativeDetail(String message, String detail) {
+        if (detail == null || detail.isBlank()) {
+            return message;
+        }
+        String trimmed = detail.trim();
+        if (message.contains(trimmed)) {
+            return message;
+        }
+        return message + " (" + trimmed + ")";
     }
 
     @Override

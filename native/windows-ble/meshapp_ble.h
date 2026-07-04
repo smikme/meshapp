@@ -78,6 +78,13 @@ MESHBLE_API void meshble_stop_scan(void);
  */
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms);
 
+/**
+ * Return the latest native BLE error detail for diagnostics.
+ * The returned pointer is owned by the library and remains valid until the
+ * calling thread calls this function again.
+ */
+MESHBLE_API const char* meshble_get_last_error(void);
+
 /** Disconnect from the current BLE device. Safe if not connected. */
 MESHBLE_API void meshble_disconnect(void);
 
