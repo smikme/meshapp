@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -52,19 +54,60 @@ class PacketMonitorWindowTest {
 
         assertEquals(null, all.direction());
         assertEquals(null, all.transportMechanism());
+        assertTrue(all.loraOnly());
         assertEquals(PacketLogEntry.Direction.INCOMING, incoming.direction());
         assertEquals(null, incoming.transportMechanism());
+        assertTrue(incoming.loraOnly());
         assertEquals(PacketLogEntry.Direction.OUTGOING, outgoing.direction());
         assertEquals(null, outgoing.transportMechanism());
+        assertTrue(outgoing.loraOnly());
+
+        assertTrue(all.matches(packet(PacketLogEntry.Direction.INCOMING, "TRANSPORT_LORA")));
+        assertTrue(all.matches(packet(PacketLogEntry.Direction.OUTGOING, "MESHCORE_COMPANION")));
+        assertFalse(all.matches(packet(PacketLogEntry.Direction.INCOMING, PacketMonitorService.TRANSPORT_MQTT)));
+        assertFalse(incoming.matches(packet(PacketLogEntry.Direction.OUTGOING, "TRANSPORT_LORA")));
+        assertTrue(outgoing.matches(packet(PacketLogEntry.Direction.OUTGOING, "TRANSPORT_LORA")));
     }
 
     @Test
-    void shouldResolveMqttRouteFilterToTransport() {
-        PacketMonitorWindow.RouteFilterSelection mqtt =
+    void shouldResolveMqttRouteFiltersToTransportAndDirection() {
+        PacketMonitorWindow.RouteFilterSelection all =
+                PacketMonitorWindow.resolveRouteFilterSelection("Все MQTT");
+        PacketMonitorWindow.RouteFilterSelection legacyAll =
                 PacketMonitorWindow.resolveRouteFilterSelection("Все MQTT (входящие/исходящие)");
+        PacketMonitorWindow.RouteFilterSelection incoming =
+                PacketMonitorWindow.resolveRouteFilterSelection("Входящие MQTT");
+        PacketMonitorWindow.RouteFilterSelection outgoing =
+                PacketMonitorWindow.resolveRouteFilterSelection("Исходящие MQTT");
 
-        assertEquals(null, mqtt.direction());
-        assertEquals(PacketMonitorService.TRANSPORT_MQTT, mqtt.transportMechanism());
+        assertEquals(null, all.direction());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, all.transportMechanism());
+        assertFalse(all.loraOnly());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, legacyAll.transportMechanism());
+        assertEquals(PacketLogEntry.Direction.INCOMING, incoming.direction());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, incoming.transportMechanism());
+        assertEquals(PacketLogEntry.Direction.OUTGOING, outgoing.direction());
+        assertEquals(PacketMonitorService.TRANSPORT_MQTT, outgoing.transportMechanism());
+
+        assertTrue(all.matches(packet(PacketLogEntry.Direction.INCOMING, PacketMonitorService.TRANSPORT_MQTT)));
+        assertTrue(all.matches(packet(PacketLogEntry.Direction.OUTGOING, PacketMonitorService.TRANSPORT_MQTT)));
+        assertFalse(all.matches(packet(PacketLogEntry.Direction.INCOMING, "TRANSPORT_LORA")));
+        assertTrue(incoming.matches(packet(PacketLogEntry.Direction.INCOMING, PacketMonitorService.TRANSPORT_MQTT)));
+        assertFalse(incoming.matches(packet(PacketLogEntry.Direction.OUTGOING, PacketMonitorService.TRANSPORT_MQTT)));
+        assertTrue(outgoing.matches(packet(PacketLogEntry.Direction.OUTGOING, PacketMonitorService.TRANSPORT_MQTT)));
+    }
+
+    @Test
+    void shouldBuildSeparateLoraAndMqttRouteOptions() {
+        assertEquals(
+                List.of(
+                        "Все LoRa",
+                        "Входящие",
+                        "Исходящие",
+                        "Все MQTT",
+                        "Входящие MQTT",
+                        "Исходящие MQTT"),
+                PacketMonitorWindow.buildRouteFilterOptions());
     }
 
     @Test
@@ -122,5 +165,18 @@ class PacketMonitorWindowTest {
         assertEquals(0.0, bounds.y());
         assertEquals(1280.0, bounds.width());
         assertEquals(720.0, bounds.height());
+    }
+
+    private static PacketLogEntry packet(PacketLogEntry.Direction direction, String transportMechanism) {
+        return new PacketLogEntry(
+                "!owner",
+                1_700_000_000_000L,
+                direction,
+                "TEXT_MESSAGE_APP",
+                transportMechanism,
+                "!11111111",
+                "!ffffffff",
+                "payload",
+                new byte[]{1});
     }
 }
