@@ -759,6 +759,25 @@ public final class PacketMonitorService {
     }
 
     /**
+     * Returns whether a stored transport belongs to the monitor's LoRa-side
+     * packet group. MeshCore Companion packets are shown with LoRa traffic
+     * because they are radio/companion protocol packets, not MQTT proxy rows.
+     *
+     * @param transportMechanism stored transport mechanism value
+     * @return true for LoRa-family monitor transports
+     */
+    public static boolean isLoraMonitorTransport(String transportMechanism) {
+        return switch (transportMechanism != null ? transportMechanism : "") {
+            case "TRANSPORT_LORA",
+                 "TRANSPORT_LORA_ALT1",
+                 "TRANSPORT_LORA_ALT2",
+                 "TRANSPORT_LORA_ALT3",
+                 "MESHCORE_COMPANION" -> true;
+            default -> false;
+        };
+    }
+
+    /**
      * Releases the service's JDBC resources.
      * Used during application shutdown and when tests reset the singleton.
      */

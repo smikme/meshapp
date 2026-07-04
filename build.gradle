@@ -2007,6 +2007,8 @@ tasks.register('jpackage') {
 			args << '--win-dir-chooser'
 			args << '--win-shortcut'
 			args << '--win-menu'
+			args << '--win-menu-group'
+			args << 'MeshApp'
 			args << '--win-upgrade-uuid'
 			args << 'd5765678-89ab-4def-8123-456789abcdef'
 			def rpcServerLauncherProperties = writeWindowsRpcServerLauncherProperties(

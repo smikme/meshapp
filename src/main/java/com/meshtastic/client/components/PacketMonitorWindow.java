@@ -133,7 +133,31 @@ public final class PacketMonitorWindow {
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
     private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
 
-    static record RouteFilterSelection(PacketLogEntry.Direction direction, String transportMechanism) {}
+    static record RouteFilterSelection(PacketLogEntry.Direction direction,
+                                       String transportMechanism,
+                                       boolean loraOnly) {
+
+        boolean matches(PacketLogEntry entry) {
+            if (entry == null) {
+                return false;
+            }
+            if (direction != null && entry.getDirection() != direction) {
+                return false;
+            }
+            if (loraOnly && !PacketMonitorService.isLoraMonitorTransport(entry.getTransportMechanism())) {
+                return false;
+            }
+            if (transportMechanism == null) {
+                return true;
+            }
+
+            String entryTransportMechanism = entry.getTransportMechanism();
+            if (PacketMonitorService.TRANSPORT_MECHANISM_UNSPECIFIED.equals(transportMechanism)) {
+                return entryTransportMechanism == null || entryTransportMechanism.isBlank();
+            }
+            return transportMechanism.equals(entryTransportMechanism);
+        }
+    }
 
     private static PacketMonitorWindow instance;
 
@@ -1532,20 +1556,8 @@ public final class PacketMonitorWindow {
 
         RouteFilterSelection routeSelection =
                 resolveRouteFilterSelection(routeFilter != null ? routeFilter.getValue() : filterAllRoutes());
-        if (routeSelection.direction() != null && entry.getDirection() != routeSelection.direction()) {
+        if (!routeSelection.matches(entry)) {
             return false;
-        }
-
-        String transportMechanismFilter = routeSelection.transportMechanism();
-        if (transportMechanismFilter != null) {
-            String entryTransportMechanism = entry.getTransportMechanism();
-            if (PacketMonitorService.TRANSPORT_MECHANISM_UNSPECIFIED.equals(transportMechanismFilter)) {
-                if (entryTransportMechanism != null && !entryTransportMechanism.isBlank()) {
-                    return false;
-                }
-            } else if (!transportMechanismFilter.equals(entryTransportMechanism)) {
-                return false;
-            }
         }
 
         String selectedType = getActiveTypeFilterSelection();
@@ -1658,6 +1670,14 @@ public final class PacketMonitorWindow {
         return I18n.t("packetMonitor.filter.route.allMqtt");
     }
 
+    static String filterIncomingMqtt() {
+        return I18n.t("packetMonitor.filter.route.incomingMqtt");
+    }
+
+    static String filterOutgoingMqtt() {
+        return I18n.t("packetMonitor.filter.route.outgoingMqtt");
+    }
+
     static String filterAllTypes() {
         return I18n.t("packetMonitor.filter.type.all");
     }
@@ -1679,9 +1699,20 @@ public final class PacketMonitorWindow {
         return matchesLocalizedOption(
                 value,
                 filterAllMqtt(),
+                "Все MQTT",
                 "Все MQTT (входящие/исходящие)",
-                "All MQTT (incoming/outgoing)"
+                "All MQTT",
+                "All MQTT (incoming/outgoing)",
+                "Alle MQTT (ein-/ausgehend)"
         );
+    }
+
+    private static boolean isIncomingMqttRouteSelection(String value) {
+        return matchesLocalizedOption(value, filterIncomingMqtt(), "Входящие MQTT", "Incoming MQTT");
+    }
+
+    private static boolean isOutgoingMqttRouteSelection(String value) {
+        return matchesLocalizedOption(value, filterOutgoingMqtt(), "Исходящие MQTT", "Outgoing MQTT");
     }
 
     private static boolean isAllTypesSelection(String value) {
@@ -1709,24 +1740,38 @@ public final class PacketMonitorWindow {
                 filterAllRoutes(),
                 filterIncoming(),
                 filterOutgoing(),
-                filterAllMqtt()
+                filterAllMqtt(),
+                filterIncomingMqtt(),
+                filterOutgoingMqtt()
         );
     }
 
     static RouteFilterSelection resolveRouteFilterSelection(String selectedRoute) {
         if (isAllRoutesSelection(selectedRoute)) {
-            return new RouteFilterSelection(null, null);
+            return new RouteFilterSelection(null, null, true);
         }
         if (isIncomingRouteSelection(selectedRoute)) {
-            return new RouteFilterSelection(PacketLogEntry.Direction.INCOMING, null);
+            return new RouteFilterSelection(PacketLogEntry.Direction.INCOMING, null, true);
         }
         if (isOutgoingRouteSelection(selectedRoute)) {
-            return new RouteFilterSelection(PacketLogEntry.Direction.OUTGOING, null);
+            return new RouteFilterSelection(PacketLogEntry.Direction.OUTGOING, null, true);
         }
         if (isAllMqttRouteSelection(selectedRoute)) {
-            return new RouteFilterSelection(null, PacketMonitorService.TRANSPORT_MQTT);
+            return new RouteFilterSelection(null, PacketMonitorService.TRANSPORT_MQTT, false);
         }
-        return new RouteFilterSelection(null, null);
+        if (isIncomingMqttRouteSelection(selectedRoute)) {
+            return new RouteFilterSelection(
+                    PacketLogEntry.Direction.INCOMING,
+                    PacketMonitorService.TRANSPORT_MQTT,
+                    false);
+        }
+        if (isOutgoingMqttRouteSelection(selectedRoute)) {
+            return new RouteFilterSelection(
+                    PacketLogEntry.Direction.OUTGOING,
+                    PacketMonitorService.TRANSPORT_MQTT,
+                    false);
+        }
+        return new RouteFilterSelection(null, null, true);
     }
 
     private String getActiveTypeFilterSelection() {
