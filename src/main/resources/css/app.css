@@ -1173,6 +1173,18 @@
     -fx-opacity: 0.78;
 }
 
+.lua-curl-security-warning-icon {
+    -fx-min-width: 18;
+    -fx-min-height: 18;
+    -fx-pref-width: 18;
+    -fx-pref-height: 18;
+    -fx-alignment: center;
+    -fx-background-color: -color-danger-emphasis;
+    -fx-background-radius: 9;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
 /* Tables */
 .table-view {
     -fx-fixed-cell-size: 28;

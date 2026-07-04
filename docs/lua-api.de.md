@@ -392,7 +392,7 @@ local body = mesh.json.encode({
 
 ## `mesh.curl`
 
-HTTP(S)-Anfragen werden vom eingebauten Java-HTTP-Client ausgeführt. Zugriff auf lokale, private, Link-Local- und Multicast-Adressen ist blockiert. URLs mit Zugangsdaten sind ebenfalls blockiert.
+HTTP(S)-Anfragen werden vom eingebauten Java-HTTP-Client ausgeführt. Standardmäßig ist der Zugriff auf lokale, private, Link-Local- und Multicast-Adressen blockiert, und URLs mit Zugangsdaten sind ebenfalls blockiert. Diese Netzwerksicherheitsbeschränkungen können in den Anwendungseinstellungen deaktiviert werden.
 
 | Funktion | Rückgabe | Zweck |
 |----------|--------|---------|

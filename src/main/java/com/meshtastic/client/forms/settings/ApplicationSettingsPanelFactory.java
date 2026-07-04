@@ -173,6 +173,7 @@ public final class ApplicationSettingsPanelFactory {
             8,
             integrationsHeader,
             createMqttDownlinkFilterSettingRow(),
+            createLuaCurlSecuritySettingRow(),
             checkUpdatesCb,
             jfrDiagnosticsCb,
             diagnosticsNote
@@ -528,6 +529,37 @@ public final class ApplicationSettingsPanelFactory {
         });
 
         return new VBox(6, titleLabel, descriptionLabel, filterBox);
+    }
+
+    private static VBox createLuaCurlSecuritySettingRow() {
+        Label warningIcon = new Label("!");
+        warningIcon.getStyleClass().add("lua-curl-security-warning-icon");
+
+        Label titleLabel = new Label(I18n.t("settings.luaCurlSecurity.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        HBox titleRow = new HBox(8, warningIcon, titleLabel);
+        titleRow.setAlignment(Pos.CENTER_LEFT);
+
+        Label descriptionLabel = new Label(
+            I18n.t("settings.luaCurlSecurity.description")
+        );
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        CheckBox disabledBox = new CheckBox(
+            I18n.t("settings.luaCurlSecurity.disable")
+        );
+        disabledBox.setSelected(
+            AppPreferences.isLuaCurlSecurityRestrictionsDisabled()
+        );
+        disabledBox
+            .selectedProperty()
+            .addListener((obs, old, val) ->
+                AppPreferences.setLuaCurlSecurityRestrictionsDisabled(val)
+            );
+
+        return new VBox(6, titleRow, descriptionLabel, disabledBox);
     }
 
     private static ListCell<I18n.LanguageOption> createLanguageCell() {

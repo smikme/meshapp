@@ -33,6 +33,8 @@ public class AppPreferences {
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
     public static final String KEY_JFR_DIAGNOSTICS = "jfrDiagnostics";
+    public static final String KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED =
+            "luaCurlSecurityRestrictionsDisabled";
     public static final String KEY_LANGUAGE = "language";
     public static final String KEY_MEMORY_LIMIT_MB = "memoryLimitMb";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
@@ -229,6 +231,15 @@ public class AppPreferences {
 
     public static void setJfrDiagnosticsEnabled(boolean value) {
         state().putBoolean(KEY_JFR_DIAGNOSTICS, value);
+    }
+
+    public static boolean isLuaCurlSecurityRestrictionsDisabled() {
+        return state().getBoolean(KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED, false);
+    }
+
+    public static void setLuaCurlSecurityRestrictionsDisabled(boolean value) {
+        state().putBoolean(KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED, value);
+        flushState();
     }
 
     public static boolean isRemoteRpcServerEnabled() {
