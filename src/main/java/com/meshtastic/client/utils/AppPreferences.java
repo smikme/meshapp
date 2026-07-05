@@ -16,6 +16,7 @@ public class AppPreferences {
     private AppPreferences() {} // utility class
 
     public static final String PREFERENCES_ROOT_PATH = "/meshapp";
+    public static final String PROP_PREFERENCES_ROOT_PATH = "meshapp.preferencesRootPath";
     public static final String KEY_DARK_MODE = "darkMode";
     public static final String KEY_RECENT_SEARCH = "recentSearch";
     public static final String KEY_RECENT_SEARCH_FAVORITE = "recentSearchFavorite";
@@ -121,7 +122,16 @@ public class AppPreferences {
     }
 
     public static void init() {
-        state = Preferences.userRoot().node(PREFERENCES_ROOT_PATH);
+        state = Preferences.userRoot().node(preferencesRootPath());
+    }
+
+    private static String preferencesRootPath() {
+        String configured = System.getProperty(PROP_PREFERENCES_ROOT_PATH);
+        if (configured == null || configured.isBlank()) {
+            return PREFERENCES_ROOT_PATH;
+        }
+        String trimmed = configured.trim();
+        return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
     }
 
     private static Preferences state() {

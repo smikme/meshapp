@@ -1,10 +1,13 @@
 package com.meshtastic.client;
 
+import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Platform;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -23,6 +26,11 @@ public final class TestEnvironmentSupport {
 
     public static void setUserHome(Path userHome) {
         System.setProperty("user.home", userHome.toString());
+        System.setProperty(
+                AppPreferences.PROP_PREFERENCES_ROOT_PATH,
+                testPreferencesRoot(userHome)
+        );
+        resetAppPreferencesState();
     }
 
     public static void ensureJavaFxStarted() {
@@ -164,9 +172,24 @@ public final class TestEnvironmentSupport {
             }
             writeStaticField(bleDiscoveryService, "instance", null);
 
+            resetAppPreferencesState();
             resetDiagnostics();
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException("Failed to reset test singletons", e);
+        }
+    }
+
+    private static String testPreferencesRoot(Path userHome) {
+        String source = userHome.toAbsolutePath().normalize().toString();
+        UUID id = UUID.nameUUIDFromBytes(source.getBytes(StandardCharsets.UTF_8));
+        return AppPreferences.PREFERENCES_ROOT_PATH + "-test/" + id;
+    }
+
+    private static void resetAppPreferencesState() {
+        try {
+            writeStaticField(AppPreferences.class, "state", null);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException("Failed to reset AppPreferences state", e);
         }
     }
 
