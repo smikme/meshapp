@@ -12,7 +12,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.List;
 import java.util.stream.Stream;
@@ -199,6 +202,35 @@ class SessionCrashLogManagerTest {
 
         try (Stream<Path> files = Files.list(SessionCrashLogManager.getPendingDir())) {
             assertTrue(files.count() <= 3, "pending diagnostics should be capped");
+        }
+    }
+
+    @Test
+    void prepareForLaunchKeepsHeapDumpBundleEvenWhenItExceedsPendingSizeLimit() throws Exception {
+        Path pendingDir = SessionCrashLogManager.getPendingDir();
+        Files.createDirectories(pendingDir);
+        Path bundle = pendingDir.resolve("heap-dump-bundle");
+        Files.createDirectories(bundle);
+        Files.writeString(bundle.resolve(SessionCrashLogManager.ACTIVE_LOG_NAME), "oom session");
+        createSparseFile(
+                bundle.resolve("heapdump_pid123.hprof"),
+                65L * 1024L * 1024L
+        );
+
+        SessionCrashLogManager.prepareForLaunch();
+
+        assertTrue(Files.exists(bundle), "heap dump crash bundle must not be pruned before it can be reported");
+        assertTrue(Files.exists(bundle.resolve("heapdump_pid123.hprof")));
+    }
+
+    private static void createSparseFile(Path file, long sizeBytes) throws Exception {
+        try (SeekableByteChannel channel = Files.newByteChannel(
+                file,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE
+        )) {
+            channel.position(sizeBytes - 1);
+            channel.write(ByteBuffer.wrap(new byte[] {0}));
         }
     }
 }

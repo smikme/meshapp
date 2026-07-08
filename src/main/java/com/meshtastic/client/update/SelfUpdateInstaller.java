@@ -328,6 +328,8 @@ final class SelfUpdateInstaller {
                 "-XX:+IgnoreUnrecognizedVMOptions",
                 "--sun-misc-unsafe-memory-access=allow",
                 "-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log",
+                "-XX:+HeapDumpOnOutOfMemoryError",
+                "-XX:HeapDumpPath=%h/.meshapp/logs/diagnostics/active/heapdump_pid%p.hprof",
                 "--add-opens", "javafx.graphics/javafx.stage=ALL-UNNAMED",
                 "--add-exports", "javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED",
                 "--add-opens", "javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED",

@@ -90,7 +90,9 @@ def baseRuntimeJvmArgs = {
 		'-Xms128m',
 		'-XX:+IgnoreUnrecognizedVMOptions',
 		'--sun-misc-unsafe-memory-access=allow',
-		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log'
+		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log',
+		'-XX:+HeapDumpOnOutOfMemoryError',
+		'-XX:HeapDumpPath=%h/.meshapp/logs/diagnostics/active/heapdump_pid%p.hprof'
 	]
 }
 
