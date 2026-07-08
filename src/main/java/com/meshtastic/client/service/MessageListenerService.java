@@ -613,7 +613,7 @@ public class MessageListenerService implements FromRadioListener {
             }
             deviceState.fireNodeUpdateListeners(fromNum);
             NodeCacheService.getInstance().update(node);
-            maybeSeedDirectContactFromNodeInfo(packet, node);
+            maybePrepareDirectThreadFromNodeInfo(packet, node);
             log.info("Received NODEINFO_APP from !{}: {} (unmessagable={})",
                     Integer.toHexString(fromNum), user.getLongName(),
                     user.hasIsUnmessagable() ? user.getIsUnmessagable() : null);
@@ -702,17 +702,16 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
-    private void maybeSeedDirectContactFromNodeInfo(MeshProtos.MeshPacket packet, NodeData node) {
+    private void maybePrepareDirectThreadFromNodeInfo(MeshProtos.MeshPacket packet, NodeData node) {
         if (protocolHandler == null || node == null) { return; }
         if (packet.getFrom() == 0 || packet.getFrom() == deviceState.getMyNodeNum()) { return; }
         if (packet.getTo() != deviceState.getMyNodeNum()) { return; }
 
-        byte[] publicKey = node.getPublicKey();
-        if (publicKey == null || publicKey.length == 0) { return; }
+        String nodeId = node.getNodeId();
+        if (nodeId == null || nodeId.isBlank()) { return; }
 
-        deviceState.ensureDirectMessageThread(node.getNodeId());
-        MessageService.seedPeerContactForPki(protocolHandler, deviceState, node);
-        log.debug("Prepared local PKI contact for {} after directed NODEINFO_APP", node.getNodeId());
+        deviceState.ensureDirectMessageThread(nodeId);
+        log.debug("Prepared local direct message thread for {} after directed NODEINFO_APP", nodeId);
     }
 
     private void handlePositionResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {

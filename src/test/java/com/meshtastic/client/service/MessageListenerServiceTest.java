@@ -40,7 +40,6 @@ import java.util.function.Consumer;
 
 import org.slf4j.LoggerFactory;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -1049,7 +1048,7 @@ class MessageListenerServiceTest {
     }
 
     @Test
-    void onMeshPacketSeedsLocalContactAndCreatesDirectThreadFromDirectedNodeInfo() throws Exception {
+    void onMeshPacketCreatesDirectThreadFromDirectedNodeInfoWithoutSeedingContact() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = new ProtocolHandler(connection);
         try {
@@ -1073,25 +1072,11 @@ class MessageListenerServiceTest {
             service.onMeshPacket(packet);
 
             assertTrue(state.getAllDirectMessages().containsKey("!cafed00d"));
-            List<byte[]> sentFrames = connection.awaitSentFrames(1);
-            assertEquals(1, sentFrames.size());
-
-            MeshProtos.ToRadio seedContact = parseToRadio(sentFrames.get(0));
-            MeshProtos.MeshPacket seedPacket = seedContact.getPacket();
-            assertEquals(Portnums.PortNum.ADMIN_APP, seedPacket.getDecoded().getPortnum());
-            AdminProtos.AdminMessage adminMessage = AdminProtos.AdminMessage.parseFrom(seedPacket.getDecoded().getPayload());
-            assertEquals(0xCAFED00D, adminMessage.getAddContact().getNodeNum());
-            assertArrayEquals(new byte[] {9, 8, 7, 6},
-                    adminMessage.getAddContact().getUser().getPublicKey().toByteArray());
+            assertFalse(connection.awaitSentFrameCount(1, 200),
+                    "Directed NODEINFO_APP must not send AdminMessage.add_contact");
         } finally {
             handler.shutdown();
         }
-    }
-
-    private static MeshProtos.ToRadio parseToRadio(byte[] frame) throws Exception {
-        int payloadLength = ((frame[2] & 0xFF) << 8) | (frame[3] & 0xFF);
-        byte[] payload = Arrays.copyOfRange(frame, 4, 4 + payloadLength);
-        return MeshProtos.ToRadio.parseFrom(payload);
     }
 
     private static MeshProtos.ToRadio toRadioPacket(int packetId) {
@@ -1167,18 +1152,14 @@ class MessageListenerServiceTest {
             // no-op for tests
         }
 
-        List<byte[]> awaitSentFrames(int expectedCount) throws InterruptedException {
-            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        boolean awaitSentFrameCount(int expectedCount, long timeoutMs) throws InterruptedException {
+            long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
             List<byte[]> snapshot = snapshotSentFrames();
             while (snapshot.size() < expectedCount && System.nanoTime() < deadlineNanos) {
                 Thread.sleep(10);
                 snapshot = snapshotSentFrames();
             }
-            if (snapshot.size() < expectedCount) {
-                throw new AssertionError("Timed out waiting for " + expectedCount
-                        + " outbound frames, got " + snapshot.size());
-            }
-            return snapshot;
+            return snapshot.size() >= expectedCount;
         }
 
         List<byte[]> snapshotSentFrames() {
