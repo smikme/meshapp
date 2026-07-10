@@ -38,6 +38,7 @@ public class BleConnection implements MeshtasticConnection {
     private static final int LOW_PRIORITY_MAX_PAYLOAD_BYTES = 256;
     private static final long WRITE_WARN_THRESHOLD_MS = 2_000;
     private static final long WRITE_ERROR_THRESHOLD_MS = 10_000;
+    private static final AtomicLong PASSKEY_REQUEST_SEQUENCE = new AtomicLong();
 
     private final String address;
     private final BlePlatform platform;
@@ -48,6 +49,7 @@ public class BleConnection implements MeshtasticConnection {
     private final AtomicLong connectionGeneration = new AtomicLong();
     private final AtomicReference<BleWriteDiagnostics> inFlightWrite = new AtomicReference<>();
     private final AtomicBoolean platformDisposed = new AtomicBoolean(false);
+    private final AtomicLong activePasskeyRequestId = new AtomicLong();
 
     private volatile Consumer<byte[]> dataListener;
     private volatile ConnectionListener connectionListener;
@@ -116,6 +118,7 @@ public class BleConnection implements MeshtasticConnection {
                 }
                 case BleState.Disconnected _ -> {
                     connected = false;
+                    dismissPendingPasskey();
                     shutdownSendInfrastructure("BLE disconnected");
                     disposeOwnedPlatformAsync();
                     if (suppressTerminalStateEvents.get()) {
@@ -127,6 +130,7 @@ public class BleConnection implements MeshtasticConnection {
                 }
                 case BleState.Error e -> {
                     connected = false;
+                    dismissPendingPasskey();
                     shutdownSendInfrastructure("BLE error");
                     disposeOwnedPlatformAsync();
                     log.error("BLE error: {}", e.message(), e.cause());
@@ -140,12 +144,20 @@ public class BleConnection implements MeshtasticConnection {
             }
         });
 
-            // Pairing UI is lifted into the common BLE contract: Linux and Windows may request
-            // a passkey from native code, while macOS simply never calls this handler.
+        // Pairing UI is lifted into the common BLE contract: Linux and Windows may request
+        // a passkey from native code, while macOS simply never calls this handler.
         platform.setPasskeyRequestHandler(deviceAddress -> {
+            long requestId = PASSKEY_REQUEST_SEQUENCE.incrementAndGet();
+            long previousRequestId = activePasskeyRequestId.getAndSet(requestId);
+            if (previousRequestId != 0) {
+                AppUi.dismissBlePasskey(previousRequestId);
+            }
             try {
-                AppUi.requestBlePasskey(deviceAddress,
+                AppUi.requestBlePasskey(requestId, deviceAddress,
                         passkey -> {
+                            if (!activePasskeyRequestId.compareAndSet(requestId, 0)) {
+                                return;
+                            }
                             try {
                                 platform.respondPasskey(passkey);
                             } catch (RuntimeException e) {
@@ -153,6 +165,9 @@ public class BleConnection implements MeshtasticConnection {
                             }
                         },
                         () -> {
+                            if (!activePasskeyRequestId.compareAndSet(requestId, 0)) {
+                                return;
+                            }
                             try {
                                 platform.cancelPasskey();
                             } catch (RuntimeException e) {
@@ -161,6 +176,9 @@ public class BleConnection implements MeshtasticConnection {
                         });
             } catch (RuntimeException e) {
                 log.error("Failed to handle BLE passkey request", e);
+                if (!activePasskeyRequestId.compareAndSet(requestId, 0)) {
+                    return;
+                }
                 try {
                     platform.cancelPasskey();
                 } catch (RuntimeException cancelError) {
@@ -169,23 +187,28 @@ public class BleConnection implements MeshtasticConnection {
             }
         });
 
-        BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
-        resolvedProfile = connectedProfile;
-        // Fallback for platforms that complete connect() successfully but do not emit Connected state.
-        if (!terminalStateObserved.get() && connectedEventDelivered.compareAndSet(false, true)) {
-            connected = true;
-            ConnectionListener listener = connectionListener;
-            if (listener != null) {
-                listener.onConnected();
+        try {
+            BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
+            resolvedProfile = connectedProfile;
+            // Fallback for platforms that complete connect() successfully but do not emit Connected state.
+            if (!terminalStateObserved.get() && connectedEventDelivered.compareAndSet(false, true)) {
+                connected = true;
+                ConnectionListener listener = connectionListener;
+                if (listener != null) {
+                    listener.onConnected();
+                }
             }
+            log.info("Connected to BLE device: {} ({})", address, connectedProfile.displayName());
+        } finally {
+            dismissPendingPasskey();
         }
-        log.info("Connected to BLE device: {} ({})", address, connectedProfile.displayName());
     }
 
     @Override
     public void disconnect() {
         connected = false;
         connectionGeneration.incrementAndGet();
+        dismissPendingPasskey();
         shutdownSendInfrastructure("disconnect");
         platform.setFromRadioListener(null);
         platform.setStateListener(null);
@@ -199,6 +222,13 @@ public class BleConnection implements MeshtasticConnection {
         ConnectionListener listener = connectionListener;
         if (listener != null) {
             listener.onDisconnected();
+        }
+    }
+
+    private void dismissPendingPasskey() {
+        long requestId = activePasskeyRequestId.getAndSet(0);
+        if (requestId != 0) {
+            AppUi.dismissBlePasskey(requestId);
         }
     }
 

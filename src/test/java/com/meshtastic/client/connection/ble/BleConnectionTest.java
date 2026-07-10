@@ -2,6 +2,7 @@ package com.meshtastic.client.connection.ble;
 
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
+import com.meshtastic.client.system.AppUi;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -9,12 +10,14 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntConsumer;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -111,6 +114,32 @@ class BleConnectionTest {
 
         BleConnection connection = new BleConnection("device", platform);
         connection.connect();
+    }
+
+    @Test
+    void failedPairingDismissesDialogAndIgnoresStaleActions() {
+        FakePlatform platform = new FakePlatform();
+        platform.connectAction = p -> {
+            p.passkeyRequestHandler.accept("device");
+            throw new ConnectionException("pairing timeout");
+        };
+        RecordingUiBridge ui = new RecordingUiBridge();
+        AppUi.install(ui);
+
+        try {
+            BleConnection connection = new BleConnection("device", platform);
+
+            assertThrows(ConnectionException.class, connection::connect);
+            assertTrue(ui.requestId > 0);
+            assertEquals(ui.requestId, ui.dismissedRequestId);
+
+            ui.onSubmit.accept(123456);
+            ui.onCancel.run();
+            assertEquals(0, platform.respondPasskeyCalls);
+            assertEquals(0, platform.cancelPasskeyCalls);
+        } finally {
+            AppUi.reset();
+        }
     }
 
     @Test
@@ -342,6 +371,8 @@ class BleConnectionTest {
         private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
         private volatile byte[] lastPayload;
         private int disposeCalls;
+        private int respondPasskeyCalls;
+        private int cancelPasskeyCalls;
 
         @Override
         public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -386,6 +417,16 @@ class BleConnectionTest {
         }
 
         @Override
+        public void respondPasskey(int passkey) {
+            respondPasskeyCalls++;
+        }
+
+        @Override
+        public void cancelPasskey() {
+            cancelPasskeyCalls++;
+        }
+
+        @Override
         public void setProfile(BleProtocolProfile profile) {
             this.profile = profile;
         }
@@ -403,6 +444,28 @@ class BleConnectionTest {
         @Override
         public void dispose() {
             disposeCalls++;
+        }
+    }
+
+    private static final class RecordingUiBridge implements AppUi.Bridge {
+        private long requestId;
+        private long dismissedRequestId;
+        private IntConsumer onSubmit;
+        private Runnable onCancel;
+
+        @Override
+        public void requestBlePasskey(long requestId,
+                                      String deviceAddress,
+                                      IntConsumer onSubmit,
+                                      Runnable onCancel) {
+            this.requestId = requestId;
+            this.onSubmit = onSubmit;
+            this.onCancel = onCancel;
+        }
+
+        @Override
+        public void dismissBlePasskey(long requestId) {
+            dismissedRequestId = requestId;
         }
     }
 

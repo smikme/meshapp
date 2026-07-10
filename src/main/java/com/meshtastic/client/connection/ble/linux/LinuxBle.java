@@ -10,6 +10,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -52,6 +53,7 @@ public class LinuxBle implements BlePlatform {
     private volatile boolean connected;
     private volatile String connectedAddress;
     private volatile BleProtocolProfile profile = BleProtocolProfile.MESHTASTIC;
+    private final AtomicBoolean disposed = new AtomicBoolean(false);
 
     // Polling (fromRadio data also comes via fd notifications in native code,
     // but polling ensures nothing is missed — same approach as Windows/macOS)
@@ -77,14 +79,14 @@ public class LinuxBle implements BlePlatform {
         logCallback = msg -> log.debug("[native] {}", msg);
         lib.meshble_set_log_callback(logCallback);
 
-        // Passkey request callback; must exist before the BlueZ agent can receive requests.
+        // Keep the callback strongly reachable, but only install it when a connection
+        // supplies a UI handler. Discovery-only backends must reject pairing requests.
         passkeyCallback = address -> {
             Consumer<String> handler = passkeyRequestHandler;
             if (handler != null && address != null) {
                 handler.accept(address);
             }
         };
-        lib.meshble_set_passkey_request_callback(passkeyCallback);
 
         int result = lib.meshble_init();
         if (result != 0) {
@@ -262,16 +264,30 @@ public class LinuxBle implements BlePlatform {
     // ==================== BlePlatform: Pairing ====================
 
     @Override
-    public void setPasskeyRequestHandler(Consumer<String> handler) {
+    public synchronized void setPasskeyRequestHandler(Consumer<String> handler) {
+        if (disposed.get()) {
+            return;
+        }
         this.passkeyRequestHandler = handler;
+        lib.meshble_set_passkey_request_callback(handler != null ? passkeyCallback : null);
     }
 
+    @Override
     public void respondPasskey(int passkey) {
+        if (disposed.get()) {
+            log.debug("Ignoring passkey response after LinuxBle disposal");
+            return;
+        }
         log.info("Responding to passkey request with PIN");
         lib.meshble_respond_passkey(passkey);
     }
 
+    @Override
     public void cancelPasskey() {
+        if (disposed.get()) {
+            log.debug("Ignoring passkey cancellation after LinuxBle disposal");
+            return;
+        }
         log.info("Cancelling passkey request");
         lib.meshble_cancel_passkey();
     }
@@ -302,7 +318,12 @@ public class LinuxBle implements BlePlatform {
     }
 
     @Override
-    public void dispose() {
+    public synchronized void dispose() {
+        if (!disposed.compareAndSet(false, true)) {
+            return;
+        }
+        passkeyRequestHandler = null;
+        lib.meshble_set_passkey_request_callback(null);
         stopPolling();
         pollScheduler.shutdownNow();
         lib.meshble_cleanup();

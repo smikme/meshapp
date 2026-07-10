@@ -21,16 +21,20 @@ import java.util.function.IntConsumer;
  */
 public final class PasskeyDialog {
 
+    private static long activeRequestId;
+
     private PasskeyDialog() {}
 
     /**
      * Shows the passkey entry dialog.
      *
+     * @param requestId unique pairing request identifier
      * @param deviceAddress MAC address of the device requesting pairing
      * @param onPasskey callback receiving the entered PIN
      * @param onCancel callback invoked when the dialog is cancelled
      */
-    public static void show(String deviceAddress,
+    public static void show(long requestId,
+                            String deviceAddress,
                             IntConsumer onPasskey,
                             Runnable onCancel) {
         ModalPane modalPane = ModalPane.getInstance();
@@ -38,6 +42,7 @@ public final class PasskeyDialog {
             onCancel.run();
             return;
         }
+        activeRequestId = requestId;
 
         VBox panel = new VBox(12);
         panel.setPadding(new Insets(20, 30, 20, 30));
@@ -81,6 +86,9 @@ public final class PasskeyDialog {
 
         Button cancelBtn = new Button("Отмена");
         cancelBtn.setOnAction(e -> {
+            if (!claim(requestId)) {
+                return;
+            }
             modalPane.hide();
             onCancel.run();
         });
@@ -98,6 +106,9 @@ public final class PasskeyDialog {
                 return;
             }
             int passkey = Integer.parseInt(text);
+            if (!claim(requestId)) {
+                return;
+            }
             modalPane.hide();
             onPasskey.accept(passkey);
         });
@@ -107,5 +118,24 @@ public final class PasskeyDialog {
 
         modalPane.show(panel);
         Platform.runLater(pinField::requestFocus);
+    }
+
+    /** Closes the dialog only when it still belongs to the specified pairing request. */
+    public static void dismiss(long requestId) {
+        if (!claim(requestId)) {
+            return;
+        }
+        ModalPane modalPane = ModalPane.getInstance();
+        if (modalPane != null) {
+            modalPane.hide();
+        }
+    }
+
+    private static boolean claim(long requestId) {
+        if (requestId <= 0 || activeRequestId != requestId) {
+            return false;
+        }
+        activeRequestId = 0;
+        return true;
     }
 }
