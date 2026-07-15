@@ -316,7 +316,7 @@ abstract class FormChatData extends FormChatRequests {
                         }
                         return;
                     }
-                    List<ChatItem> items = RemoteChatJson.parseChatItems(result);
+                    List<ChatItem> items = RemoteChatJson.parseChatItems(result, currentOwnerNodeId());
                     applyChatItemsPreservingSelection(items);
                     clearChatUnreadDotIfFormVisible();
                     reopenVisibleSelectedChatIfNeeded();
@@ -795,7 +795,7 @@ abstract class FormChatData extends FormChatRequests {
                         Toast.show(Toast.Type.ERROR, I18n.t("chat.remote.error", RemoteChatJson.errorMessage(error)));
                         return;
                     }
-                    List<ChatItem> items = RemoteChatJson.parseChatItems(result);
+                    List<ChatItem> items = RemoteChatJson.parseChatItems(result, currentOwnerNodeId());
                     applyChatItemsPreservingSelection(items);
                     clearChatUnreadDotIfFormVisible();
                     refreshUnreadTailIndicatorLater();

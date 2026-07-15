@@ -924,6 +924,15 @@ public class AppPreferences {
         setChatMuted(ownerId, composeChatPreferenceId(chatType, chatKey), muted);
     }
 
+    /**
+     * Returns the local preference scope used for chats from one RPC connection.
+     */
+    public static String remoteChatOwnerId(String connectionId) {
+        return connectionId == null || connectionId.isBlank()
+                ? "remote"
+                : "remote:" + connectionId.trim();
+    }
+
     public static String composeChatPreferenceId(String chatType, String chatKey) {
         if ("channel".equals(chatType)) {
             return "channel:" + (chatKey != null ? chatKey : "");

@@ -2,13 +2,18 @@ package com.meshtastic.client.protocol.rpc;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.utils.AppPreferences;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -38,6 +43,28 @@ class RemoteChatJsonTest {
 
         assertEquals(1, parsed.size());
         assertEquals(4, parsed.getFirst().getUnreadCount());
+    }
+
+    @Test
+    void parseChatItemsUsesRpcClientMutePreference(@TempDir Path tempHome) {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        String ownerId = AppPreferences.remoteChatOwnerId("rpc-1");
+        AppPreferences.setChatMuted(ownerId, "channel", "0", true);
+
+        JsonObject item = new JsonObject();
+        item.addProperty("type", "CHANNEL");
+        item.addProperty("channelIndex", 0);
+        item.addProperty("muted", false);
+        JsonArray items = new JsonArray();
+        items.add(item);
+        JsonObject result = new JsonObject();
+        result.add("items", items);
+
+        List<ChatItem> parsed = RemoteChatJson.parseChatItems(result, ownerId);
+
+        assertTrue(parsed.getFirst().isMuted());
+        assertFalse(RemoteChatJson.parseChatItems(result,
+                AppPreferences.remoteChatOwnerId("rpc-2")).getFirst().isMuted());
     }
 
     @Test
