@@ -169,6 +169,22 @@ public final class NativeWindowHelper {
         }
     }
 
+    /**
+     * Updates the JavaFX title and repairs its UTF-8 X11 property on Linux.
+     */
+    public static void setWindowTitle(Stage stage, String title) {
+        if (stage == null) {
+            return;
+        }
+
+        if (OsDetect.isLinux()
+                && stage.isShowing()
+                && new NativeLinuxWindowControl(stage).setTitle(title)) {
+            return;
+        }
+        stage.setTitle(title);
+    }
+
     public static boolean isSeamlessActive() {
         return seamlessActive;
     }

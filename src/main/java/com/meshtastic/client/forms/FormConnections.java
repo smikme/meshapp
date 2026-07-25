@@ -42,6 +42,7 @@ import javafx.scene.shape.SVGPath;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -59,11 +60,20 @@ public class FormConnections extends Form {
     private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
 
     private VBox cardsBox;
+    private final Map<String, ConnectionCard> cardsByConnectionId = new HashMap<>();
     private final Map<String, RemoteConnectionSnapshot> remoteConnectionSnapshots = new ConcurrentHashMap<>();
     private final Set<String> remoteRefreshInProgress = ConcurrentHashMap.newKeySet();
     private final Set<String> remoteActionInProgress = ConcurrentHashMap.newKeySet();
     private final AtomicBoolean rebuildCardsQueued = new AtomicBoolean(false);
     private final Runnable changeListener = this::queueRebuildCards;
+
+    private record ConnectionCard(VBox root,
+                                  Label indicator,
+                                  Label name,
+                                  Label status,
+                                  Label address,
+                                  ToolBar actionToolbar,
+                                  VBox remoteContent) {}
 
     public FormConnections() {
         init();
@@ -116,9 +126,29 @@ public class FormConnections extends Form {
     }
 
     private void rebuildCards() {
-        cardsBox.getChildren().clear();
-        for (ConnectionEntry entry : ConnectionManager.getInstance().getEntries()) {
-            cardsBox.getChildren().add(createConnectionCard(entry));
+        List<ConnectionEntry> entries = ConnectionManager.getInstance().getEntries();
+        Set<String> activeIds = entries.stream()
+                .map(ConnectionEntry::getId)
+                .collect(java.util.stream.Collectors.toSet());
+
+        cardsByConnectionId.keySet().removeIf(id -> !activeIds.contains(id));
+        cardsBox.getChildren().removeIf(node ->
+                !(node.getUserData() instanceof String id) || !activeIds.contains(id));
+
+        for (int index = 0; index < entries.size(); index++) {
+            ConnectionEntry entry = entries.get(index);
+            ConnectionCard card = cardsByConnectionId.computeIfAbsent(
+                    entry.getId(),
+                    ignored -> createConnectionCard(entry));
+            updateConnectionCard(card, entry);
+
+            int currentIndex = cardsBox.getChildren().indexOf(card.root());
+            if (currentIndex < 0) {
+                cardsBox.getChildren().add(index, card.root());
+            } else if (currentIndex != index) {
+                cardsBox.getChildren().remove(currentIndex);
+                cardsBox.getChildren().add(index, card.root());
+            }
         }
     }
 
@@ -132,63 +162,92 @@ public class FormConnections extends Form {
         });
     }
 
-    private VBox createConnectionCard(ConnectionEntry entry) {
-        boolean connected = entry.isConnected();
-        boolean reconnecting = entry.isReconnecting();
-
+    private ConnectionCard createConnectionCard(ConnectionEntry entry) {
         VBox card = new VBox(5);
+        card.setUserData(entry.getId());
         card.setPadding(new Insets(15));
         card.getStyleClass().add("connection-card");
-        if (connected) {
-            card.setStyle("-fx-border-color: #1EA97C; -fx-border-width: 0 0 0 4; -fx-background-radius: 20; -fx-border-radius: 20;");
-        } else if (reconnecting) {
-            card.setStyle("-fx-border-color: #F59E0B; -fx-border-width: 0 0 0 4; -fx-background-radius: 20; -fx-border-radius: 20;");
-        }
 
         HBox topRow = new HBox(10);
         topRow.setAlignment(Pos.CENTER_LEFT);
 
-        String indicatorColor = connected ? "#1EA97C" : reconnecting ? "#F59E0B" : "#9CA3AF";
         Label indicator = new Label("\u25CF");
-        indicator.setStyle("-fx-text-fill: " + indicatorColor + "; -fx-font-weight: bold;");
 
         Label lblName = new Label(entry.getName());
         lblName.getStyleClass().add("connection-card-name");
 
-        String statusText = connected
-                ? I18n.t("connection.status.connected")
-                : reconnecting ? I18n.t("connection.status.reconnecting") : "";
-        String statusColor = connected ? "#1EA97C" : "#F59E0B";
-        Label lblStatus = new Label(statusText);
-        lblStatus.setStyle("-fx-text-fill: " + statusColor + "; -fx-font-weight: bold;");
+        Label lblStatus = new Label();
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        ToolBar actionToolbar = createConnectionActionToolbar(entry, connected, reconnecting);
+        ToolBar actionToolbar = new ToolBar();
+        actionToolbar.getStyleClass().add("connection-toolbar");
 
         topRow.getChildren().addAll(indicator, lblName, lblStatus, spacer, actionToolbar);
 
-        ProtocolType protocolType = ConnectionManager.getInstance().getActiveProtocolType(entry.getId());
-        String addressText = String.join(" · ",
+        Label lblAddress = new Label();
+        lblAddress.setStyle("-fx-opacity: 0.6;");
+
+        VBox remoteContent = new VBox();
+        remoteContent.setVisible(false);
+        remoteContent.setManaged(false);
+
+        card.getChildren().addAll(topRow, lblAddress, remoteContent);
+        return new ConnectionCard(
+                card,
+                indicator,
+                lblName,
+                lblStatus,
+                lblAddress,
+                actionToolbar,
+                remoteContent);
+    }
+
+    private void updateConnectionCard(ConnectionCard card, ConnectionEntry entry) {
+        boolean connected = entry.isConnected();
+        boolean reconnecting = entry.isReconnecting();
+        String stateColor = connected ? "#1EA97C" : reconnecting ? "#F59E0B" : "#9CA3AF";
+
+        card.root().setStyle(connected || reconnecting
+                ? "-fx-border-color: " + stateColor
+                + "; -fx-border-width: 0 0 0 4; -fx-background-radius: 20; -fx-border-radius: 20;"
+                : "");
+        card.indicator().setStyle(
+                "-fx-text-fill: " + stateColor + "; -fx-font-weight: bold;");
+        card.name().setText(entry.getName());
+        card.status().setText(connected
+                ? I18n.t("connection.status.connected")
+                : reconnecting ? I18n.t("connection.status.reconnecting") : "");
+        card.status().setStyle(
+                "-fx-text-fill: " + stateColor + "; -fx-font-weight: bold;");
+
+        ProtocolType protocolType = ConnectionManager.getInstance()
+                .getActiveProtocolType(entry.getId());
+        card.address().setText(String.join(" · ",
                 formatTransportAddress(entry),
                 I18n.t("connection.card.protocol", formatProtocol(protocolType)),
                 I18n.t("connection.card.autoconnect", I18n.t(entry.isAutoconnect()
                         ? "connection.state.on"
-                        : "connection.state.off")));
+                        : "connection.state.off"))));
+        updateConnectionActionToolbar(
+                card.actionToolbar(),
+                entry,
+                connected,
+                reconnecting);
 
-        Label lblAddress = new Label(addressText);
-        lblAddress.setStyle("-fx-opacity: 0.6;");
-
-        card.getChildren().addAll(topRow, lblAddress);
-        if (entry.getEffectiveType() == ConnectionType.REMOTE_RPC) {
-            if (connected) {
-                card.getChildren().add(createRemoteHostConnectionsSection(entry));
-            } else {
+        boolean showRemoteContent = entry.getEffectiveType() == ConnectionType.REMOTE_RPC
+                && connected;
+        card.remoteContent().setVisible(showRemoteContent);
+        card.remoteContent().setManaged(showRemoteContent);
+        if (showRemoteContent) {
+            card.remoteContent().getChildren().setAll(createRemoteHostConnectionsSection(entry));
+        } else {
+            card.remoteContent().getChildren().clear();
+            if (entry.getEffectiveType() == ConnectionType.REMOTE_RPC) {
                 remoteConnectionSnapshots.remove(entry.getId());
             }
         }
-        return card;
     }
 
     private VBox createRemoteHostConnectionsSection(ConnectionEntry rpcEntry) {
@@ -306,10 +365,10 @@ public class FormConnections extends Form {
         return actionToolbar;
     }
 
-    private ToolBar createConnectionActionToolbar(ConnectionEntry entry, boolean connected, boolean reconnecting) {
-        ToolBar actionToolbar = new ToolBar();
-        actionToolbar.getStyleClass().add("connection-toolbar");
-
+    private void updateConnectionActionToolbar(ToolBar actionToolbar,
+                                               ConnectionEntry entry,
+                                               boolean connected,
+                                               boolean reconnecting) {
         Button connectButton = createToolbarButton(
                 connected || reconnecting ? I18n.t("connection.action.disconnect") : I18n.t("connection.action.connect"),
                 connected || reconnecting
@@ -337,13 +396,12 @@ public class FormConnections extends Form {
                 "/drawer/icon/delete-node.svg",
                 () -> doDelete(entry));
 
-        actionToolbar.getItems().addAll(
+        actionToolbar.getItems().setAll(
                 connectButton,
                 new Separator(Orientation.VERTICAL),
                 editButton,
                 deleteButton
         );
-        return actionToolbar;
     }
 
     private Button createToolbarButton(String title, String description, String iconPath, Runnable action) {
