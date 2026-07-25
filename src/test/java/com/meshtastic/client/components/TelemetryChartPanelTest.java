@@ -32,12 +32,14 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import software.coley.bentofx.control.Header;
 import software.coley.bentofx.dockable.Dockable;
 import software.coley.bentofx.layout.container.DockContainerBranch;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -100,8 +102,12 @@ class TelemetryChartPanelTest {
 
     private static String originalTelemetryDockLayout;
 
+    @TempDir
+    private static Path tempHome;
+
     @BeforeAll
     static void startJavaFx() {
+        TestEnvironmentSupport.setUserHome(tempHome);
         TestEnvironmentSupport.ensureJavaFxStarted();
         originalTelemetryDockLayout = AppPreferences.getTelemetryDockLayout();
         AppPreferences.saveTelemetryDockLayout(null);

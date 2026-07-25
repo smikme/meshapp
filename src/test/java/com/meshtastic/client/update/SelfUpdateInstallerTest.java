@@ -133,6 +133,7 @@ class SelfUpdateInstallerTest {
         var command = SelfUpdateInstaller.managedPayloadCommand(request, target);
 
         assertTrue(command.getFirst().endsWith("java") || command.getFirst().endsWith("java.exe"));
+        assertTrue(command.contains("--enable-native-access=javafx.graphics,ALL-UNNAMED"));
         assertTrue(command.contains("--module-path"));
         assertTrue(command.contains(target.resolve("lib/fx").toAbsolutePath().toString()));
         assertTrue(command.contains("-Dmeshapp.update.root=" + root.toAbsolutePath()));

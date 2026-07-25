@@ -404,7 +404,6 @@ public final class ConnectionManager {
                 protocolRuntime = createProtocolRuntime(id, entry, conn, resolvedProtocolType);
                 protocolRuntimes.put(id, protocolRuntime);
                 future = protocolRuntime.start();
-                protocolReadyFutures.put(id, future);
                 cacheMeshtasticRuntime(id, protocolRuntime);
                 connectionGenerations.merge(id, 1L, Long::sum);
 
@@ -422,11 +421,11 @@ public final class ConnectionManager {
 
         ReconnectService.getInstance().cancelReconnect(id);
         ProtocolRuntime<?> activeRuntime = protocolRuntime;
-        future.thenAccept(ignored -> {
+        CompletableFuture<?> connectionReadyFuture = future.thenApply(ignored -> {
             if (activeConnections.get(id) != conn || !entry.isConnected()) {
                 log.debug("Skipping post-connect actions for '{}' because transport is no longer active",
                         entry.getName());
-                return;
+                return ignored;
             }
             String nodeId = activeRuntime.getOwnerId();
             if (nodeId != null && !nodeId.isBlank() && !"?".equals(nodeId)) {
@@ -438,7 +437,7 @@ public final class ConnectionManager {
                     log.warn("Connection '{}' resolved to duplicate nodeId {} already active as '{}'; disconnecting new connection",
                             entry.getName(), nodeId, duplicateEntry.getName());
                     disconnect(id, "duplicate node id " + nodeId + " already active as " + duplicateEntry.getName());
-                    return;
+                    return ignored;
                 }
             }
             String readyNodeId = nodeId != null && !nodeId.isBlank() && !"?".equals(nodeId)
@@ -448,13 +447,15 @@ public final class ConnectionManager {
             if (activeConnections.get(id) != conn || !entry.isConnected()) {
                 log.debug("Skipping Lua autostart for '{}' because transport is no longer active",
                         entry.getName());
-                return;
+                return ignored;
             }
             LuaScriptRuntimeService.getInstance().autostartScriptsForNode(
                     readyNodeId,
                     event -> fireChanged());
             fireChanged();
+            return ignored;
         });
+        protocolReadyFutures.put(id, connectionReadyFuture);
         fireChanged();
     }
 
@@ -831,6 +832,10 @@ public final class ConnectionManager {
      * @return future with populated {@link DeviceState}, or {@code null}
      */
     public CompletableFuture<DeviceState> getConfigFuture(String id) {
+        CompletableFuture<?> readyFuture = protocolReadyFutures.get(id);
+        if (readyFuture != null && getMeshtasticRuntime(id) != null) {
+            return readyFuture.thenApply(DeviceState.class::cast);
+        }
         MeshtasticProtocolRuntime runtime = getMeshtasticRuntime(id);
         return runtime != null ? runtime.getReadyFuture() : configFutures.get(id);
     }

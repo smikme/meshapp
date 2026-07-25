@@ -323,7 +323,7 @@ class LuaScriptRuntimeServiceTest {
         runtimeService.deliverFormEvent(extension.getId(),
                 new LuaFormEvent(extension.getId(), "run", "action", "clicked", "Run"));
 
-        awaitCondition(() -> "action:run:clicked".equals(scriptService.getKv(extension.getId(), "form_event")),
+        awaitCondition(() -> "Done".equals(formBridge.components.get("run").text()),
                 "Extension did not receive form event");
 
         assertEquals("Done", formBridge.components.get("run").text());
@@ -401,7 +401,7 @@ class LuaScriptRuntimeServiceTest {
 
         runtimeService.runExtension(extension, formBridge, events::add);
 
-        awaitCondition(() -> formBridge.components.containsKey("sync"),
+        awaitCondition(() -> formBridge.components.containsKey("tempChart"),
                 "Extension did not create extended form controls");
 
         LuaFormComponentSpec shell = formBridge.components.get("shell").spec();
@@ -691,7 +691,7 @@ class LuaScriptRuntimeServiceTest {
 
             runtimeService.runScript(script, events::add);
 
-            awaitCondition(() -> "2026-06-19".equals(scriptService.getKv(script.getId(), "iso_date")),
+            awaitCondition(() -> "2026-06-19 14:05:09".equals(scriptService.getKv(script.getId(), "local_iso")),
                     "Lua time API script did not finish");
 
             String expectedDate = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
@@ -1534,7 +1534,8 @@ class LuaScriptRuntimeServiceTest {
 
         runtimeService.debugContinue(extension.getId());
 
-        awaitCondition(() -> "2".equals(scriptService.getKv(extension.getId(), "count")),
+        awaitCondition(() -> formBridge.components.containsKey("status")
+                        && "2".equals(formBridge.components.get("status").text()),
                 "Extension debugger did not continue after breakpoint");
 
         assertEquals("Debug Extension", formBridge.title);
