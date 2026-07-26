@@ -16,6 +16,7 @@ import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
+import com.meshtastic.client.utils.MeshtasticConfigCompatibility;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -64,13 +65,27 @@ public final class MeshtasticConfigTreeBuilder {
                 ringtoneSection(state)
             ));
 
+        MeshtasticConfigCompatibility.Context compatibility =
+            new MeshtasticConfigCompatibility.Context(
+                state.getFirmwareCapabilities(),
+                state.getRegionPresetMap(),
+                MeshtasticConfigCompatibility.currentRegionValue(configs)
+            );
+
         if (!configs.isEmpty()) {
-            root.getChildren().add(ProtobufTreeBuilder.buildConfigTree(configs));
+            root.getChildren().add(
+                ProtobufTreeBuilder.buildConfigTree(configs, compatibility)
+            );
         }
         if (!moduleConfigs.isEmpty()) {
             root
                 .getChildren()
-                .add(ProtobufTreeBuilder.buildModuleConfigTree(moduleConfigs));
+                .add(
+                    ProtobufTreeBuilder.buildModuleConfigTree(
+                        moduleConfigs,
+                        compatibility
+                    )
+                );
         }
         return root;
     }

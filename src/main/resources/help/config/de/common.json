@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "sections": {
     "owner_info": {
       "summary": "Gerätename und kurzes Rufzeichen, die für andere Benutzer im Mesh sichtbar sind.",
@@ -2864,6 +2864,106 @@
           "description": "TAK-Einsatzrolle: K9."
         }
       }
+    },
+    "meshtastic.Config.SecurityConfig.packet_signature_policy": {
+      "summary": "Legt fest, wie signierte Mesh-Pakete angenommen und geprüft werden.",
+      "whenToUse": "Nur bei XEdDSA-Unterstützung ändern, wenn das Mesh Paketsignaturen verwendet.",
+      "defaultBehavior": "Der Standard bleibt mit gewöhnlichem unsigniertem Verkehr kompatibel."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.flags": {
+      "summary": "Wählt die aktivierten Mesh-Beacon-Sendungen und Angebote.",
+      "whenToUse": "Nur die für diesen Knoten benötigten Beacon-Funktionen aktivieren.",
+      "defaultBehavior": "Ohne gesetzte Flags sind Mesh-Beacon-Sendungen deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_send_as_node": {
+      "summary": "Sendet Beacon-Nachrichten mit der Identität dieses Knotens.",
+      "whenToUse": "Aktivieren, wenn Empfänger den Quellknoten erkennen sollen.",
+      "defaultBehavior": "Deaktiviert verwendet die Firmware ihr Standardverhalten."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_message": {
+      "summary": "Text in Mesh-Beacon-Sendungen.",
+      "whenToUse": "Eine kurze Kennzeichnung oder Beschreibung des Beacons verwenden.",
+      "defaultBehavior": "Ein leerer Wert sendet keinen eigenen Text."
+    },
+    "meshtastic.ChannelSettings.channel_num": {
+      "summary": "Kanalnummer eines Mesh-Beacon-Sendeziels.",
+      "whenToUse": "Den lokalen Kanal wählen, dessen Einstellungen angeboten werden.",
+      "defaultBehavior": "Kanal null bezeichnet den primären Kanal."
+    },
+    "meshtastic.ChannelSettings.psk": {
+      "summary": "Vorab vereinbarter Schlüssel des angebotenen Zielkanals.",
+      "whenToUse": "Nur setzen, wenn der Beacon diesen Kanalschlüssel verteilen soll.",
+      "defaultBehavior": "Ein leerer Wert bietet keinen eigenen Schlüssel an."
+    },
+    "meshtastic.ChannelSettings.name": {
+      "summary": "Angebotener Name des Zielkanals.",
+      "whenToUse": "Den erkennbaren Namen des empfangenden Mesh verwenden.",
+      "defaultBehavior": "Ein leerer Name verwendet die Firmware-Vorgabe."
+    },
+    "meshtastic.ChannelSettings.id": {
+      "summary": "Numerische Kennung des Zielkanals.",
+      "whenToUse": "Nur setzen, wenn eine bestimmte Kanalkennung erforderlich ist.",
+      "defaultBehavior": "Null überlässt die Kennung der Firmware."
+    },
+    "meshtastic.ChannelSettings.uplink_enabled": {
+      "summary": "Bietet MQTT-Uplink für den Zielkanal an.",
+      "whenToUse": "Aktivieren, wenn Pakete dieses Kanals an MQTT weitergeleitet werden sollen.",
+      "defaultBehavior": "MQTT-Uplink ist deaktiviert."
+    },
+    "meshtastic.ChannelSettings.downlink_enabled": {
+      "summary": "Bietet MQTT-Downlink für den Zielkanal an.",
+      "whenToUse": "Aktivieren, wenn MQTT-Pakete an diesen Kanal geliefert werden sollen.",
+      "defaultBehavior": "MQTT-Downlink ist deaktiviert."
+    },
+    "meshtastic.ModuleSettings.position_precision": {
+      "summary": "Angebotene Positionsgenauigkeit des Zielkanals.",
+      "whenToUse": "Verringern, wenn Kanalmitglieder nur einen ungefähren Standort erhalten sollen.",
+      "defaultBehavior": "Die Firmware verwendet ihre Standardgenauigkeit."
+    },
+    "meshtastic.ModuleSettings.is_muted": {
+      "summary": "Schaltet Modulverkehr auf dem Zielkanal stumm.",
+      "whenToUse": "Aktivieren, wenn Modulnachrichten nicht auf diesem Kanal gesendet werden sollen.",
+      "defaultBehavior": "Modulverkehr ist nicht stummgeschaltet."
+    },
+    "meshtastic.ChannelSettings.module_settings": {
+      "summary": "Modulbezogene Einstellungen des angebotenen Zielkanals.",
+      "whenToUse": "Für besondere Datenschutz- oder Stummschaltungsregeln anpassen.",
+      "defaultBehavior": "Die Firmware-Vorgaben werden verwendet."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_channel": {
+      "summary": "Nimmt Kanaleinstellungen in Mesh-Beacon-Angebote auf.",
+      "whenToUse": "Aktivieren, wenn benachbarten Knoten der Kanal angeboten werden soll.",
+      "defaultBehavior": "Kanalangebote sind deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_region": {
+      "summary": "Nimmt die Funkregion in Mesh-Beacon-Angebote auf.",
+      "whenToUse": "Aktivieren, wenn Empfängern die Region dieses Knotens angeboten werden soll.",
+      "defaultBehavior": "Regionsangebote sind deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_preset": {
+      "summary": "Nimmt die LoRa-Voreinstellung in Mesh-Beacon-Angebote auf.",
+      "whenToUse": "Aktivieren, wenn Empfängern die Modem-Voreinstellung angeboten werden soll.",
+      "defaultBehavior": "Voreinstellungsangebote sind deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_channel": {
+      "summary": "Sendet Mesh-Beacon-Informationen auf dem eingestellten Kanal.",
+      "whenToUse": "Aktivieren, um Beacons über den gewählten Kanal zu senden.",
+      "defaultBehavior": "Kanalbezogene Beacon-Sendungen sind deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_region": {
+      "summary": "Sendet Mesh-Beacon-Informationen für die eingestellte Region.",
+      "whenToUse": "Aktivieren, um Informationen zur gewählten Region anzukündigen.",
+      "defaultBehavior": "Regionsbezogene Beacon-Sendungen sind deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_preset": {
+      "summary": "Sendet Mesh-Beacon-Informationen mit der eingestellten Voreinstellung.",
+      "whenToUse": "Aktivieren, um Informationen zur gewählten Voreinstellung anzukündigen.",
+      "defaultBehavior": "Voreinstellungsbezogene Beacon-Sendungen sind deaktiviert."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_interval_secs": {
+      "summary": "Zeitabstand zwischen Mesh-Beacon-Sendungen in Sekunden.",
+      "whenToUse": "Einen langen Abstand passend zur geringen Mesh-Bandbreite wählen.",
+      "defaultBehavior": "Null deaktiviert periodische Sendungen; andere Werte müssen das Firmware-Minimum einhalten."
     }
   }
 }

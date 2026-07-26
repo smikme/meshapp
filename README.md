@@ -189,6 +189,10 @@ After connecting, MeshApp performs the initial exchange with the device:
 - MeshCore KISS: negotiation through `SetHardware`
 - MeshCore Companion: exchange startup through `APP_START`
 
+For Meshtastic firmware 2.8.0 and newer, MeshApp supports the compact initial
+node database followed by background position and telemetry replay. Older
+firmware keeps the legacy connection flow.
+
 ### MeshCore
 
 MeshCore is supported in two variants:
@@ -245,6 +249,10 @@ Configuration can be exported and imported:
 
 - `.mcf` - full configuration copy
 - `.mtp` - template without personal and secret data
+
+Firmware 2.8 settings are enabled only when the target node reports version
+2.8.0 or newer. This includes legal region/preset combinations, packet
+signature policy, Mesh Beacon, and the 24-byte UTF-8 long-name limit.
 
 The interface can also clear the local H2 database: messages, reactions, telemetry, node cache, and packet log.
 

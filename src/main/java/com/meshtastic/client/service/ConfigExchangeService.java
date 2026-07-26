@@ -1,6 +1,7 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.HardwareModelNames;
 import com.meshtastic.client.utils.ConfigDebugFormatter;
 import org.meshtastic.proto.*;
 import com.meshtastic.client.model.NodeData;
@@ -65,6 +66,7 @@ public class ConfigExchangeService implements FromRadioListener {
     private final List<MeshProtos.NodeInfo> deferredNodeInfos = new ArrayList<>();
     private volatile ScheduledFuture<?> retryFuture;
     private Integer deferredConfigCompleteId;
+    private volatile MeshProtos.LoRaRegionPresetMap pendingRegionPresetMap;
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "config-retry");
         t.setDaemon(true);
@@ -218,7 +220,9 @@ public class ConfigExchangeService implements FromRadioListener {
                 node.setRole(user.getRole().name());
             }
             if (user.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
-                node.setHwModel(user.getHwModel().name());
+                node.setHwModel(HardwareModelNames.forFirmware(
+                        user.getHwModel(),
+                        deviceState.getFirmwareCapabilities()));
             }
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
@@ -355,9 +359,27 @@ public class ConfigExchangeService implements FromRadioListener {
         }
         markReceivedAnyResponse();
         deviceState.setDeviceMetadata(metadata);
+        if (deviceState.getFirmwareCapabilities().firmware28OrNewer()
+                && pendingRegionPresetMap != null) {
+            deviceState.setRegionPresetMap(pendingRegionPresetMap);
+        } else if (!deviceState.getFirmwareCapabilities().firmware28OrNewer()) {
+            pendingRegionPresetMap = null;
+        }
         deviceState.fireDeviceMetadataListeners();
         log.debug("onDeviceMetadata firmwareVersion='{}', excludedModules={}",
                 metadata.getFirmwareVersion(), metadata.getExcludedModules());
+    }
+
+    @Override
+    public void onRegionPresets(MeshProtos.LoRaRegionPresetMap regionPresetMap) {
+        if (aborted.get()) {
+            return;
+        }
+        markReceivedAnyResponse();
+        pendingRegionPresetMap = regionPresetMap;
+        if (deviceState.getFirmwareCapabilities().firmware28OrNewer()) {
+            deviceState.setRegionPresetMap(regionPresetMap);
+        }
     }
 
     @Override
@@ -546,6 +568,7 @@ public class ConfigExchangeService implements FromRadioListener {
         synchronized (deferredConfigLock) {
             deferredNodeInfos.clear();
             deferredConfigCompleteId = null;
+            pendingRegionPresetMap = null;
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.HardwareModelNames;
 import com.meshtastic.client.model.NodeData;
 import org.meshtastic.proto.ConnStatusProtos;
 import org.meshtastic.proto.DeviceUIProtos;
@@ -242,7 +243,9 @@ public final class RemoteAdminSession {
         if (!owner.getId().isEmpty()) { node.setNodeId(owner.getId()); }
         if (owner.getRole() != null) { node.setRole(owner.getRole().name()); }
         if (owner.getHwModel() != MeshProtos.HardwareModel.UNSET) {
-            node.setHwModel(owner.getHwModel().name());
+            node.setHwModel(HardwareModelNames.forFirmware(
+                    owner.getHwModel(),
+                    remoteState.getFirmwareCapabilities()));
         }
         if (!owner.getPublicKey().isEmpty()) {
             node.setPublicKey(owner.getPublicKey().toByteArray());

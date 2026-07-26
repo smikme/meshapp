@@ -137,6 +137,84 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void firmware28RegionMapActivatesEvenWhenItArrivesBeforeMetadata() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(
+                new ConfigExchangeService(handler, state));
+        MeshProtos.LoRaRegionPresetMap presetMap =
+                MeshProtos.LoRaRegionPresetMap.newBuilder()
+                        .addGroups(MeshProtos.LoRaPresetGroup.newBuilder()
+                                .addPresets(
+                                        ConfigProtos.Config.LoRaConfig.ModemPreset.LONG_FAST)
+                                .build())
+                        .addRegionGroups(MeshProtos.LoRaRegionPresets.newBuilder()
+                                .setRegion(
+                                        ConfigProtos.Config.LoRaConfig.RegionCode.US)
+                                .setGroupIndex(0)
+                                .build())
+                        .build();
+
+        service.onRegionPresets(presetMap);
+        assertEquals(null, state.getRegionPresetMap());
+
+        service.onDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder()
+                .setFirmwareVersion("2.8.0.build")
+                .build());
+
+        assertEquals(presetMap, state.getRegionPresetMap());
+        assertTrue(state.getFirmwareCapabilities().firmware28OrNewer());
+    }
+
+    @Test
+    void legacyFirmwareIgnoresUnexpectedRegionMap() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        ConfigExchangeService service = track(
+                new ConfigExchangeService(handler, state));
+
+        service.onDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder()
+                .setFirmwareVersion("2.7.27")
+                .build());
+        service.onRegionPresets(
+                MeshProtos.LoRaRegionPresetMap.getDefaultInstance());
+
+        assertEquals(null, state.getRegionPresetMap());
+        assertFalse(state.getFirmwareCapabilities().firmware28OrNewer());
+    }
+
+    @Test
+    void thinNodeInfoDoesNotEraseCachedSatelliteData() {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        NodeData node = state.getOrCreateNode(0xCAFEBABE);
+        node.setNodeId("!cafebabe");
+        node.setLatitude(55.75);
+        node.setLongitude(37.61);
+        node.setBatteryLevel(73);
+        ConfigExchangeService service = track(
+                new ConfigExchangeService(handler, state));
+
+        service.onNodeInfo(MeshProtos.NodeInfo.newBuilder()
+                .setNum(0xCAFEBABE)
+                .setUser(MeshProtos.User.newBuilder()
+                        .setId("!cafebabe")
+                        .setLongName("Thin")
+                        .build())
+                .setLastHeard(1_700_000_000)
+                .build());
+
+        assertEquals(55.75, node.getLatitude());
+        assertEquals(37.61, node.getLongitude());
+        assertEquals(73, node.getBatteryLevel());
+        assertEquals("Thin", node.getLongName());
+    }
+
+    @Test
     void onNodeInfoDefersTelemetryUntilMyNodeInfoIsKnown() {
         FakeConnection connection = new FakeConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));

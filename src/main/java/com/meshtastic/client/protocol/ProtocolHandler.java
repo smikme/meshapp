@@ -433,6 +433,14 @@ public class ProtocolHandler {
                         metadata.getFirmwareVersion(), metadata.getExcludedModules());
                 notifyListeners(l -> l.onDeviceMetadata(metadata));
             }
+            case REGION_PRESETS -> {
+                MeshProtos.LoRaRegionPresetMap presetMap =
+                        fromRadio.getRegionPresets();
+                log.debug("Received LoRa region preset map: groups={}, regions={}",
+                        presetMap.getGroupsCount(),
+                        presetMap.getRegionGroupsCount());
+                notifyListeners(l -> l.onRegionPresets(presetMap));
+            }
             case CHANNEL -> {
                 log.debug("Received Channel: index={}", fromRadio.getChannel().getIndex());
                 notifyListeners(l -> l.onChannel(fromRadio.getChannel()));
