@@ -1007,6 +1007,16 @@ def prepareLinuxPackagingResources = {
 	)
 
 	def linuxScriptsDir = file('src/jpackage/linux')
+	def desktopTemplate = new File(linuxScriptsDir, 'MeshApp.desktop')
+	if (!desktopTemplate.isFile()) {
+		throw new GradleException("packaging: Linux desktop template not found: ${desktopTemplate}")
+	}
+	java.nio.file.Files.copy(
+		desktopTemplate.toPath(),
+		new File(linuxResourceDir, desktopTemplate.name).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+
 	['postinstall', 'postrm'].each { scriptName ->
 		def source = new File(linuxScriptsDir, scriptName)
 		if (source.exists()) {
