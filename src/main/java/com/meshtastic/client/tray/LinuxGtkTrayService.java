@@ -1,6 +1,7 @@
 package com.meshtastic.client.tray;
 
 import com.meshtastic.client.i18n.I18n;
+import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.NativeResourceLoader;
 import com.sun.jna.Callback;
 import com.sun.jna.Library;
@@ -26,6 +27,8 @@ public final class LinuxGtkTrayService implements AppTrayService {
     private static final int APP_INDICATOR_CATEGORY_APPLICATION_STATUS = 0;
     private static final int APP_INDICATOR_STATUS_PASSIVE = 0;
     private static final int APP_INDICATOR_STATUS_ACTIVE = 1;
+    private static final String APP_INDICATOR_ID = "app.privatepractice.meshapp";
+    private static final String FLATPAK_TRAY_ICON_NAME = APP_INDICATOR_ID + ".tray";
 
     private final AppTrayService fallback = new AwtAppTrayService();
 
@@ -190,14 +193,23 @@ public final class LinuxGtkTrayService implements AppTrayService {
         Pointer createdIndicator = null;
         try {
             library = loadAppIndicator();
-            String fileName = iconPath.getFileName().toString();
-            int extensionStart = fileName.lastIndexOf('.');
-            String iconName = extensionStart > 0 ? fileName.substring(0, extensionStart) : fileName;
-            createdIndicator = library.app_indicator_new_with_path(
-                    "app.privatepractice.meshapp",
-                    iconName,
-                    APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
-                    iconPath.getParent().toAbsolutePath().toString());
+            if (OsDetect.isLinuxFlatpak()) {
+                // Flatpak exports owned icon names to the host icon theme. A temporary path inside
+                // the sandbox is not visible to GNOME Shell, so use the exported tray icon by name.
+                createdIndicator = library.app_indicator_new(
+                        APP_INDICATOR_ID,
+                        FLATPAK_TRAY_ICON_NAME,
+                        APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
+            } else {
+                String fileName = iconPath.getFileName().toString();
+                int extensionStart = fileName.lastIndexOf('.');
+                String iconName = extensionStart > 0 ? fileName.substring(0, extensionStart) : fileName;
+                createdIndicator = library.app_indicator_new_with_path(
+                        APP_INDICATOR_ID,
+                        iconName,
+                        APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
+                        iconPath.getParent().toAbsolutePath().toString());
+            }
             if (createdIndicator == null) {
                 log.warn("app_indicator_new_with_path returned null");
                 return false;
@@ -330,6 +342,8 @@ public final class LinuxGtkTrayService implements AppTrayService {
     }
 
     private interface AppIndicatorLibrary extends Library {
+        Pointer app_indicator_new(String id, String iconName, int category);
+
         Pointer app_indicator_new_with_path(String id, String iconName, int category, String iconThemePath);
         void app_indicator_set_status(Pointer indicator, int status);
         void app_indicator_set_menu(Pointer indicator, Pointer menu);

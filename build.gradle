@@ -1375,7 +1375,12 @@ def resolveSelfUpdatePlatform = {
 // ============================================================================
 
 def flatpakAppId = 'app.privatepractice.meshapp'
+def flatpakTrayIconName = "${flatpakAppId}.tray"
 def flatpakMetadataDir = file('src/flatpak')
+def flatpakAppIndicatorModuleFile = new File(
+	flatpakMetadataDir,
+	'shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json'
+)
 def flatpakDesktopFileName = "${flatpakAppId}.desktop"
 def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
 def flatpakLauncherFileName = 'MeshApp'
@@ -1571,13 +1576,18 @@ def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource, S
 		new File(resourcesDir, "${flatpakAppId}.png").toPath(),
 		java.nio.file.StandardCopyOption.REPLACE_EXISTING
 	)
+	def trayIconSource = requirePackagingFile('src/main/resources/tray/linux/icon_32.png', 'flatpak')
+	java.nio.file.Files.copy(
+		trayIconSource.toPath(),
+		new File(resourcesDir, "${flatpakTrayIconName}.png").toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
 
 	return sourceDir
 }
 
 def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, String runtimeVersion, String sdk ->
-	// The manifest references only the locally prepared sourceDir. The builder needs no network,
-	// keeping the release reproducible.
+	def appIndicatorModule = requirePackagingFile(flatpakAppIndicatorModuleFile.path, 'flatpak')
 	def manifest = [
 		'app-id'         : flatpakAppId,
 		'runtime'        : runtime,
@@ -1595,9 +1605,10 @@ def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, 
 			'--device=all',
 			'--allow=bluetooth',
 			'--filesystem=home',
-			'--system-talk-name=org.bluez'
+			'--system-talk-name=org.bluez',
+			'--talk-name=org.kde.StatusNotifierWatcher'
 		],
-		'modules'        : [[
+		'modules'        : [appIndicatorModule.absolutePath, [
 			'name'          : 'meshapp',
 			'buildsystem'   : 'simple',
 			'build-commands': [
@@ -1606,7 +1617,8 @@ def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, 
 				"install -Dm755 resources/${flatpakLauncherFileName} /app/bin/MeshApp",
 				"install -Dm644 resources/${flatpakDesktopFileName} /app/share/applications/${flatpakDesktopFileName}",
 				"install -Dm644 resources/${flatpakMetainfoFileName} /app/share/metainfo/${flatpakMetainfoFileName}",
-				"install -Dm644 resources/${flatpakAppId}.png /app/share/icons/hicolor/512x512/apps/${flatpakAppId}.png"
+				"install -Dm644 resources/${flatpakAppId}.png /app/share/icons/hicolor/512x512/apps/${flatpakAppId}.png",
+				"install -Dm644 resources/${flatpakTrayIconName}.png /app/share/icons/hicolor/32x32/apps/${flatpakTrayIconName}.png"
 			],
 			'sources'       : [[
 				'type': 'dir',
