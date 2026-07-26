@@ -6,6 +6,7 @@
         "/lib/pkgconfig"
     ],
     "config-opts": [
+        "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DENABLE_BINDINGS_MONO=NO",
         "-DENABLE_BINDINGS_VALA=NO",
         "-DENABLE_GTKDOC=NO"
@@ -62,6 +63,7 @@
                 "/lib/pkgconfig"
             ],
             "config-opts": [
+                "-DCMAKE_INSTALL_LIBDIR=lib",
                 "-DENABLE_INTROSPECTION=OFF"
             ],
             "sources": [
@@ -91,6 +93,9 @@
                 "/lib/pkgconfig",
                 "/libexec",
                 "/share"
+            ],
+            "config-opts": [
+                "-DCMAKE_INSTALL_LIBDIR=lib"
             ],
             "sources": [
                 {
