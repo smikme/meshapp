@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Linux tray integration through a GTK status icon.
+ * Linux tray integration through AppIndicator with a legacy GTK status-icon fallback.
  * Falls back to the AWT tray when GTK is unavailable.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -23,12 +23,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class LinuxGtkTrayService implements AppTrayService {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxGtkTrayService.class);
+    private static final int APP_INDICATOR_CATEGORY_APPLICATION_STATUS = 0;
+    private static final int APP_INDICATOR_STATUS_PASSIVE = 0;
+    private static final int APP_INDICATOR_STATUS_ACTIVE = 1;
 
     private final AppTrayService fallback = new AwtAppTrayService();
 
     private volatile GtkLibrary gtk;
+    private volatile AppIndicatorLibrary appIndicator;
     private volatile GObjectLibrary gObject;
     private volatile GLibLibrary gLib;
+    private volatile Pointer indicator;
     private volatile Pointer statusIcon;
     private volatile Pointer menu;
     private volatile Thread gtkThread;
@@ -115,16 +120,7 @@ public final class LinuxGtkTrayService implements AppTrayService {
                 return;
             }
 
-            Path iconPath = NativeResourceLoader.extractResource("/tray/linux/icon_16.png", "meshapp-tray-", ".png");
-
-            statusIcon = gtk.gtk_status_icon_new_from_file(iconPath.toAbsolutePath().toString());
-            if (statusIcon == null) {
-                log.warn("gtk_status_icon_new_from_file returned null");
-                return;
-            }
-
-            gtk.gtk_status_icon_set_tooltip_text(statusIcon, I18n.t("app.title"));
-            gtk.gtk_status_icon_set_visible(statusIcon, true);
+            Path iconPath = NativeResourceLoader.extractResource("/tray/linux/icon_32.png", "meshapp-tray-", ".png");
 
             Pointer gtkMenu = gtk.gtk_menu_new();
             menu = gtkMenu;
@@ -136,20 +132,15 @@ public final class LinuxGtkTrayService implements AppTrayService {
             gtk.gtk_menu_shell_append(gtkMenu, exitItem);
             gtk.gtk_widget_show_all(gtkMenu);
 
-            statusActivateCallback = (widget, userData) -> dispatch("tray-activate", onActivate);
-            statusPopupMenuCallback = (widget, button, activateTime, userData) -> {
-                try {
-                    if (menu != null) {
-                        gtk.gtk_menu_popup_at_pointer(menu, null);
-                    }
-                } catch (Throwable t) {
-                    log.error("Failed to show GTK tray menu", t);
-                }
-            };
             openItemActivateCallback = (widget, userData) -> dispatch("tray-open", onActivate);
             exitItemActivateCallback = (widget, userData) -> dispatch("tray-exit", onExit);
             disposeCallback = userData -> {
                 try {
+                    if (indicator != null) {
+                        appIndicator.app_indicator_set_status(indicator, APP_INDICATOR_STATUS_PASSIVE);
+                        gObject.g_object_unref(indicator);
+                        indicator = null;
+                    }
                     if (statusIcon != null) {
                         gtk.gtk_status_icon_set_visible(statusIcon, false);
                         gObject.g_object_unref(statusIcon);
@@ -166,10 +157,12 @@ public final class LinuxGtkTrayService implements AppTrayService {
                 return false;
             };
 
-            gObject.g_signal_connect_data(statusIcon, "activate", statusActivateCallback, null, null, 0);
-            gObject.g_signal_connect_data(statusIcon, "popup-menu", statusPopupMenuCallback, null, null, 0);
             gObject.g_signal_connect_data(openItem, "activate", openItemActivateCallback, null, null, 0);
             gObject.g_signal_connect_data(exitItem, "activate", exitItemActivateCallback, null, null, 0);
+
+            if (!installAppIndicator(iconPath, gtkMenu)) {
+                installLegacyStatusIcon(iconPath, onActivate);
+            }
 
             installed.set(true);
         } catch (Throwable t) {
@@ -192,16 +185,86 @@ public final class LinuxGtkTrayService implements AppTrayService {
         }
     }
 
+    private boolean installAppIndicator(Path iconPath, Pointer gtkMenu) {
+        AppIndicatorLibrary library = null;
+        Pointer createdIndicator = null;
+        try {
+            library = loadAppIndicator();
+            String fileName = iconPath.getFileName().toString();
+            int extensionStart = fileName.lastIndexOf('.');
+            String iconName = extensionStart > 0 ? fileName.substring(0, extensionStart) : fileName;
+            createdIndicator = library.app_indicator_new_with_path(
+                    "app.privatepractice.meshapp",
+                    iconName,
+                    APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
+                    iconPath.getParent().toAbsolutePath().toString());
+            if (createdIndicator == null) {
+                log.warn("app_indicator_new_with_path returned null");
+                return false;
+            }
+
+            appIndicator = library;
+            indicator = createdIndicator;
+            library.app_indicator_set_title(createdIndicator, I18n.t("app.title"));
+            library.app_indicator_set_menu(createdIndicator, gtkMenu);
+            library.app_indicator_set_status(createdIndicator, APP_INDICATOR_STATUS_ACTIVE);
+            log.debug("Linux tray installed through AppIndicator");
+            return true;
+        } catch (Throwable t) {
+            if (createdIndicator != null) {
+                try {
+                    library.app_indicator_set_status(createdIndicator, APP_INDICATOR_STATUS_PASSIVE);
+                    gObject.g_object_unref(createdIndicator);
+                } catch (Throwable cleanupError) {
+                    t.addSuppressed(cleanupError);
+                }
+            }
+            appIndicator = null;
+            indicator = null;
+            log.debug("AppIndicator is unavailable; using legacy GTK status icon", t);
+            return false;
+        }
+    }
+
+    private void installLegacyStatusIcon(Path iconPath, Runnable onActivate) {
+        statusIcon = gtk.gtk_status_icon_new_from_file(iconPath.toAbsolutePath().toString());
+        if (statusIcon == null) {
+            throw new IllegalStateException("gtk_status_icon_new_from_file returned null");
+        }
+
+        gtk.gtk_status_icon_set_tooltip_text(statusIcon, I18n.t("app.title"));
+        gtk.gtk_status_icon_set_visible(statusIcon, true);
+
+        statusActivateCallback = (widget, userData) -> dispatch("tray-activate", onActivate);
+        statusPopupMenuCallback = (widget, button, activateTime, userData) -> {
+            try {
+                if (menu != null) {
+                    gtk.gtk_menu_popup_at_pointer(menu, null);
+                }
+            } catch (Throwable t) {
+                log.error("Failed to show GTK tray menu", t);
+            }
+        };
+        gObject.g_signal_connect_data(statusIcon, "activate", statusActivateCallback, null, null, 0);
+        gObject.g_signal_connect_data(statusIcon, "popup-menu", statusPopupMenuCallback, null, null, 0);
+        log.debug("Linux tray installed through legacy GTK status icon");
+    }
+
     private void cleanupGtkObjects() {
         try {
-            if (menu != null && gtk != null) {
-                gtk.gtk_widget_destroy(menu);
-                menu = null;
+            if (indicator != null && appIndicator != null && gObject != null) {
+                appIndicator.app_indicator_set_status(indicator, APP_INDICATOR_STATUS_PASSIVE);
+                gObject.g_object_unref(indicator);
+                indicator = null;
             }
             if (statusIcon != null && gtk != null && gObject != null) {
                 gtk.gtk_status_icon_set_visible(statusIcon, false);
                 gObject.g_object_unref(statusIcon);
                 statusIcon = null;
+            }
+            if (menu != null && gtk != null) {
+                gtk.gtk_widget_destroy(menu);
+                menu = null;
             }
         } catch (Throwable t) {
             log.debug("Failed to cleanup GTK tray objects", t);
@@ -238,6 +301,18 @@ public final class LinuxGtkTrayService implements AppTrayService {
         throw new IllegalStateException("GTK library is not available", lastError);
     }
 
+    private AppIndicatorLibrary loadAppIndicator() {
+        UnsatisfiedLinkError lastError = null;
+        for (String name : new String[]{"ayatana-appindicator3", "appindicator3"}) {
+            try {
+                return Native.load(name, AppIndicatorLibrary.class);
+            } catch (UnsatisfiedLinkError e) {
+                lastError = e;
+            }
+        }
+        throw new IllegalStateException("AppIndicator library is not available", lastError);
+    }
+
     private interface GtkLibrary extends Library {
         boolean gtk_init_check(Pointer argc, Pointer argv);
         Pointer gtk_status_icon_new_from_file(String filename);
@@ -252,6 +327,13 @@ public final class LinuxGtkTrayService implements AppTrayService {
         void gtk_menu_popup_at_pointer(Pointer menu, Pointer triggerEvent);
         void gtk_main();
         void gtk_main_quit();
+    }
+
+    private interface AppIndicatorLibrary extends Library {
+        Pointer app_indicator_new_with_path(String id, String iconName, int category, String iconThemePath);
+        void app_indicator_set_status(Pointer indicator, int status);
+        void app_indicator_set_menu(Pointer indicator, Pointer menu);
+        void app_indicator_set_title(Pointer indicator, String title);
     }
 
     private interface GObjectLibrary extends Library {
