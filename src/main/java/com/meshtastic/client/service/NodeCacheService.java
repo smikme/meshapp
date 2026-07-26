@@ -52,6 +52,7 @@ public final class NodeCacheService {
             "ts",
             "node_id",
             "owner_node_id",
+            "packet_id",
             "telemetry_variant",
             "battery_level",
             "externally_powered",
@@ -161,6 +162,7 @@ public final class NodeCacheService {
     };
 
     private static final String[][] EXTENDED_TELEMETRY_COLUMNS = {
+            {"packet_id", "packet_id BIGINT DEFAULT 0"},
             {"telemetry_variant", "telemetry_variant VARCHAR(40)"},
             {"device_uptime_seconds", "device_uptime_seconds BIGINT"},
             {"gas_resistance", "gas_resistance REAL"},
@@ -356,6 +358,7 @@ public final class NodeCacheService {
                         ts                  BIGINT NOT NULL,
                         node_id             VARCHAR(20) NOT NULL,
                         owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                        packet_id           BIGINT DEFAULT 0,
                         telemetry_variant   VARCHAR(40),
                         battery_level       INT,
                         externally_powered  BOOLEAN DEFAULT FALSE,
@@ -1067,16 +1070,58 @@ public final class NodeCacheService {
      * Saves one telemetry entry to H2.
      */
     public synchronized void persistTelemetry(TelemetryEntry entry, String ownerNodeId) {
-        if (insertTelemetryStmt == null || entry == null) { return; }
+        persistTelemetry(entry, ownerNodeId, false);
+    }
+
+    /**
+     * Saves one telemetry entry and optionally suppresses firmware 2.8 replay duplicates.
+     *
+     * @return {@code true} when the entry was stored
+     */
+    public synchronized boolean persistTelemetry(
+            TelemetryEntry entry,
+            String ownerNodeId,
+            boolean deduplicateByPacketId) {
+        if (insertTelemetryStmt == null || entry == null) { return false; }
         try {
+            if (deduplicateByPacketId
+                    && entry.getPacketId() != 0
+                    && telemetryPacketExists(entry, ownerNodeId)) {
+                return false;
+            }
             bindTelemetry(insertTelemetryStmt, entry, ownerNodeId);
             insertTelemetryStmt.executeUpdate();
             long telemetryId = generatedTelemetryId(insertTelemetryStmt);
             if (telemetryId > 0) {
                 persistOneWireTemperatures(telemetryId, entry.getOneWireTemperatures());
             }
+            return true;
         } catch (SQLException e) {
             log.error("Failed to persist telemetry entry", e);
+            return false;
+        }
+    }
+
+    private boolean telemetryPacketExists(
+            TelemetryEntry entry,
+            String ownerNodeId) throws SQLException {
+        String sql = """
+                SELECT 1
+                FROM telemetry_history
+                WHERE owner_node_id = ?
+                  AND node_id = ?
+                  AND packet_id = ?
+                  AND COALESCE(telemetry_variant, '') = COALESCE(?, '')
+                LIMIT 1
+                """;
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, entry.getNodeId());
+            ps.setLong(3, entry.getPacketId());
+            ps.setString(4, entry.getTelemetryVariant());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         }
     }
 
@@ -1295,6 +1340,7 @@ public final class NodeCacheService {
     private TelemetryEntry readTelemetryRow(ResultSet rs) throws SQLException {
         TelemetryEntry e = new TelemetryEntry(rs.getLong("ts"), rs.getString("node_id"));
         long telemetryId = rs.getLong("id");
+        e.setPacketId(rs.getLong("packet_id"));
         e.setTelemetryVariant(rs.getString("telemetry_variant"));
         applyBatteryLevel(rs.getInt("battery_level"), e);
         e.setExternallyPowered(e.isExternallyPowered() || rs.getBoolean("externally_powered"));
@@ -1835,6 +1881,7 @@ public final class NodeCacheService {
         ps.setLong(i++, entry.getTimestamp());
         ps.setString(i++, entry.getNodeId());
         ps.setString(i++, ownerNodeId != null ? ownerNodeId : "");
+        ps.setLong(i++, entry.getPacketId());
         setNullableString(ps, i++, entry.getTelemetryVariant(), 40);
         ps.setInt(i++, entry.getBatteryLevel());
         ps.setBoolean(i++, entry.isExternallyPowered());

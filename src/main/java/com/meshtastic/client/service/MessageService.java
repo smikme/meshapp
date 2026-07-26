@@ -7,7 +7,9 @@ import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.Portnums;
 import com.google.protobuf.ByteString;
+import com.meshtastic.client.forms.settings.ConfigCompatibilityValidator;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.HardwareModelNames;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -627,6 +629,10 @@ public final class MessageService {
     public static void setOwnerInfo(ProtocolHandler handler, DeviceState state,
                                     String longName, String shortName, boolean isLicensed,
                                     ByteString sessionPasskey) {
+        ConfigCompatibilityValidator.validateOwnerName(state, longName)
+                .ifPresent(error -> {
+                    throw new IllegalArgumentException(error);
+                });
         MeshProtos.User user = MeshProtos.User.newBuilder()
                 .setLongName(longName)
                 .setShortName(shortName)
@@ -1119,9 +1125,10 @@ public final class MessageService {
             }
         }
         if (node.getHwModel() != null && !node.getHwModel().isEmpty()) {
-            try {
-                builder.setHwModel(MeshProtos.HardwareModel.valueOf(node.getHwModel()));
-            } catch (IllegalArgumentException ignored) {
+            MeshProtos.HardwareModel hwModel = HardwareModelNames.toProto(node.getHwModel());
+            if (hwModel != null) {
+                builder.setHwModel(hwModel);
+            } else {
                 log.debug("Skipping unknown hwModel '{}' for PKI contact {}", node.getHwModel(), node.getNodeId());
             }
         }
@@ -1592,12 +1599,11 @@ public final class MessageService {
         if (node == null || node.getHwModel() == null || node.getHwModel().isEmpty()) {
             return null;
         }
-        try {
-            return MeshProtos.HardwareModel.valueOf(node.getHwModel());
-        } catch (IllegalArgumentException ignored) {
+        MeshProtos.HardwareModel hwModel = HardwareModelNames.toProto(node.getHwModel());
+        if (hwModel == null) {
             log.debug("Skipping unknown local hwModel '{}'", node.getHwModel());
-            return null;
         }
+        return hwModel;
     }
 
     private static ByteString extractSecurityPublicKey(DeviceState state) {

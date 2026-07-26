@@ -6,6 +6,7 @@ import static com.meshtastic.client.forms.settings.ConfigEditorConstants.MODULE_
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.meshtastic.client.forms.settings.ConfigChangeCollector;
 import com.meshtastic.client.forms.settings.ConfigChangeSet;
+import com.meshtastic.client.forms.settings.ConfigCompatibilityValidator;
 import com.meshtastic.client.forms.settings.ConfigHelpPopupController;
 import com.meshtastic.client.forms.settings.ConfigPanelFactory;
 import com.meshtastic.client.forms.settings.ConfigProtobufSupport;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
@@ -425,6 +427,16 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
             statusLabel.setText(I18n.t("settings.config.status.noChanges"));
             return;
         }
+        Optional<String> compatibilityError =
+            ConfigCompatibilityValidator.validate(
+                loadedSession.remoteState(),
+                changes,
+                originalConfigs
+            );
+        if (compatibilityError.isPresent()) {
+            statusLabel.setText(compatibilityError.get());
+            return;
+        }
         if (!ensureAdminKeyConfirmed(statusLabel)) {
             return;
         }
@@ -496,7 +508,10 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
         }
 
         Set<Integer> loadedModuleVariants = loadedModuleVariants();
-        for (AdminProtos.AdminMessage.ModuleConfigType type : RemoteAdminService.editableModuleConfigTypes()) {
+        for (AdminProtos.AdminMessage.ModuleConfigType type :
+                RemoteAdminService.editableModuleConfigTypes(
+                    loadedSession.remoteState().getFirmwareCapabilities()
+                )) {
             int variantNumber = RemoteAdminService.moduleConfigVariantNumber(type);
             if (loadedModuleVariants.contains(variantNumber)) {
                 continue;
@@ -654,6 +669,17 @@ public final class RemoteAdminPanel extends VBox implements AutoCloseable {
     }
 
     private void syncRepeatedEditorSlots(ConfigTreeItem editedItem) {
+        if (fullConfigRoot != null
+                && loadedSession != null
+                && ProtobufTreeBuilder.adjustLoRaPresetAfterRegionEdit(
+                    fullConfigRoot,
+                    editedItem,
+                    loadedSession.remoteState().getFirmwareCapabilities(),
+                    loadedSession.remoteState().getRegionPresetMap()
+                )) {
+            configTree.refresh();
+            return;
+        }
         if (editedItem == null
                 || editedItem.getFieldDescriptor() == null
                 || !editedItem.getFieldDescriptor().isRepeated()

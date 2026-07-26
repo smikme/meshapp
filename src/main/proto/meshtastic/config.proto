@@ -800,6 +800,7 @@ message Config {
    */
   message LoRaConfig {
     enum RegionCode {
+      option allow_alias = true;
       /*
        * Region is not set
        */
@@ -878,7 +879,7 @@ message Config {
       /*
        * Ukraine 868mhz
        */
-      UA_868 = 15;
+      UA_868 = 15 [deprecated = true];
 
       /*
        * Malaysia 433mhz
@@ -943,7 +944,8 @@ message Config {
       /*
        * ITU Region 2 / 3 Amateur Radio 2m band (144-148 MHz)
        */
-      ITU23_2M = 28;
+      ITU23_2M = 28 [deprecated = true];
+      ITU2_2M = 28;
 
       /*
        * EU 866MHz band (Band no. 47b of 2006/771/EC and subsequent amendments) for Non-specific short-range devices (SRD)
@@ -960,6 +962,31 @@ message Config {
        * EU 868MHz band, with narrow presets
        */
       EU_N_868 = 32;
+
+      /*
+       * ITU Region 3 Amateur Radio 2m band (144-148 MHz)
+       */
+      ITU3_2M = 33;
+
+      /*
+       * ITU Region 1 Amateur Radio 70cm band (430-440 MHz)
+       */
+      ITU1_70CM = 34;
+
+      /*
+       * ITU Region 2 Amateur Radio 70cm band (420-450 MHz)
+       */
+      ITU2_70CM = 35;
+
+      /*
+       * ITU Region 3 Amateur Radio 70cm band (430-450 MHz)
+       */
+      ITU3_70CM = 36;
+
+      /*
+       * ITU Region 2 Amateur Radio 1.25m band (220-225 MHz)
+       */
+      ITU2_125CM = 37;
     }
 
     /*
@@ -1050,6 +1077,21 @@ message Config {
        * Comparable link budget and data rate to LONG_FAST.
        */
       NARROW_SLOW = 13;
+
+      /*
+       * Tiny Fast, 31.25kHz bandwidth.
+       */
+      TINY_FAST = 14;
+
+      /*
+       * Tiny Slow, 31.25kHz bandwidth.
+       */
+      TINY_SLOW = 15;
+
+      /*
+       * Medium Turbo, 500kHz bandwidth.
+       */
+      MEDIUM_TURBO = 16;
     }
 
     enum FEM_LNA_Mode {
@@ -1236,6 +1278,23 @@ message Config {
   }
 
   message SecurityConfig {
+    enum PacketSignaturePolicy {
+      /*
+       * Accept unsigned packets while rejecting malformed signatures.
+       */
+      PACKET_SIGNATURE_POLICY_COMPATIBLE = 0;
+
+      /*
+       * Prefer authenticated packets while retaining legacy compatibility.
+       */
+      PACKET_SIGNATURE_POLICY_BALANCED = 1;
+
+      /*
+       * Accept only authenticated packets.
+       */
+      PACKET_SIGNATURE_POLICY_STRICT = 2;
+    }
+
     /*
      * The public key of the user's device.
      * Sent out to other nodes on the mesh to allow them to compute a shared secret key.
@@ -1274,6 +1333,11 @@ message Config {
      * Allow incoming device control over the insecure legacy admin channel.
      */
     bool admin_channel_enabled = 8;
+
+    /*
+     * Signature policy for remotely received mesh packets.
+     */
+    PacketSignaturePolicy packet_signature_policy = 9;
   }
 
   /*

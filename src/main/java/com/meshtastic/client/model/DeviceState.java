@@ -95,6 +95,9 @@ public class DeviceState {
     private volatile ByteString sessionPasskey;
     private final CopyOnWriteArrayList<Runnable> ownerInfoListeners = new CopyOnWriteArrayList<>();
     private volatile MeshProtos.DeviceMetadata deviceMetadata;
+    private volatile FirmwareCapabilities firmwareCapabilities =
+            FirmwareCapabilities.legacy();
+    private volatile MeshProtos.LoRaRegionPresetMap regionPresetMap;
     private final CopyOnWriteArrayList<Runnable> deviceMetadataListeners = new CopyOnWriteArrayList<>();
     private volatile String ringtone;
     private volatile boolean ringtoneLoaded;
@@ -446,7 +449,34 @@ public class DeviceState {
     public void setSessionPasskey(ByteString sessionPasskey) { this.sessionPasskey = sessionPasskey; }
 
     public MeshProtos.DeviceMetadata getDeviceMetadata() { return deviceMetadata; }
-    public void setDeviceMetadata(MeshProtos.DeviceMetadata deviceMetadata) { this.deviceMetadata = deviceMetadata; }
+    public void setDeviceMetadata(MeshProtos.DeviceMetadata deviceMetadata) {
+        this.deviceMetadata = deviceMetadata;
+        this.firmwareCapabilities =
+                FirmwareCapabilities.fromMetadata(deviceMetadata);
+        if (firmwareCapabilities.firmware28OrNewer()) {
+            nodeDatabase.getNodeDb().values().forEach(node ->
+                    node.setHwModel(HardwareModelNames.forFirmware(
+                            node.getHwModel(),
+                            firmwareCapabilities)));
+        }
+        if (!firmwareCapabilities.firmware28OrNewer()) {
+            regionPresetMap = null;
+        }
+    }
+
+    public FirmwareCapabilities getFirmwareCapabilities() {
+        return firmwareCapabilities;
+    }
+
+    public MeshProtos.LoRaRegionPresetMap getRegionPresetMap() {
+        return regionPresetMap;
+    }
+
+    public void setRegionPresetMap(MeshProtos.LoRaRegionPresetMap regionPresetMap) {
+        this.regionPresetMap = firmwareCapabilities.firmware28OrNewer()
+                ? regionPresetMap
+                : null;
+    }
 
     public String getRingtone() { return ringtone != null ? ringtone : ""; }
     public boolean isRingtoneLoaded() { return ringtoneLoaded; }
@@ -600,6 +630,8 @@ public class DeviceState {
         ownerInfo = null;
         sessionPasskey = null;
         deviceMetadata = null;
+        firmwareCapabilities = FirmwareCapabilities.legacy();
+        regionPresetMap = null;
         ringtone = null;
         ringtoneLoaded = false;
         synchronized (telemetryHistory) {

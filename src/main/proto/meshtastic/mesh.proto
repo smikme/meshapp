@@ -218,6 +218,8 @@ message Position {
  * To match the old style filenames, _ is converted to -, p is converted to .
  */
 enum HardwareModel {
+  option allow_alias = true;
+
   /*
    * TODO: REPLACE
    */
@@ -359,11 +361,19 @@ enum HardwareModel {
    * Makerfabs SenseLoRA Receiver (RP2040 + RFM96)
    */
   SENSELORA_RP2040 = 27;
+  /*
+   * Firmware 2.8.0 reuses hardware model 27 for Makerfabs Tracker.
+   */
+  MAKERFABS_TRACKER = 27;
 
   /*
    * Makerfabs SenseLoRA Industrial Monitor (ESP32-S3 + RFM96)
    */
   SENSELORA_S3 = 28;
+  /*
+   * Firmware 2.8.0 reserves hardware model 28 for Makerfabs.
+   */
+  MAKERFABS_RESERVED = 28;
 
   /*
    * Canary Radio Company - CanaryOne: https://canaryradio.io/products/canaryone
@@ -880,6 +890,10 @@ enum HardwareModel {
    * GPS, button, buzzer, and sensors.
    */
   TRACKER_T1000_E_PRO = 128;
+  /*
+   * Firmware 2.8.0 reuses hardware model 128 for Mesh Tracker X1.
+   */
+  MESH_TRACKER_X1 = 128;
 
   /*
    * Elecrow ThinkNode M7, M8 and M9
@@ -2292,6 +2306,12 @@ message FromRadio {
      * encoding state as magic-string prefixes inside ClientNotification.
      */
     LockdownStatus lockdown_status = 18;
+
+    /*
+     * Firmware-provided map of legal LoRa presets for each region.
+     * Introduced by firmware 2.8.
+     */
+    LoRaRegionPresetMap region_presets = 19;
   }
 }
 
@@ -2620,6 +2640,37 @@ message DeviceMetadata {
    * (bitwise OR of ExcludedModules)
    */
   uint32 excluded_modules = 12;
+
+  /*
+   * Whether this build includes XEdDSA packet signature verification.
+   */
+  bool has_xeddsa = 14;
+}
+
+/*
+ * A distinct set of legal modem presets shared by one or more regions.
+ */
+message LoRaPresetGroup {
+  repeated Config.LoRaConfig.ModemPreset presets = 1;
+  Config.LoRaConfig.ModemPreset default_preset = 2;
+  bool licensed_only = 3;
+}
+
+/*
+ * Associates a region with an entry in LoRaRegionPresetMap.groups.
+ */
+message LoRaRegionPresets {
+  Config.LoRaConfig.RegionCode region = 1;
+  uint32 group_index = 2;
+}
+
+/*
+ * Legal region/preset combinations supplied during want_config.
+ * Missing regions intentionally mean that the client must not restrict them.
+ */
+message LoRaRegionPresetMap {
+  repeated LoRaPresetGroup groups = 1;
+  repeated LoRaRegionPresets region_groups = 2;
 }
 
 /*

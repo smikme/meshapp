@@ -12,6 +12,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import javafx.scene.control.TreeItem;
 import javafx.stage.FileChooser;
 import javafx.stage.Window;
@@ -185,6 +186,18 @@ public final class ConfigSnapshotController {
                         "settings.snapshot.wrongType",
                         expectedKind.extension()
                     )
+                );
+            }
+            Optional<String> compatibilityError =
+                ConfigSnapshotEditor.validateCompatibility(
+                    snapshot,
+                    host.state(),
+                    host.originalConfigs(),
+                    host.originalModuleConfigs()
+                );
+            if (compatibilityError.isPresent()) {
+                throw new IllegalArgumentException(
+                    compatibilityError.get()
                 );
             }
 

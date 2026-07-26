@@ -17,11 +17,12 @@ public class ConfigTreeItem {
     private Object value;                   // Current value.
     private Object originalValue;           // Original value used for change tracking.
     private final Class<?> valueType;       // Value type: Boolean, Integer, Long, Float, Double, String, or Enum.
-    private final List<?> enumValues;       // Allowed enum values, or null for non-enum fields.
+    private List<?> enumValues;             // Allowed enum values, or null for non-enum fields.
     private final boolean editable;         // true for fields, false for categories.
     private final boolean category;         // Root category such as device, position, or mqtt.
     private final String actionLabel;       // Button label for action rows.
     private final Runnable action;          // Action invoked by value-column button.
+    private boolean structurallyModified;
 
     // Used when writing values back into protobuf.
     private final Descriptors.FieldDescriptor fieldDescriptor;   // null for categories.
@@ -103,10 +104,16 @@ public class ConfigTreeItem {
     public void setValue(Object value) { this.value = value; }
 
     public Object getOriginalValue() { return originalValue; }
-    public void resetOriginal() { this.originalValue = this.value; }
+    public void resetOriginal() {
+        this.originalValue = this.value;
+        this.structurallyModified = false;
+    }
+
+    public void markStructurallyModified() { this.structurallyModified = true; }
 
     public Class<?> getValueType() { return valueType; }
     public List<?> getEnumValues() { return enumValues; }
+    public void setEnumValues(List<?> enumValues) { this.enumValues = enumValues; }
     public boolean isEditable() { return editable; }
     public boolean isCategory() { return category; }
     public boolean hasAction() { return action != null; }
@@ -125,6 +132,7 @@ public class ConfigTreeItem {
      * Checks whether the value was changed by the user.
      */
     public boolean isModified() {
+        if (structurallyModified) { return true; }
         if (!editable) { return false; }
         if (value == null && originalValue == null) { return false; }
         if (value == null || originalValue == null) { return true; }

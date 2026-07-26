@@ -3,11 +3,14 @@ package com.meshtastic.client.utils;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
+import com.google.protobuf.DynamicMessage;
 import com.google.protobuf.Message;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
+import com.meshtastic.client.model.FirmwareCapabilities;
 import javafx.scene.control.TreeItem;
 import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +22,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -59,7 +63,8 @@ public final class ProtobufTreeBuilder {
             Map.entry("paxcounter", "settings.config.section.paxcounter"),
             Map.entry("statusmessage", "settings.config.section.statusmessage"),
             Map.entry("traffic_management", "settings.config.section.traffic_management"),
-            Map.entry("tak", "settings.config.section.tak")
+            Map.entry("tak", "settings.config.section.tak"),
+            Map.entry("mesh_beacon", "settings.config.section.mesh_beacon")
     );
 
     private ProtobufTreeBuilder() {}
@@ -68,6 +73,14 @@ public final class ProtobufTreeBuilder {
      * Builds a device configuration tree from {@code Config} messages.
      */
     public static TreeItem<ConfigTreeItem> buildConfigTree(List<ConfigProtos.Config> configs) {
+        return buildConfigTree(
+                configs,
+                MeshtasticConfigCompatibility.Context.legacy());
+    }
+
+    public static TreeItem<ConfigTreeItem> buildConfigTree(
+            List<ConfigProtos.Config> configs,
+            MeshtasticConfigCompatibility.Context compatibility) {
         ConfigTreeItem rootData = new ConfigTreeItem(I18n.t("settings.config.section.root.device"), "config", 0);
         TreeItem<ConfigTreeItem> root = new TreeItem<>(rootData);
         root.setExpanded(true);
@@ -79,13 +92,23 @@ public final class ProtobufTreeBuilder {
             Message sectionMsg = (Message) config.getField(oneofField);
             String sectionName = oneofField.getName();
             int variantNumber = oneofField.getNumber();
+            if (!MeshtasticConfigCompatibility.includeSection(
+                    sectionName,
+                    compatibility)) {
+                continue;
+            }
 
             String displayName = sectionDisplayName(sectionName);
             ConfigTreeItem sectionData = new ConfigTreeItem(
                     displayName, sectionName, oneofField, "config", variantNumber);
             TreeItem<ConfigTreeItem> sectionItem = new TreeItem<>(sectionData);
 
-            addFieldsToTree(sectionItem, sectionMsg, "config", variantNumber);
+            addFieldsToTree(
+                    sectionItem,
+                    sectionMsg,
+                    "config",
+                    variantNumber,
+                    compatibility);
 
             if (!sectionItem.getChildren().isEmpty()) {
                 root.getChildren().add(sectionItem);
@@ -99,6 +122,14 @@ public final class ProtobufTreeBuilder {
      * Builds a module configuration tree from {@code ModuleConfig} messages.
      */
     public static TreeItem<ConfigTreeItem> buildModuleConfigTree(List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
+        return buildModuleConfigTree(
+                moduleConfigs,
+                MeshtasticConfigCompatibility.Context.legacy());
+    }
+
+    public static TreeItem<ConfigTreeItem> buildModuleConfigTree(
+            List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
+            MeshtasticConfigCompatibility.Context compatibility) {
         ConfigTreeItem rootData = new ConfigTreeItem(I18n.t("settings.config.section.root.module"), "module_config", 0);
         TreeItem<ConfigTreeItem> root = new TreeItem<>(rootData);
         root.setExpanded(true);
@@ -110,13 +141,23 @@ public final class ProtobufTreeBuilder {
             Message sectionMsg = (Message) mc.getField(oneofField);
             String sectionName = oneofField.getName();
             int variantNumber = oneofField.getNumber();
+            if (!MeshtasticConfigCompatibility.includeSection(
+                    sectionName,
+                    compatibility)) {
+                continue;
+            }
 
             String displayName = sectionDisplayName(sectionName);
             ConfigTreeItem sectionData = new ConfigTreeItem(
                     displayName, sectionName, oneofField, "module_config", variantNumber);
             TreeItem<ConfigTreeItem> sectionItem = new TreeItem<>(sectionData);
 
-            addFieldsToTree(sectionItem, sectionMsg, "module_config", variantNumber);
+            addFieldsToTree(
+                    sectionItem,
+                    sectionMsg,
+                    "module_config",
+                    variantNumber,
+                    compatibility);
 
             if (!sectionItem.getChildren().isEmpty()) {
                 root.getChildren().add(sectionItem);
@@ -130,8 +171,12 @@ public final class ProtobufTreeBuilder {
      * Recursively adds protobuf message fields to the configuration tree.
      */
     private static void addFieldsToTree(TreeItem<ConfigTreeItem> parent, Message message,
-                                          String configType, int variantNumber) {
+                                          String configType, int variantNumber,
+                                          MeshtasticConfigCompatibility.Context compatibility) {
         for (FieldDescriptor fd : message.getDescriptorForType().getFields()) {
+            if (!MeshtasticConfigCompatibility.includeField(fd, compatibility)) {
+                continue;
+            }
             String fieldName = fd.getName();
             String displayName = humanize(fieldName);
             Object value = message.getField(fd);
@@ -140,7 +185,21 @@ public final class ProtobufTreeBuilder {
                 if (fd.getType() == FieldDescriptor.Type.BYTES) {
                     parent.getChildren().add(buildRepeatedBytesGroup(fd, value, configType, variantNumber, displayName));
                 } else if (isSupportedRepeatedScalar(fd)) {
-                    parent.getChildren().add(buildRepeatedScalarGroup(fd, value, configType, variantNumber, displayName));
+                    parent.getChildren().add(buildRepeatedScalarGroup(
+                            fd,
+                            value,
+                            configType,
+                            variantNumber,
+                            displayName,
+                            compatibility));
+                } else if (fd.getType() == FieldDescriptor.Type.MESSAGE) {
+                    parent.getChildren().add(buildRepeatedMessageGroup(
+                            fd,
+                            value,
+                            configType,
+                            variantNumber,
+                            displayName,
+                            compatibility));
                 }
                 continue;
             }
@@ -151,12 +210,24 @@ public final class ProtobufTreeBuilder {
                 ConfigTreeItem groupData = new ConfigTreeItem(
                         displayName, fieldName, fd, configType, variantNumber);
                 TreeItem<ConfigTreeItem> groupItem = new TreeItem<>(groupData);
-                addFieldsToTree(groupItem, subMsg, configType, variantNumber);
+                addFieldsToTree(
+                        groupItem,
+                        subMsg,
+                        configType,
+                        variantNumber,
+                        compatibility);
                 if (!groupItem.getChildren().isEmpty()) {
                     parent.getChildren().add(groupItem);
                 }
             } else {
-                ConfigTreeItem item = createValueItem(displayName, fieldName, value, fd, configType, variantNumber);
+                ConfigTreeItem item = createValueItem(
+                        displayName,
+                        fieldName,
+                        value,
+                        fd,
+                        configType,
+                        variantNumber,
+                        compatibility);
                 if (item != null) {
                     parent.getChildren().add(new TreeItem<>(item));
                 }
@@ -180,12 +251,160 @@ public final class ProtobufTreeBuilder {
                                                                      Object value,
                                                                      String configType,
                                                                      int variantNumber,
-                                                                     String displayName) {
+                                                                     String displayName,
+                                                                     MeshtasticConfigCompatibility.Context compatibility) {
         ConfigTreeItem groupData = new ConfigTreeItem(displayName, fd.getName(), fd, configType, variantNumber);
         TreeItem<ConfigTreeItem> groupItem = new TreeItem<>(groupData);
         groupItem.setExpanded(true);
-        syncRepeatedScalarGroup(groupItem, fd, value, configType, variantNumber, displayName);
+        syncRepeatedScalarGroup(
+                groupItem,
+                fd,
+                value,
+                configType,
+                variantNumber,
+                displayName,
+                compatibility);
         return groupItem;
+    }
+
+    private static TreeItem<ConfigTreeItem> buildRepeatedMessageGroup(
+            FieldDescriptor fd,
+            Object value,
+            String configType,
+            int variantNumber,
+            String displayName,
+            MeshtasticConfigCompatibility.Context compatibility) {
+        ConfigTreeItem groupData = new ConfigTreeItem(
+                displayName,
+                fd.getName(),
+                fd,
+                configType,
+                variantNumber);
+        TreeItem<ConfigTreeItem> groupItem = new TreeItem<>(groupData);
+        groupItem.setExpanded(true);
+        syncRepeatedMessageGroup(
+                groupItem,
+                fd,
+                value,
+                configType,
+                variantNumber,
+                displayName,
+                compatibility,
+                false);
+        return groupItem;
+    }
+
+    private static void syncRepeatedMessageGroup(
+            TreeItem<ConfigTreeItem> groupItem,
+            FieldDescriptor fd,
+            Object value,
+            String configType,
+            int variantNumber,
+            String displayName,
+            MeshtasticConfigCompatibility.Context compatibility,
+            boolean markModified) {
+        groupItem.getChildren().clear();
+        List<?> messages = value instanceof List<?> list ? list : List.of();
+        for (Object valueItem : messages) {
+            if (valueItem instanceof Message message) {
+                appendRepeatedMessageEntry(
+                        groupItem,
+                        fd,
+                        message,
+                        configType,
+                        variantNumber,
+                        displayName,
+                        compatibility);
+            }
+        }
+        appendRepeatedMessageAddAction(
+                groupItem,
+                fd,
+                configType,
+                variantNumber,
+                displayName,
+                compatibility);
+        if (markModified && groupItem.getValue() != null) {
+            groupItem.getValue().markStructurallyModified();
+        }
+    }
+
+    private static void appendRepeatedMessageEntry(
+            TreeItem<ConfigTreeItem> groupItem,
+            FieldDescriptor fd,
+            Message message,
+            String configType,
+            int variantNumber,
+            String displayName,
+            MeshtasticConfigCompatibility.Context compatibility) {
+        int entryNumber = (int) groupItem.getChildren().stream()
+                .filter(child -> child.getValue() != null
+                        && child.getValue().isCategory())
+                .count() + 1;
+        ConfigTreeItem entryData = new ConfigTreeItem(
+                displayName + " " + entryNumber,
+                configType,
+                variantNumber);
+        TreeItem<ConfigTreeItem> entryItem = new TreeItem<>(entryData);
+        entryItem.setExpanded(true);
+        addFieldsToTree(
+                entryItem,
+                message,
+                configType,
+                variantNumber,
+                compatibility);
+        ConfigTreeItem removeAction = new ConfigTreeItem(
+                I18n.t("settings.config.repeated.remove"),
+                I18n.t("settings.config.repeated.remove"),
+                () -> {
+                    groupItem.getChildren().remove(entryItem);
+                    if (groupItem.getValue() != null) {
+                        groupItem.getValue().markStructurallyModified();
+                    }
+                },
+                configType,
+                variantNumber);
+        entryItem.getChildren().add(new TreeItem<>(removeAction));
+        int actionIndex = groupItem.getChildren().size();
+        if (actionIndex > 0) {
+            ConfigTreeItem last = groupItem.getChildren()
+                    .get(actionIndex - 1)
+                    .getValue();
+            if (last != null && last.hasAction()) {
+                actionIndex--;
+            }
+        }
+        groupItem.getChildren().add(actionIndex, entryItem);
+    }
+
+    private static void appendRepeatedMessageAddAction(
+            TreeItem<ConfigTreeItem> groupItem,
+            FieldDescriptor fd,
+            String configType,
+            int variantNumber,
+            String displayName,
+            MeshtasticConfigCompatibility.Context compatibility) {
+        ConfigTreeItem addAction = new ConfigTreeItem(
+                I18n.t("settings.config.repeated.add"),
+                I18n.t("settings.config.repeated.add"),
+                () -> {
+                    Message empty = DynamicMessage.getDefaultInstance(
+                            fd.getMessageType());
+                    appendRepeatedMessageEntry(
+                            groupItem,
+                            fd,
+                            empty,
+                            configType,
+                            variantNumber,
+                            displayName,
+                            compatibility);
+                    if (groupItem.getValue() != null) {
+                        groupItem.getValue().markStructurallyModified();
+                    }
+                },
+                configType,
+                variantNumber);
+        groupItem.getChildren().add(new TreeItem<>(addAction));
     }
 
     /**
@@ -222,6 +441,95 @@ public final class ProtobufTreeBuilder {
                     groupData.getConfigVariantNumber(),
                     groupData.getName());
         }
+    }
+
+    /**
+     * Rebuilds the LoRa preset choices after a firmware 2.8 region change and
+     * selects the firmware default when the old preset is no longer legal.
+     */
+    public static boolean adjustLoRaPresetAfterRegionEdit(
+            TreeItem<ConfigTreeItem> root,
+            ConfigTreeItem editedItem,
+            FirmwareCapabilities capabilities,
+            MeshProtos.LoRaRegionPresetMap presetMap) {
+        if (root == null
+                || editedItem == null
+                || editedItem.getFieldDescriptor() == null
+                || !"meshtastic.Config.LoRaConfig.region".equals(
+                        editedItem.getFieldDescriptor().getFullName())
+                || !(editedItem.getValue()
+                        instanceof EnumValueDescriptor region)
+                || capabilities == null
+                || !capabilities.firmware28OrNewer()) {
+            return false;
+        }
+        TreeItem<ConfigTreeItem> presetItem = findTreeItemByFieldFullName(
+                root,
+                "meshtastic.Config.LoRaConfig.modem_preset");
+        if (presetItem == null || presetItem.getValue() == null) {
+            return false;
+        }
+        ConfigTreeItem preset = presetItem.getValue();
+        MeshtasticConfigCompatibility.Context compatibility =
+                new MeshtasticConfigCompatibility.Context(
+                        capabilities,
+                        presetMap,
+                        region.getNumber());
+        List<EnumValueDescriptor> allowed =
+                MeshtasticConfigCompatibility.allowedEnumValues(
+                        preset.getFieldDescriptor(),
+                        preset.getValue(),
+                        compatibility);
+        preset.setEnumValues(allowed);
+
+        Set<Integer> legal =
+                MeshtasticConfigCompatibility.legalPresetNumbers(
+                        presetMap,
+                        region.getNumber());
+        if (legal.isEmpty()
+                || !(preset.getValue()
+                        instanceof EnumValueDescriptor current)
+                || legal.contains(current.getNumber())) {
+            return true;
+        }
+        MeshProtos.LoRaPresetGroup group =
+                MeshtasticConfigCompatibility.presetGroup(
+                        presetMap,
+                        region.getNumber());
+        if (group == null) {
+            return true;
+        }
+        EnumValueDescriptor defaultPreset =
+                preset.getFieldDescriptor()
+                        .getEnumType()
+                        .findValueByNumber(group.getDefaultPresetValue());
+        if (defaultPreset != null) {
+            preset.setValue(defaultPreset);
+        }
+        return true;
+    }
+
+    private static TreeItem<ConfigTreeItem> findTreeItemByFieldFullName(
+            TreeItem<ConfigTreeItem> root,
+            String fullName) {
+        if (root == null) {
+            return null;
+        }
+        ConfigTreeItem value = root.getValue();
+        if (value != null
+                && value.getFieldDescriptor() != null
+                && fullName.equals(
+                        value.getFieldDescriptor().getFullName())) {
+            return root;
+        }
+        for (TreeItem<ConfigTreeItem> child : root.getChildren()) {
+            TreeItem<ConfigTreeItem> found =
+                    findTreeItemByFieldFullName(child, fullName);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
     }
 
     private static void syncRepeatedBytesGroup(TreeItem<ConfigTreeItem> groupItem,
@@ -301,14 +609,22 @@ public final class ProtobufTreeBuilder {
                                                 Object value,
                                                 String configType,
                                                 int variantNumber,
-                                                String displayName) {
+                                                String displayName,
+                                                MeshtasticConfigCompatibility.Context compatibility) {
         List<?> values = value instanceof List<?> list ? list : List.of();
         int slotCount = Math.max(values.size() + 1, MIN_VISIBLE_REPEATED_SCALAR_SLOTS);
         groupItem.getChildren().clear();
         for (int i = 0; i < slotCount; i++) {
             Object slotValue = i < values.size() ? toTreeValue(fd, values.get(i)) : null;
             String slotName = displayName + " " + (i + 1);
-            ConfigTreeItem item = createValueItem(slotName, fd.getName(), slotValue, fd, configType, variantNumber);
+            ConfigTreeItem item = createValueItem(
+                    slotName,
+                    fd.getName(),
+                    slotValue,
+                    fd,
+                    configType,
+                    variantNumber,
+                    compatibility);
             if (item != null) {
                 groupItem.getChildren().add(new TreeItem<>(item));
             }
@@ -406,6 +722,12 @@ public final class ProtobufTreeBuilder {
                 }
                 if (groupFd != null && groupFd.isRepeated() && isSupportedRepeatedScalar(groupFd)) {
                     applyRepeatedScalarValues(child, builder, groupFd);
+                    continue;
+                }
+                if (groupFd != null
+                        && groupFd.isRepeated()
+                        && groupFd.getType() == FieldDescriptor.Type.MESSAGE) {
+                    applyRepeatedMessageValues(child, builder, groupFd);
                     continue;
                 }
                 if (groupFd == null || groupFd.isRepeated() || groupFd.getType() != FieldDescriptor.Type.MESSAGE) {
@@ -528,6 +850,30 @@ public final class ProtobufTreeBuilder {
         }
     }
 
+    private static void applyRepeatedMessageValues(
+            TreeItem<ConfigTreeItem> groupItem,
+            Message.Builder builder,
+            FieldDescriptor fieldDescriptor) {
+        FieldDescriptor builderFd =
+                builder.getDescriptorForType().findFieldByName(
+                        fieldDescriptor.getName());
+        if (builderFd == null
+                || !builderFd.isRepeated()
+                || builderFd.getType() != FieldDescriptor.Type.MESSAGE) {
+            return;
+        }
+        builder.clearField(builderFd);
+        for (TreeItem<ConfigTreeItem> entry : groupItem.getChildren()) {
+            ConfigTreeItem entryData = entry.getValue();
+            if (entryData == null || !entryData.isCategory()) {
+                continue;
+            }
+            Message.Builder entryBuilder = builder.newBuilderForField(builderFd);
+            applyTreeValues(entry, entryBuilder);
+            builder.addRepeatedField(builderFd, entryBuilder.build());
+        }
+    }
+
     private static boolean isIgnoreIncomingField(FieldDescriptor fieldDescriptor) {
         return fieldDescriptor != null
                 && "meshtastic.Config.LoRaConfig.ignore_incoming".equals(fieldDescriptor.getFullName());
@@ -579,8 +925,37 @@ public final class ProtobufTreeBuilder {
                     if (messageFd == null || !messageFd.isRepeated() || !isSupportedRepeatedScalar(messageFd)) {
                         continue;
                     }
-                    syncRepeatedScalarGroup(child, messageFd, message.getField(messageFd),
-                            item.getConfigType(), item.getConfigVariantNumber(), item.getName());
+                    syncRepeatedScalarGroup(
+                            child,
+                            messageFd,
+                            message.getField(messageFd),
+                            item.getConfigType(),
+                            item.getConfigVariantNumber(),
+                            item.getName(),
+                            MeshtasticConfigCompatibility.Context.legacy());
+                    continue;
+                }
+                if (fd != null
+                        && fd.isRepeated()
+                        && fd.getType() == FieldDescriptor.Type.MESSAGE) {
+                    FieldDescriptor messageFd =
+                            message.getDescriptorForType()
+                                    .findFieldByName(fd.getName());
+                    if (messageFd == null
+                            || !messageFd.isRepeated()
+                            || messageFd.getType()
+                                    != FieldDescriptor.Type.MESSAGE) {
+                        continue;
+                    }
+                    syncRepeatedMessageGroup(
+                            child,
+                            messageFd,
+                            message.getField(messageFd),
+                            item.getConfigType(),
+                            item.getConfigVariantNumber(),
+                            item.getName(),
+                            MeshtasticConfigCompatibility.Context.legacy(),
+                            true);
                     continue;
                 }
                 if (fd == null || fd.isRepeated() || fd.getType() != FieldDescriptor.Type.MESSAGE) {
@@ -630,9 +1005,31 @@ public final class ProtobufTreeBuilder {
                                                   FieldDescriptor fd,
                                                   String configType,
                                                   int variantNumber) {
+        return createValueItem(
+                displayName,
+                fieldName,
+                value,
+                fd,
+                configType,
+                variantNumber,
+                MeshtasticConfigCompatibility.Context.legacy());
+    }
+
+    private static ConfigTreeItem createValueItem(
+                                                  String displayName,
+                                                  String fieldName,
+                                                  Object value,
+                                                  FieldDescriptor fd,
+                                                  String configType,
+                                                  int variantNumber,
+                                                  MeshtasticConfigCompatibility.Context compatibility) {
         if (fd.getType() == FieldDescriptor.Type.ENUM) {
             EnumValueDescriptor enumVal = value instanceof EnumValueDescriptor evd ? evd : null;
-            List<EnumValueDescriptor> enumValues = new ArrayList<>(fd.getEnumType().getValues());
+            List<EnumValueDescriptor> enumValues =
+                    MeshtasticConfigCompatibility.allowedEnumValues(
+                            fd,
+                            enumVal,
+                            compatibility);
             return new ConfigTreeItem(
                     displayName, fieldName, enumVal, EnumValueDescriptor.class,
                     enumValues, fd, configType, variantNumber);

@@ -189,6 +189,11 @@ Nach dem Verbinden führt MeshApp den initialen Austausch mit dem Gerät aus:
 - MeshCore KISS: Aushandlung über `SetHardware`
 - MeshCore Companion: Startaustausch über `APP_START`
 
+Für Meshtastic-Firmware 2.8.0 und neuer unterstützt MeshApp die kompakte
+anfängliche Knotendatenbank mit anschließender Übertragung von Positionen und
+Telemetrie im Hintergrund. Ältere Firmware verwendet weiterhin den bisherigen
+Verbindungsablauf.
+
 ### MeshCore
 
 MeshCore wird in zwei Varianten unterstützt:
@@ -245,6 +250,11 @@ Konfigurationen können exportiert und importiert werden:
 
 - `.mcf` - vollständige Konfigurationskopie
 - `.mtp` - Vorlage ohne persönliche und geheime Daten
+
+Firmware-2.8-Einstellungen werden nur aktiviert, wenn der Zielknoten Version
+2.8.0 oder neuer meldet. Dazu gehören zulässige Regions-/Preset-Kombinationen,
+die Paketsignaturrichtlinie, Mesh Beacon und die Begrenzung des langen Namens
+auf 24 UTF-8-Bytes.
 
 Die Oberfläche kann außerdem die lokale H2-Datenbank leeren: Nachrichten, Reaktionen, Telemetrie, Knotencache und Paketlog.
 

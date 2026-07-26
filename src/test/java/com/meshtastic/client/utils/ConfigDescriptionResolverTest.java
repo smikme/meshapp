@@ -352,14 +352,14 @@ class ConfigDescriptionResolverTest {
         ConfigHelpRepository repository = ConfigHelpRepository.getInstance();
 
         assertEquals(
-            1,
+            2,
             repository.documentVersionForTests(
                 I18n.LANGUAGE_EN,
                 "config/common"
             )
         );
         assertEquals(
-            1,
+            2,
             repository.documentVersionForTests(
                 I18n.LANGUAGE_DE,
                 "config/common"
@@ -368,7 +368,7 @@ class ConfigDescriptionResolverTest {
 
         Connection connection = DatabaseProvider.getConnection();
         assertEquals(
-            277,
+            297,
             countRows(
                 connection,
                 "config_help_articles",
@@ -425,7 +425,7 @@ class ConfigDescriptionResolverTest {
                 .contains("Full device name")
         );
         assertEquals(
-            1,
+            2,
             repository.documentVersionForTests(
                 I18n.LANGUAGE_EN,
                 "config/common"

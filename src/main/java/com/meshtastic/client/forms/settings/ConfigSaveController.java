@@ -93,6 +93,17 @@ public final class ConfigSaveController {
             return;
         }
 
+        Optional<String> compatibilityError =
+            ConfigCompatibilityValidator.validate(
+                actionState,
+                changes,
+                host.originalConfigs()
+            );
+        if (compatibilityError.isPresent()) {
+            host.setStatus(compatibilityError.get());
+            return;
+        }
+
         Optional<String> excludedModuleName = firstExcludedModuleName(
             actionState.getDeviceMetadata(),
             changes.moduleConfigs()
@@ -281,7 +292,7 @@ public final class ConfigSaveController {
             case DETECTION_SENSOR ->
                 MeshProtos.ExcludedModules.DETECTIONSENSOR_CONFIG_VALUE;
             case PAXCOUNTER -> MeshProtos.ExcludedModules.PAXCOUNTER_CONFIG_VALUE;
-            case STATUSMESSAGE, TRAFFIC_MANAGEMENT, TAK,
+            case STATUSMESSAGE, TRAFFIC_MANAGEMENT, TAK, MESH_BEACON,
                  PAYLOADVARIANT_NOT_SET -> 0;
         };
     }

@@ -87,7 +87,10 @@ public final class ConfigValueCell
         checkBox.setSelected(item.getValue() instanceof Boolean value && value);
         checkBox
             .selectedProperty()
-            .addListener((obs, oldVal, newVal) -> item.setValue(newVal));
+            .addListener((obs, oldVal, newVal) -> {
+                item.setValue(newVal);
+                repeatedEditSynchronizer.accept(item);
+            });
         return checkBox;
     }
 
@@ -114,7 +117,10 @@ public final class ConfigValueCell
         comboBox.setMaxWidth(Double.MAX_VALUE);
         comboBox
             .valueProperty()
-            .addListener((obs, oldVal, newVal) -> item.setValue(newVal));
+            .addListener((obs, oldVal, newVal) -> {
+                item.setValue(newVal);
+                repeatedEditSynchronizer.accept(item);
+            });
         return comboBox;
     }
 
@@ -198,6 +204,7 @@ public final class ConfigValueCell
                                 selectedOptions
                             )
                         );
+                        repeatedEditSynchronizer.accept(item);
                         menuButton.setText(
                             ConfigValueFormatter.formatValue(item)
                         );

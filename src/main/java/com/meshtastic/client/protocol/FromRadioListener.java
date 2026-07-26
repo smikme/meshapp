@@ -30,6 +30,9 @@ public interface FromRadioListener {
     /** Receives device metadata advertised by the connected radio. */
     default void onDeviceMetadata(MeshProtos.DeviceMetadata metadata) {}
 
+    /** Receives firmware-provided legal LoRa region/preset combinations. */
+    default void onRegionPresets(MeshProtos.LoRaRegionPresetMap regionPresetMap) {}
+
     /** Receives a PRIMARY or SECONDARY channel. */
     default void onChannel(ChannelProtos.Channel channel) {}
 

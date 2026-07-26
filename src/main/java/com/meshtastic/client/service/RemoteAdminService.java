@@ -2,7 +2,10 @@ package com.meshtastic.client.service;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.meshtastic.client.forms.settings.ConfigChangeSet;
+import com.meshtastic.client.forms.settings.ConfigCompatibilityValidator;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.FirmwareCapabilities;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.FromRadioListener;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -111,6 +114,17 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
                 .toList();
     }
 
+    public static List<AdminProtos.AdminMessage.ModuleConfigType> editableModuleConfigTypes(
+            FirmwareCapabilities capabilities) {
+        boolean firmware28 = capabilities != null
+                && capabilities.firmware28OrNewer();
+        return Arrays.stream(AdminProtos.AdminMessage.ModuleConfigType.values())
+                .filter(type -> type != AdminProtos.AdminMessage.ModuleConfigType.UNRECOGNIZED)
+                .filter(type -> firmware28
+                        || type != AdminProtos.AdminMessage.ModuleConfigType.MESHBEACON_CONFIG)
+                .toList();
+    }
+
     /**
      * Returns the stable query key used for a device config section.
      *
@@ -175,10 +189,45 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
         return CompletableFuture.supplyAsync(() -> {
             ensureOpen();
             session.clearSnapshot();
-            List<RequestPlan> plans = buildSnapshotRequestPlans();
+            RequestPlan metadataPlan = deviceMetadataRequestPlan();
+            int provisionalTotal = buildSnapshotRequestPlans(FirmwareCapabilities.legacy()).size() + 1;
+            notifyProgress(
+                    progressConsumer,
+                    metadataPlan.key(),
+                    RemoteAdminSession.QueryState.SENT,
+                    0,
+                    provisionalTotal);
+            CompletableFuture<AdminProtos.AdminMessage> metadataRequest =
+                    sendAdminRequest(
+                            metadataPlan.message(),
+                            metadataPlan.matcher(),
+                            metadataPlan.key());
+            boolean metadataSucceeded = false;
+            try {
+                metadataRequest.join();
+                metadataSucceeded = true;
+            } catch (CompletionException e) {
+                log.debug("Remote metadata query failed for !{}: {}",
+                        Integer.toHexString(session.targetNodeNum()),
+                        rootMessage(e));
+            }
+
+            List<RequestPlan> plans = buildSnapshotRequestPlans(
+                    session.remoteState().getFirmwareCapabilities());
             List<CompletableFuture<AdminProtos.AdminMessage>> requests = new ArrayList<>();
-            AtomicInteger completed = new AtomicInteger();
-            int total = plans.size();
+            AtomicInteger completed = new AtomicInteger(1);
+            int total = plans.size() + 1;
+            notifyProgress(
+                    progressConsumer,
+                    metadataPlan.key(),
+                    metadataSucceeded
+                            ? RemoteAdminSession.QueryState.RECEIVED
+                            : RemoteAdminSession.QueryState.FAILED,
+                    completed.get(),
+                    total);
+            if (!plans.isEmpty()) {
+                pauseBetweenQueries();
+            }
 
             for (int i = 0; i < plans.size(); i++) {
                 RequestPlan plan = plans.get(i);
@@ -202,7 +251,7 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
                 }
             }
 
-            int successfulResponses = 0;
+            int successfulResponses = metadataSucceeded ? 1 : 0;
             for (CompletableFuture<AdminProtos.AdminMessage> request : requests) {
                 try {
                     request.join();
@@ -246,7 +295,8 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
      * @return future completed when the section response is received
      */
     public CompletableFuture<Void> requestModuleConfigSection(AdminProtos.AdminMessage.ModuleConfigType type) {
-        if (!editableModuleConfigTypes().contains(type)) {
+        if (!editableModuleConfigTypes(
+                session.remoteState().getFirmwareCapabilities()).contains(type)) {
             return CompletableFuture.failedFuture(new IllegalArgumentException(
                     "Unsupported remote module config type: " + type));
         }
@@ -266,6 +316,14 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
      * @return future completed when the command ACK is received
      */
     public CompletableFuture<Void> saveOwner(String longName, String shortName, boolean isLicensed) {
+        var compatibilityError =
+                ConfigCompatibilityValidator.validateOwnerName(
+                        session.remoteState(),
+                        longName);
+        if (compatibilityError.isPresent()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(compatibilityError.get()));
+        }
         return ensureSessionPasskey().thenCompose(ignored -> {
             MeshProtos.User user = MeshProtos.User.newBuilder()
                     .setLongName(longName != null ? longName : "")
@@ -297,6 +355,31 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
         List<ConfigProtos.Config> safeConfigs = configs != null ? configs : List.of();
         List<ModuleConfigProtos.ModuleConfig> safeModuleConfigs = moduleConfigs != null ? moduleConfigs : List.of();
         List<ChannelProtos.Channel> safeChannels = channels != null ? channels : List.of();
+
+        boolean licensed = session.remoteState().getOwnerInfo() != null
+                && session.remoteState().getOwnerInfo().getIsLicensed();
+        ConfigChangeSet compatibilityChanges = new ConfigChangeSet(
+                false,
+                null,
+                null,
+                licensed,
+                false,
+                0,
+                0,
+                0,
+                false,
+                "",
+                safeConfigs,
+                safeModuleConfigs,
+                safeChannels);
+        var compatibilityError = ConfigCompatibilityValidator.validate(
+                session.remoteState(),
+                compatibilityChanges,
+                session.remoteState().getConfigs());
+        if (compatibilityError.isPresent()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException(compatibilityError.get()));
+        }
 
         return ensureSessionPasskey()
                 .thenCompose(ignored -> sendChannelsSequentially(safeChannels, 0))
@@ -729,7 +812,10 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
         if (adminMessage.hasGetOwnerResponse()) {
             session.applyOwner(adminMessage.getGetOwnerResponse());
         } else if (adminMessage.hasGetDeviceMetadataResponse()) {
-            session.remoteState().setDeviceMetadata(adminMessage.getGetDeviceMetadataResponse());
+            session.remoteState().setDeviceMetadata(
+                    adminMessage.getGetDeviceMetadataResponse());
+            session.remoteState().setRegionPresetMap(
+                    localState.getRegionPresetMap());
         } else if (adminMessage.hasGetRingtoneResponse()) {
             session.remoteState().setRingtone(adminMessage.getGetRingtoneResponse());
         } else if (adminMessage.hasGetCannedMessageModuleMessagesResponse()) {
@@ -766,12 +852,18 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
         ensureOpen();
     }
 
-    private static List<RequestPlan> buildSnapshotRequestPlans() {
-        List<RequestPlan> plans = new ArrayList<>();
-        plans.add(new RequestPlan(
+    private static RequestPlan deviceMetadataRequestPlan() {
+        return new RequestPlan(
                 "get_device_metadata",
-                AdminProtos.AdminMessage.newBuilder().setGetDeviceMetadataRequest(true).build(),
-                AdminProtos.AdminMessage::hasGetDeviceMetadataResponse));
+                AdminProtos.AdminMessage.newBuilder()
+                        .setGetDeviceMetadataRequest(true)
+                        .build(),
+                AdminProtos.AdminMessage::hasGetDeviceMetadataResponse);
+    }
+
+    private static List<RequestPlan> buildSnapshotRequestPlans(
+            FirmwareCapabilities capabilities) {
+        List<RequestPlan> plans = new ArrayList<>();
         plans.add(new RequestPlan(
                 "get_owner",
                 AdminProtos.AdminMessage.newBuilder().setGetOwnerRequest(true).build(),
@@ -799,7 +891,8 @@ public final class RemoteAdminService implements FromRadioListener, AutoCloseabl
                     AdminProtos.AdminMessage.newBuilder().setGetConfigRequest(type).build(),
                     AdminProtos.AdminMessage::hasGetConfigResponse));
         }
-        for (AdminProtos.AdminMessage.ModuleConfigType type : editableModuleConfigTypes()) {
+        for (AdminProtos.AdminMessage.ModuleConfigType type :
+                editableModuleConfigTypes(capabilities)) {
             plans.add(new RequestPlan(
                     moduleConfigQueryKey(type),
                     AdminProtos.AdminMessage.newBuilder().setGetModuleConfigRequest(type).build(),

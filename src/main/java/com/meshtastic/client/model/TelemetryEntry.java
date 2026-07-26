@@ -17,6 +17,7 @@ public class TelemetryEntry {
 
     private final long timestamp; // epoch seconds
     private final String nodeId;
+    private long packetId;
     private String telemetryVariant;
 
     // DeviceMetrics
@@ -156,6 +157,8 @@ public class TelemetryEntry {
 
     public long getTimestamp() { return timestamp; }
     public String getNodeId() { return nodeId; }
+    public long getPacketId() { return packetId; }
+    public void setPacketId(long packetId) { this.packetId = packetId; }
 
     public String getTelemetryVariant() { return telemetryVariant; }
     public void setTelemetryVariant(String telemetryVariant) { this.telemetryVariant = telemetryVariant; }
