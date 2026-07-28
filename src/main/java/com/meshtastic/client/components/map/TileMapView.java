@@ -29,7 +29,6 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 
 import java.io.IOException;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -38,9 +37,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,9 +49,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -80,12 +78,13 @@ public class TileMapView extends StackPane {
     private static final String TRACE_FORWARD_COLOR = "#58a6ff";
     private static final String TRACE_REVERSE_COLOR = "#f0883e";
     private static final String NIGHT_MODE_CLASS = "map-night-mode";
+    static final String PROJECT_URL = "https://github.com/smikme/meshapp";
+    static final String CONTACT_EMAIL = "ks@privatepractice.app";
     private static final String[] TILE_EXTENSIONS = {".png", ".jpg", ".jpeg"};
-    private static final Path CACHE_ROOT = Paths.get(
+    private static final Path CACHE_BASE = Paths.get(
             System.getProperty("user.home", "."),
             ".meshapp",
-            "map-tiles",
-            "osm"
+            "map-tiles"
     );
 
     private final Pane tileLayer = new Pane();
@@ -93,13 +92,14 @@ public class TileMapView extends StackPane {
     private final Pane traceLayer = new Pane();
     private final Pane markerLayer = new Pane();
     private final Pane measureLayer = new Pane();
-    private final Label attributionLabel = new Label("© OpenStreetMap contributors");
+    private final Label attributionLabel = new Label();
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
+            .version(HttpClient.Version.HTTP_2)
             .build();
-    private final ExecutorService tileExecutor = Executors.newFixedThreadPool(4, runnable -> {
-        Thread thread = new Thread(runnable, "meshapp-osm-tile-loader");
+    private final ExecutorService tileExecutor = Executors.newFixedThreadPool(2, runnable -> {
+        Thread thread = new Thread(runnable, "meshapp-tile-loader");
         thread.setDaemon(true);
         return thread;
     });
@@ -120,10 +120,12 @@ public class TileMapView extends StackPane {
             }
     );
     private final Set<TileKey> inFlightDownloads = ConcurrentHashMap.newKeySet();
+    private volatile Set<TileKey> visibleTiles = Set.of();
     private final List<GeoPoint> measurePoints = new ArrayList<>();
 
     private List<MapMarker> markers = List.of();
     private List<TraceSegment> traceSegments = List.of();
+    private TileSource tileSource = TileSource.configured(System.getProperties());
     private Path externalTileRoot;
     private GeoBounds selectedArea;
     private boolean offlineOnly;
@@ -175,6 +177,7 @@ public class TileMapView extends StackPane {
         measureLayer.setMouseTransparent(true);
         attributionLabel.getStyleClass().add("map-attribution-label");
         attributionLabel.setMouseTransparent(true);
+        attributionLabel.setText(tileSource.attribution());
 
         getChildren().addAll(tileLayer, areaLayer, traceLayer, markerLayer, measureLayer, attributionLabel);
         StackPane.setAlignment(attributionLabel, Pos.BOTTOM_LEFT);
@@ -598,123 +601,37 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Returns the number of tiles that would be downloaded for the selected area.
+     * Returns the built-in cache directory dedicated to the current source.
+     *
+     * @return source-specific local tile cache path
      */
-    public long downloadTileCount() {
-        return downloadTilePlan().totalTiles();
-    }
-
-    /** @return {@code true} if the user explicitly selected an area for download */
-    public boolean hasSelectedArea() {
-        return selectedArea != null;
-    }
-
-    /** @return path to the built-in local tile cache */
     public Path cacheRoot() {
-        return CACHE_ROOT;
+        return CACHE_BASE.resolve(tileSource.id());
     }
 
     /**
-     * Downloads tiles into the built-in cache.
-     * <p>
-     * Only tiles from the explicitly selected area are downloaded, across all
-     * supported zoom levels. The download plan is stored as tile ranges so large
-     * areas do not materialize millions of key objects in memory.
+     * Returns the source used for interactive network requests.
      *
-     * @param progressConsumer receives download progress updates
+     * @return current tile source
      */
-    public DownloadHandle downloadSelectedAreaTiles(Consumer<DownloadProgress> progressConsumer) {
-        TileDownloadPlan plan = downloadTilePlan();
-        if (plan.isEmpty()) {
-            progressConsumer.accept(new DownloadProgress(
-                    0,
-                    0,
-                    0,
-                    I18n.t("map.download.selectAreaForTiles"),
-                    DownloadState.CANCELLED
-            ));
-            return DownloadHandle.inactive();
-        }
+    public TileSource getTileSource() {
+        return tileSource;
+    }
 
-        DownloadHandle handle = new DownloadHandle();
-        Future<?> future = tileExecutor.submit(() -> {
-            AtomicLong completed = new AtomicLong();
-            AtomicLong available = new AtomicLong();
-            long total = plan.totalTiles();
-            long lastUiUpdate = 0;
-            boolean cancelled = false;
-
-            downloadLoop:
-            for (TileRange range : plan.ranges()) {
-                for (int x = range.startX(); x <= range.endX(); x++) {
-                    for (int y = range.startY(); y <= range.endY(); y++) {
-                        if (handle.isCancelled()) {
-                            cancelled = true;
-                            break downloadLoop;
-                        }
-                        try {
-                            handle.awaitIfPaused();
-                        } catch (InterruptedException ignored) {
-                            Thread.currentThread().interrupt();
-                            cancelled = true;
-                            break downloadLoop;
-                        }
-                        if (handle.isCancelled()) {
-                            cancelled = true;
-                            break downloadLoop;
-                        }
-
-                        TileKey key = new TileKey(range.zoom(), x, y);
-                        boolean ok = false;
-                        try {
-                            ok = hasLocalTile(key) || downloadTileFromNetwork(key);
-                            if (ok) {
-                                available.incrementAndGet();
-                            }
-                        } catch (InterruptedException ignored) {
-                            Thread.currentThread().interrupt();
-                            cancelled = true;
-                            break downloadLoop;
-                        } catch (IOException ignored) {
-                            // Partial downloads are still useful for offline use.
-                        }
-
-                        long done = completed.incrementAndGet();
-                        long cached = available.get();
-                        long now = System.nanoTime();
-                        if (done >= total || now - lastUiUpdate >= 250_000_000L) {
-                            lastUiUpdate = now;
-                            Platform.runLater(() -> progressConsumer.accept(new DownloadProgress(
-                                    done,
-                                    total,
-                                    cached,
-                                    I18n.t("map.download.loadedProgress", done, total),
-                                    DownloadState.RUNNING
-                            )));
-                        }
-                        if (Thread.currentThread().isInterrupted()) {
-                            cancelled = true;
-                            break downloadLoop;
-                        }
-                    }
-                }
-            }
-
-            long done = completed.get();
-            long cached = available.get();
-            DownloadState finalState = cancelled || handle.isCancelled()
-                    ? DownloadState.CANCELLED
-                    : DownloadState.COMPLETED;
-            String message = finalState == DownloadState.CANCELLED
-                    ? I18n.t("map.download.cancelledProgress", done, total)
-                    : I18n.t("map.download.loadedProgress", done, total);
-            Platform.runLater(() -> {
-                progressConsumer.accept(new DownloadProgress(done, total, cached, message, finalState));
-                render();
-            });
-        });
-        handle.attach(future);
-        return handle;
+    /**
+     * Changes the source used for interactive viewport requests. This component
+     * intentionally exposes no bulk-download operation, regardless of source.
+     * Existing external offline tiles remain connected and continue to take priority.
+     *
+     * @param tileSource new interactive tile source
+     * @throws NullPointerException if {@code tileSource} is {@code null}
+     */
+    public void setTileSource(TileSource tileSource) {
+        this.tileSource = java.util.Objects.requireNonNull(tileSource, "tileSource");
+        attributionLabel.setText(tileSource.attribution());
+        memoryCache.clear();
+        nightMemoryCache.clear();
+        render();
     }
 
     /**
@@ -789,10 +706,12 @@ public class TileMapView extends StackPane {
      */
     private void render() {
         if (getWidth() <= 0 || getHeight() <= 0) {
+            visibleTiles = Set.of();
             return;
         }
 
         tileLayer.getChildren().clear();
+        visibleTiles = Set.copyOf(new HashSet<>(visibleTileKeys()));
         int tileCount = 1 << zoom;
         double centerX = lonToPixelX(centerLongitude, zoom);
         double centerY = latToPixelY(centerLatitude, zoom);
@@ -839,6 +758,9 @@ public class TileMapView extends StackPane {
             imageView.setFitHeight(TILE_SIZE);
             imageView.setSmooth(true);
             tile.getChildren().add(imageView);
+            if (!offlineOnly && networkLoadNeeded(key)) {
+                downloadTileIfNeeded(key);
+            }
             return tile;
         }
 
@@ -952,7 +874,7 @@ public class TileMapView extends StackPane {
      * Schedules a background tile download if it is not already loading and is absent locally.
      */
     private void downloadTileIfNeeded(TileKey key) {
-        if (inFlightDownloads.contains(key) || hasLocalTile(key)) {
+        if (!visibleTiles.contains(key) || inFlightDownloads.contains(key) || !networkLoadNeeded(key)) {
             return;
         }
         if (!inFlightDownloads.add(key)) {
@@ -961,6 +883,9 @@ public class TileMapView extends StackPane {
 
         tileExecutor.submit(() -> {
             try {
+                if (!visibleTiles.contains(key)) {
+                    return;
+                }
                 downloadTileFromNetwork(key);
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
@@ -968,9 +893,20 @@ public class TileMapView extends StackPane {
                 // Missing network/cache is represented by the placeholder tile.
             } finally {
                 inFlightDownloads.remove(key);
-                Platform.runLater(this::render);
+                if (visibleTiles.contains(key)) {
+                    Platform.runLater(this::render);
+                }
             }
         });
+    }
+
+    /** Returns whether the visible tile is missing or its HTTP cache lifetime has expired. */
+    private boolean networkLoadNeeded(TileKey key) {
+        if (findTileInRoot(externalTileRoot, key) != null) {
+            return false;
+        }
+        Path cached = cachePath(key);
+        return !Files.isRegularFile(cached) || !TileCacheMetadata.isFresh(cached, Instant.now());
     }
 
     /**
@@ -980,18 +916,28 @@ public class TileMapView extends StackPane {
      */
     private boolean downloadTileFromNetwork(TileKey key) throws IOException, InterruptedException {
         Path target = cachePath(key);
-        if (Files.isRegularFile(target)) {
+        boolean cached = Files.isRegularFile(target);
+        if (cached && TileCacheMetadata.isFresh(target, Instant.now())) {
             return true;
         }
 
         Files.createDirectories(target.getParent());
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("https://tile.openstreetmap.org/" + key.zoom() + "/" + key.x() + "/" + key.y() + ".png"))
+        TileCacheMetadata previous = TileCacheMetadata.load(target).orElse(null);
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                .uri(tileSource.tileUri(key.zoom(), key.x(), key.y()))
                 .timeout(Duration.ofSeconds(20))
                 .header("User-Agent", userAgent())
-                .GET()
-                .build();
+                .GET();
+        if (cached && previous != null) {
+            previous.addValidators(requestBuilder);
+        }
+        HttpRequest request = requestBuilder.build();
         HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        Instant now = Instant.now();
+        if (response.statusCode() == 304 && cached) {
+            TileCacheMetadata.fromHeaders(response.headers(), now, previous).save(target);
+            return true;
+        }
         if (response.statusCode() != 200 || response.body() == null || response.body().length == 0) {
             return false;
         }
@@ -1003,6 +949,7 @@ public class TileMapView extends StackPane {
         } catch (IOException atomicMoveFailed) {
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
         }
+        TileCacheMetadata.fromHeaders(response.headers(), now, previous).save(target);
         memoryCache.remove(key);
         nightMemoryCache.remove(key);
         return true;
@@ -1013,14 +960,17 @@ public class TileMapView extends StackPane {
      */
     private String userAgent() {
         String version = MeshApp.APPLICATION_VERSION != null ? MeshApp.APPLICATION_VERSION : "dev";
-        return "MeshApp/" + version + " JavaFX OSM tile client";
+        return userAgent(version);
     }
 
     /**
-     * Checks whether a tile exists in the external directory or the built-in cache.
+     * Builds the stable, contactable identity sent to raster tile providers.
+     *
+     * @param version application version
+     * @return HTTP User-Agent value
      */
-    private boolean hasLocalTile(TileKey key) {
-        return findLocalTile(key) != null;
+    static String userAgent(String version) {
+        return "MeshApp/" + version + " (+" + PROJECT_URL + "; contact: " + CONTACT_EMAIL + ")";
     }
 
     /**
@@ -1031,7 +981,7 @@ public class TileMapView extends StackPane {
         if (external != null) {
             return external;
         }
-        return findTileInRoot(CACHE_ROOT, key);
+        return findTileInRoot(cacheRoot(), key);
     }
 
     /**
@@ -1055,7 +1005,7 @@ public class TileMapView extends StackPane {
      * Returns the path where the tile should be stored in the built-in cache.
      */
     private Path cachePath(TileKey key) {
-        return CACHE_ROOT
+        return cacheRoot()
                 .resolve(Integer.toString(key.zoom()))
                 .resolve(Integer.toString(key.x()))
                 .resolve(key.y() + ".png");
@@ -1090,58 +1040,6 @@ public class TileMapView extends StackPane {
             }
         }
         return keys;
-    }
-
-    /**
-     * Builds a tile-download plan without materializing every key.
-     */
-    private TileDownloadPlan downloadTilePlan() {
-        if (selectedArea == null) {
-            return TileDownloadPlan.empty();
-        }
-        return areaTilePlan(selectedArea, MIN_ZOOM, MAX_ZOOM);
-    }
-
-    /**
-     * Computes tile ranges that intersect a geographic area.
-     */
-    private static TileDownloadPlan areaTilePlan(GeoBounds area, int minZoom, int maxZoom) {
-        if (area == null) {
-            return TileDownloadPlan.empty();
-        }
-
-        List<TileRange> ranges = new ArrayList<>();
-        long totalTiles = 0;
-        int startZoom = clampZoom(minZoom);
-        int endZoom = clampZoom(maxZoom);
-        if (startZoom > endZoom) {
-            return TileDownloadPlan.empty();
-        }
-
-        for (int tileZoom = startZoom; tileZoom <= endZoom; tileZoom++) {
-            int tileCount = 1 << tileZoom;
-            double westTile = lonToPixelX(area.west(), tileZoom) / TILE_SIZE;
-            double eastTile = lonToPixelX(area.east(), tileZoom) / TILE_SIZE;
-            double northTile = latToPixelY(area.north(), tileZoom) / TILE_SIZE;
-            double southTile = latToPixelY(area.south(), tileZoom) / TILE_SIZE;
-
-            int startX = clampTileIndex((int) Math.floor(Math.min(westTile, eastTile)), tileCount);
-            int endX = clampTileIndex((int) Math.floor(Math.max(westTile, eastTile)), tileCount);
-            int startY = clampTileIndex((int) Math.floor(Math.min(northTile, southTile)), tileCount);
-            int endY = clampTileIndex((int) Math.floor(Math.max(northTile, southTile)), tileCount);
-
-            TileRange range = new TileRange(tileZoom, startX, endX, startY, endY);
-            ranges.add(range);
-            totalTiles += range.count();
-        }
-        return new TileDownloadPlan(List.copyOf(ranges), totalTiles);
-    }
-
-    /**
-     * Clamps a tile index to the valid range for the zoom level.
-     */
-    private static int clampTileIndex(int value, int tileCount) {
-        return Math.max(0, Math.min(tileCount - 1, value));
     }
 
     /**
@@ -1729,81 +1627,6 @@ public class TileMapView extends StackPane {
     }
 
     /**
-     * Download progress for the selected area's tiles.
-     *
-     * @param completed number of processed tiles
-     * @param total     total number of tiles
-     * @param available number of tiles available locally after processing
-     * @param message   user-facing progress message
-     * @param state     current download state
-     */
-    public record DownloadProgress(long completed, long total, long available, String message, DownloadState state) {
-    }
-
-    /**
-     * State of the background tile download.
-     */
-    public enum DownloadState {
-        RUNNING, CANCELLED, COMPLETED
-    }
-
-    /**
-     * Controls the active background tile download.
-     */
-    public static final class DownloadHandle {
-        private final AtomicBoolean paused = new AtomicBoolean(false);
-        private final AtomicBoolean cancelled = new AtomicBoolean(false);
-        private final Object pauseLock = new Object();
-        private volatile Future<?> future;
-
-        private static DownloadHandle inactive() {
-            return new DownloadHandle();
-        }
-
-        private void attach(Future<?> future) {
-            this.future = future;
-        }
-
-        public void pause() {
-            if (!cancelled.get()) {
-                paused.set(true);
-            }
-        }
-
-        public void resume() {
-            paused.set(false);
-            synchronized (pauseLock) {
-                pauseLock.notifyAll();
-            }
-        }
-
-        public void cancel() {
-            cancelled.set(true);
-            resume();
-            Future<?> task = future;
-            if (task != null) {
-                task.cancel(true);
-            }
-        }
-
-        public boolean isPaused() {
-            return paused.get();
-        }
-
-        public boolean isCancelled() {
-            return cancelled.get();
-        }
-
-        private void awaitIfPaused() throws InterruptedException {
-            synchronized (pauseLock) {
-                while (paused.get() && !cancelled.get()) {
-                    pauseLock.wait();
-                }
-            }
-        }
-    }
-
-    /**
      * One visual trace segment between two nodes with coordinates.
      *
      * @param from       segment start point
@@ -1842,28 +1665,6 @@ public class TileMapView extends StackPane {
             double west = Math.min(first.longitude(), second.longitude());
             double east = Math.max(first.longitude(), second.longitude());
             return new GeoBounds(north, south, west, east);
-        }
-    }
-
-    /**
-     * Offline-download plan represented as tile ranges instead of a full key list.
-     */
-    private record TileDownloadPlan(List<TileRange> ranges, long totalTiles) {
-        static TileDownloadPlan empty() {
-            return new TileDownloadPlan(List.of(), 0);
-        }
-
-        boolean isEmpty() {
-            return totalTiles <= 0 || ranges.isEmpty();
-        }
-    }
-
-    /**
-     * Rectangular tile range at a single zoom level.
-     */
-    private record TileRange(int zoom, int startX, int endX, int startY, int endY) {
-        long count() {
-            return ((long) endX - startX + 1) * ((long) endY - startY + 1);
         }
     }
 

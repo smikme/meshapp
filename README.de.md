@@ -145,9 +145,11 @@ Der Verlauf der Routenprüfungen wird für jeden Knoten separat gespeichert. Ein
   <img src="docs/screenshots/map-w.jpg" width="49%" alt="Karte - helles Theme"/>
 </p>
 
-Die Karte zeigt Knoten mit Koordinaten und gespeicherte Routen. Unterstützt werden Online-Kacheln von OpenStreetMap, ein lokaler Cache und ein Offline-Kachelverzeichnis im Format `z/x/y.png|jpg|jpeg`.
+Die Karte zeigt Knoten mit Koordinaten und gespeicherte Routen. Unterstützt werden interaktive OpenStreetMap-Kacheln, ein HTTP-konformer lokaler Cache und ein bereits vorhandenes Offline-Kachelverzeichnis im Format `z/x/y.png|jpg|jpeg`.
 
-Die Karte bietet Suche, Filter, Sprung zum eigenen Gerät, Übersicht aller Knoten mit Koordinaten, Nachtmodus, Entfernungsmessung und rechteckige Bereichsauswahl. Der ausgewählte Bereich kann für die Nutzung ohne Internetzugang heruntergeladen werden; der Download lässt sich pausieren oder abbrechen.
+Die Karte bietet Suche, Filter, Sprung zum eigenen Gerät, Übersicht aller Knoten mit Koordinaten, Nachtmodus, Entfernungsmessung und rechteckige Bereichsauswahl. MeshApp fordert nur Kacheln des aktuell sichtbaren interaktiven Ausschnitts an und lädt keine OpenStreetMap-Bereiche gesammelt herunter. Für die Offline-Nutzung kann ein separat bezogenes Kachelverzeichnis aus einer Quelle eingebunden werden, deren Bedingungen dies erlauben.
+
+Ein anderer interaktiver Anbieter kann beim Start über die JVM-Eigenschaften `meshapp.map.tileSource.url`, `meshapp.map.tileSource.id`, `meshapp.map.tileSource.attribution`, `meshapp.map.tileSource.minZoom` und `meshapp.map.tileSource.maxZoom` ausgewählt werden. Die URL-Vorlage muss `{z}`, `{x}` und `{y}` enthalten. Die Laufzeitkonfiguration aktiviert niemals Massendownloads.
 
 ---
 

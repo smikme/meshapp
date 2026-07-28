@@ -145,9 +145,11 @@ Route check history is stored separately for each node. A saved route can be ope
   <img src="docs/screenshots/map-w.jpg" width="49%" alt="Map - light theme"/>
 </p>
 
-The map shows nodes with coordinates and saved routes. Network OpenStreetMap tiles, local cache, and an offline tile directory in `z/x/y.png|jpg|jpeg` format are supported.
+The map shows nodes with coordinates and saved routes. Interactive OpenStreetMap tiles, an HTTP-compliant local cache, and a pre-existing offline tile directory in `z/x/y.png|jpg|jpeg` format are supported.
 
-The map includes search, filters, jump to your own device, overview of all nodes with coordinates, night mode, distance measurement, and rectangular area selection. The selected area can be downloaded for use without internet access; the download can be paused or canceled.
+The map includes search, filters, jump to your own device, overview of all nodes with coordinates, night mode, distance measurement, and rectangular area selection. MeshApp requests only tiles visible in the current interactive viewport and does not bulk-download OpenStreetMap areas. For offline work, connect a tile directory obtained separately from a source whose terms permit offline use.
+
+An alternative interactive provider can be selected at startup with the JVM properties `meshapp.map.tileSource.url`, `meshapp.map.tileSource.id`, `meshapp.map.tileSource.attribution`, `meshapp.map.tileSource.minZoom`, and `meshapp.map.tileSource.maxZoom`. The URL template must contain `{z}`, `{x}`, and `{y}`. Runtime configuration never enables bulk downloading.
 
 ---
 
