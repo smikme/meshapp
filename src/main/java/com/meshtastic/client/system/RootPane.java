@@ -7,6 +7,7 @@ import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.platform.NativeWindowHelper;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.tray.AppTrayManager;
@@ -224,7 +225,7 @@ public class RootPane extends BorderPane {
         }
         Stage stage = MeshApp.getPrimaryStage();
         if (stage != null) {
-            stage.setTitle(title);
+            NativeWindowHelper.setWindowTitle(stage, title);
         }
     }
 

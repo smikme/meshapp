@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.utils.AppPreferences;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -87,6 +88,14 @@ public final class RemoteChatJson {
     }
 
     public static List<ChatItem> parseChatItems(JsonElement result) {
+        return parseChatItems(result, null);
+    }
+
+    /**
+     * Parses a remote chat snapshot and applies notification preferences stored
+     * by this RPC client for the supplied connection scope.
+     */
+    public static List<ChatItem> parseChatItems(JsonElement result, String notificationOwnerId) {
         JsonArray items = objectArray(result, "items");
         List<ChatItem> parsed = new ArrayList<>();
         for (JsonElement element : items) {
@@ -97,6 +106,16 @@ public final class RemoteChatJson {
             ChatItem.ChatType type = "DIRECT_MESSAGE".equals(stringField(item, "type"))
                     ? ChatItem.ChatType.DIRECT_MESSAGE
                     : ChatItem.ChatType.CHANNEL;
+            int channelIndex = intField(item, "channelIndex");
+            String peerNodeId = stringField(item, "peerNodeId");
+            boolean muted = booleanField(item, "muted");
+            if (notificationOwnerId != null && !notificationOwnerId.isBlank()) {
+                String chatType = type == ChatItem.ChatType.DIRECT_MESSAGE ? "dm" : "channel";
+                String chatKey = type == ChatItem.ChatType.DIRECT_MESSAGE
+                        ? peerNodeId
+                        : String.valueOf(channelIndex);
+                muted = AppPreferences.isChatMuted(notificationOwnerId, chatType, chatKey);
+            }
             parsed.add(ChatItem.remote(
                     type,
                     stringField(item, "displayName"),
@@ -105,9 +124,9 @@ public final class RemoteChatJson {
                     stringField(item, "lastMessageText"),
                     longField(item, "lastMessageTime"),
                     intField(item, "unreadCount"),
-                    intField(item, "channelIndex"),
-                    stringField(item, "peerNodeId"),
-                    booleanField(item, "muted")));
+                    channelIndex,
+                    peerNodeId,
+                    muted));
         }
         return parsed;
     }

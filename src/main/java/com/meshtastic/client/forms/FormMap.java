@@ -35,7 +35,6 @@ import javafx.scene.control.CustomMenuItem;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.OverrunStyle;
-import javafx.scene.control.ProgressBar;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
@@ -85,7 +84,6 @@ public class FormMap extends Form {
     private static final int RECENT_TRACE_LIMIT = 20;
     private static final int TRACE_NODE_CACHE_LIMIT = 2_000;
     private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
-    private static final double DOWNLOAD_PROGRESS_WIDTH = 180;
     private static final double STATUS_LEGEND_WIDTH = 260;
     private static final Pattern TRACE_SEGMENT_PATTERN = Pattern.compile(" →(-?\\d+[.,]\\d+)dB→ | → ");
     private static final Pattern TRACE_NODE_ID_PATTERN = Pattern.compile("!([0-9a-fA-F]{1,8})");
@@ -98,9 +96,6 @@ public class FormMap extends Form {
     private final Label measureLabel = new Label();
     private final Label areaLabel = new Label();
     private final Label tileDirectoryLabel = new Label();
-    private final ProgressBar downloadProgressBar = new ProgressBar(0);
-    private final Button downloadPauseButton = new Button();
-    private final Button downloadCancelButton = new Button();
     private final TextField searchField = new TextField();
     private final ContextMenu searchSuggestionMenu = new ContextMenu();
     private final Button favoriteFilterButton = new Button();
@@ -112,7 +107,6 @@ public class FormMap extends Form {
     private final Button fitNodesButton = new Button();
     private final Button tracesButton = new Button();
     private final ContextMenu tracesMenu = new ContextMenu();
-    private final Button downloadButton = new Button(I18n.t("map.downloadArea"));
 
     private DeviceState state;
     private RemoteRpcState remoteRpcState;
@@ -129,8 +123,6 @@ public class FormMap extends Form {
     private List<String> currentSearchInsertTexts = List.of();
     private List<CustomMenuItem> currentSearchSuggestionItems = List.of();
     private int selectedSearchSuggestionIndex = -1;
-    private TileMapView.DownloadHandle activeDownload;
-    private boolean downloadPaused;
     private final Map<Long, ParsedTrace> selectedTraces = new LinkedHashMap<>();
     private List<ParsedTrace> recentTraces = List.of();
     private Map<String, NodeData> currentMarkerNodes = Map.of();
@@ -311,9 +303,6 @@ public class FormMap extends Form {
         Button zoomOutButton = iconButton("−", I18n.t("map.zoom.out"));
         zoomOutButton.setOnAction(event -> mapView.zoomOut());
 
-        downloadButton.setTooltip(new Tooltip(I18n.t("map.tooltip.downloadArea")));
-        downloadButton.setOnAction(event -> downloadSelectedAreaTiles());
-
         Button tileDirectoryButton = new Button(I18n.t("map.tileDirectory.button"));
         tileDirectoryButton.setTooltip(new Tooltip(I18n.t("map.tooltip.tileDirectory")));
         tileDirectoryButton.setOnAction(event -> chooseTileDirectory());
@@ -334,7 +323,6 @@ public class FormMap extends Form {
                 clearMeasureButton,
                 nightModeButton,
                 offlineButton,
-                downloadButton,
                 tileDirectoryButton
         );
         toolbar.getStyleClass().add("map-toolbar");
@@ -351,22 +339,10 @@ public class FormMap extends Form {
         tileDirectoryLabel.getStyleClass().add("map-status-label");
         tileDirectoryLabel.setTextOverrun(OverrunStyle.LEADING_ELLIPSIS);
         tileDirectoryLabel.setMaxWidth(Double.MAX_VALUE);
-        downloadProgressBar.setMinWidth(DOWNLOAD_PROGRESS_WIDTH);
-        downloadProgressBar.setPrefWidth(DOWNLOAD_PROGRESS_WIDTH);
-        downloadProgressBar.setMaxWidth(DOWNLOAD_PROGRESS_WIDTH);
-        configureDownloadControlButton(downloadPauseButton, "/icons/pause.svg", I18n.t("map.tooltip.downloadPause"), "||");
-        configureDownloadControlButton(downloadCancelButton, "/icons/close.svg", I18n.t("map.tooltip.downloadCancel"), "x");
-        downloadPauseButton.setOnAction(event -> toggleDownloadPause());
-        downloadCancelButton.setOnAction(event -> cancelDownload());
-        hideDownloadProgress();
         updateTileDirectoryLabel();
-
-        HBox downloadProgressBox = new HBox(4, downloadProgressBar, downloadPauseButton, downloadCancelButton);
-        downloadProgressBox.setAlignment(Pos.CENTER_LEFT);
 
         HBox statusBar = new HBox(
                 16,
-                downloadProgressBox,
                 statusLabel,
                 pointerLabel,
                 measureLabel,
@@ -1316,32 +1292,6 @@ public class FormMap extends Form {
     }
 
     /**
-     * Configures a compact download-control button next to the progress bar.
-     */
-    private void configureDownloadControlButton(Button button, String iconPath, String tooltip, String fallbackText) {
-        button.getStyleClass().add("map-progress-icon-button");
-        button.setFocusTraversable(false);
-        button.setTooltip(new Tooltip(tooltip));
-        setButtonIcon(button, iconPath, fallbackText, 14);
-    }
-
-    /**
-     * Updates a button icon while keeping text fallback for a missing SVG.
-     */
-    private void setButtonIcon(Button button, String iconPath, String fallbackText, double size) {
-        SVGPath icon = SvgIconLoader.load(iconPath, size);
-        if (icon != null) {
-            button.setGraphic(icon);
-            button.setText(null);
-            button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-        } else {
-            button.setGraphic(null);
-            button.setText(fallbackText);
-            button.setContentDisplay(ContentDisplay.TEXT_ONLY);
-        }
-    }
-
-    /**
      * Configures a toggle map-panel button as an icon with a tooltip.
      */
     private void configureIconToggleButton(ToggleButton button, String iconPath, String tooltip) {
@@ -1753,130 +1703,6 @@ public class FormMap extends Form {
         } else {
             tileDirectoryLabel.setText(I18n.t("map.tileDirectory.external", root));
         }
-    }
-
-    /**
-     * Starts downloading tiles into the local cache and displays progress.
-     */
-    private void downloadSelectedAreaTiles() {
-        if (!mapView.hasSelectedArea()) {
-            String message = I18n.t("map.download.selectAreaFirst");
-            statusLabel.setText(message);
-            hideDownloadProgress();
-            Toast.show(Toast.Type.WARNING, message);
-            return;
-        }
-
-        downloadButton.setDisable(true);
-        long count = mapView.downloadTileCount();
-        if (count <= 0) {
-            downloadButton.setDisable(false);
-            String message = I18n.t("map.download.noTiles");
-            statusLabel.setText(message);
-            Toast.show(Toast.Type.WARNING, message);
-            return;
-        }
-
-        downloadPaused = false;
-        updateDownloadPauseButton();
-        statusLabel.setText(I18n.t("map.download.starting", count, pluralUnit("map.status.tile", count)));
-        showDownloadProgress(0);
-
-        TileMapView.DownloadHandle[] handleRef = new TileMapView.DownloadHandle[1];
-        TileMapView.DownloadHandle handle = mapView.downloadSelectedAreaTiles(progress -> {
-            if (activeDownload != handleRef[0]) {
-                return;
-            }
-            handleDownloadProgress(progress);
-        });
-        handleRef[0] = handle;
-        activeDownload = handle;
-    }
-
-    private void handleDownloadProgress(TileMapView.DownloadProgress progress) {
-        if (progress.total() == 0) {
-            finishDownload(progress.message());
-            return;
-        }
-
-        showDownloadProgress((double) progress.completed() / progress.total());
-        if (progress.state() == TileMapView.DownloadState.CANCELLED) {
-            finishDownload(progress.message());
-            return;
-        }
-        if (progress.state() == TileMapView.DownloadState.COMPLETED || progress.completed() >= progress.total()) {
-            finishDownload(I18n.t("map.download.available",
-                    progress.available(),
-                    progress.total(),
-                    pluralUnit("map.status.tile", progress.total())));
-            return;
-        }
-
-        statusLabel.setText(downloadPaused
-                ? I18n.t("map.download.pausedProgress", progress.completed(), progress.total())
-                : progress.message());
-    }
-
-    private void toggleDownloadPause() {
-        if (activeDownload == null) {
-            return;
-        }
-        if (downloadPaused) {
-            activeDownload.resume();
-            downloadPaused = false;
-            statusLabel.setText(I18n.t("map.download.resumed"));
-        } else {
-            activeDownload.pause();
-            downloadPaused = true;
-            statusLabel.setText(I18n.t("map.download.paused"));
-        }
-        updateDownloadPauseButton();
-    }
-
-    private void updateDownloadPauseButton() {
-        if (downloadPaused) {
-            setButtonIcon(downloadPauseButton, "/icons/play.svg", ">", 14);
-            downloadPauseButton.setTooltip(new Tooltip(I18n.t("map.tooltip.downloadResume")));
-        } else {
-            setButtonIcon(downloadPauseButton, "/icons/pause.svg", "||", 14);
-            downloadPauseButton.setTooltip(new Tooltip(I18n.t("map.tooltip.downloadPause")));
-        }
-    }
-
-    private void cancelDownload() {
-        if (activeDownload == null) {
-            return;
-        }
-        activeDownload.cancel();
-        finishDownload(I18n.t("map.download.cancelled"));
-    }
-
-    private void finishDownload(String message) {
-        activeDownload = null;
-        downloadPaused = false;
-        downloadButton.setDisable(false);
-        statusLabel.setText(message);
-        updateDownloadPauseButton();
-        hideDownloadProgress();
-    }
-
-    private void showDownloadProgress(double progress) {
-        setDownloadProgressVisible(true);
-        downloadProgressBar.setProgress(Math.max(0, Math.min(1, progress)));
-    }
-
-    private void hideDownloadProgress() {
-        downloadProgressBar.setProgress(0);
-        setDownloadProgressVisible(false);
-    }
-
-    private void setDownloadProgressVisible(boolean visible) {
-        downloadProgressBar.setVisible(visible);
-        downloadProgressBar.setManaged(visible);
-        downloadPauseButton.setVisible(visible);
-        downloadPauseButton.setManaged(visible);
-        downloadCancelButton.setVisible(visible);
-        downloadCancelButton.setManaged(visible);
     }
 
     /**

@@ -147,6 +147,7 @@ static atomic_int g_profile;
 
 static task_queue_t g_tasks;
 static int g_wake_pipe[2] = {-1, -1};
+static pthread_mutex_t g_lifecycle_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static char g_adapter_path[MAX_PATH];
 static char g_device_path[MAX_PATH];
@@ -206,8 +207,14 @@ static void wake_worker(void) {
     if (write(g_wake_pipe[1], &b, 1) < 0) { /* ignore */ }
 }
 
-/** Post task to worker thread, block until done */
-static void run_on_worker(void (*func)(void* ctx), void* ctx) {
+/** Post task to worker thread, block until done. Returns false after shutdown. */
+static bool run_on_worker(void (*func)(void* ctx), void* ctx) {
+    if (atomic_load(&g_initialized) && atomic_load(&g_worker_running)
+            && pthread_equal(pthread_self(), g_worker_thread)) {
+        func(ctx);
+        return true;
+    }
+
     sync_call_t sc;
     sc.func = func;
     sc.ctx = ctx;
@@ -215,8 +222,16 @@ static void run_on_worker(void (*func)(void* ctx), void* ctx) {
     pthread_mutex_init(&sc.mutex, NULL);
     pthread_cond_init(&sc.cond, NULL);
 
+    pthread_mutex_lock(&g_lifecycle_mutex);
+    if (!atomic_load(&g_initialized) || !atomic_load(&g_worker_running)) {
+        pthread_mutex_unlock(&g_lifecycle_mutex);
+        pthread_mutex_destroy(&sc.mutex);
+        pthread_cond_destroy(&sc.cond);
+        return false;
+    }
     tq_push(&g_tasks, sync_call_wrapper, &sc);
     wake_worker();
+    pthread_mutex_unlock(&g_lifecycle_mutex);
 
     pthread_mutex_lock(&sc.mutex);
     while (!sc.done) pthread_cond_wait(&sc.cond, &sc.mutex);
@@ -224,6 +239,7 @@ static void run_on_worker(void (*func)(void* ctx), void* ctx) {
 
     pthread_mutex_destroy(&sc.mutex);
     pthread_cond_destroy(&sc.cond);
+    return true;
 }
 
 /* ==================== Helpers ==================== */
@@ -1847,8 +1863,10 @@ MESHBLE_API void meshble_cleanup(void) {
     run_on_worker(do_disconnect_wrapper, NULL);
     run_on_worker(do_stop_scan_wrapper, NULL);
 
+    pthread_mutex_lock(&g_lifecycle_mutex);
     atomic_store(&g_worker_running, false);
     wake_worker();
+    pthread_mutex_unlock(&g_lifecycle_mutex);
     pthread_join(g_worker_thread, NULL);
 
     tq_destroy(&g_tasks);
@@ -1884,7 +1902,7 @@ MESHBLE_API void meshble_set_profile(int profile) {
 MESHBLE_API int meshble_start_scan(meshble_device_cb callback) {
     if (!atomic_load(&g_initialized) || !callback) return -1;
     scan_ctx_t ctx = { .callback = callback, .result = 0 };
-    run_on_worker(do_start_scan, &ctx);
+    if (!run_on_worker(do_start_scan, &ctx)) return -1;
     return ctx.result;
 }
 
@@ -1901,7 +1919,7 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
     ctx.address[sizeof(ctx.address) - 1] = '\0';
     ctx.timeout_ms = timeout_ms;
     ctx.result = 0;
-    run_on_worker(do_connect, &ctx);
+    if (!run_on_worker(do_connect, &ctx)) return -1;
     return ctx.result;
 }
 
@@ -1949,7 +1967,7 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
     if (atomic_load(&g_use_dbus_write)) {
         /* D-Bus WriteValue — dispatch to worker thread (sd-bus not thread-safe) */
         write_ctx_t ctx = { .data = data, .length = length, .result = 0 };
-        run_on_worker(do_write_to_radio, &ctx);
+        if (!run_on_worker(do_write_to_radio, &ctx)) return -1;
         return ctx.result;
     }
 
@@ -1969,7 +1987,7 @@ MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int
 
     if (atomic_load(&g_use_dbus_read)) {
         read_ctx_t ctx = { .buffer = buffer, .buf_size = buf_size, .out_len = 0, .result = 0 };
-        run_on_worker(do_read_from_radio, &ctx);
+        if (!run_on_worker(do_read_from_radio, &ctx)) return -1;
         *out_len = ctx.out_len;
         return ctx.result;
     }
@@ -2016,6 +2034,7 @@ static void do_respond_passkey(void* arg) {
 }
 
 MESHBLE_API void meshble_respond_passkey(uint32_t passkey) {
+    if (!atomic_load(&g_initialized) || !atomic_load(&g_worker_running)) return;
     uint32_t pk = passkey;
     run_on_worker(do_respond_passkey, &pk);
 }
@@ -2031,5 +2050,6 @@ static void do_cancel_passkey(void* arg) {
 }
 
 MESHBLE_API void meshble_cancel_passkey(void) {
+    if (!atomic_load(&g_initialized) || !atomic_load(&g_worker_running)) return;
     run_on_worker(do_cancel_passkey, NULL);
 }

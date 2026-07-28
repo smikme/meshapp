@@ -7,6 +7,7 @@ import org.meshtastic.proto.Portnums;
 import org.meshtastic.proto.TelemetryProtos;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.HardwareModelNames;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
@@ -602,7 +603,9 @@ public class MessageListenerService implements FromRadioListener {
                 node.setRole(user.getRole().name());
             }
             if (user.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
-                node.setHwModel(user.getHwModel().name());
+                node.setHwModel(HardwareModelNames.forFirmware(
+                        user.getHwModel(),
+                        deviceState.getFirmwareCapabilities()));
             }
             if (!user.getPublicKey().isEmpty()) {
                 node.setPublicKey(user.getPublicKey().toByteArray());
@@ -613,7 +616,7 @@ public class MessageListenerService implements FromRadioListener {
             }
             deviceState.fireNodeUpdateListeners(fromNum);
             NodeCacheService.getInstance().update(node);
-            maybeSeedDirectContactFromNodeInfo(packet, node);
+            maybePrepareDirectThreadFromNodeInfo(packet, node);
             log.info("Received NODEINFO_APP from !{}: {} (unmessagable={})",
                     Integer.toHexString(fromNum), user.getLongName(),
                     user.hasIsUnmessagable() ? user.getIsUnmessagable() : null);
@@ -677,7 +680,7 @@ public class MessageListenerService implements FromRadioListener {
         return node;
     }
 
-    private static void applyUserInfo(NodeData node, MeshProtos.User user) {
+    private void applyUserInfo(NodeData node, MeshProtos.User user) {
         if (!user.getLongName().isEmpty()) {
             node.setLongName(user.getLongName());
         }
@@ -691,7 +694,9 @@ public class MessageListenerService implements FromRadioListener {
             node.setRole(user.getRole().name());
         }
         if (user.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
-            node.setHwModel(user.getHwModel().name());
+            node.setHwModel(HardwareModelNames.forFirmware(
+                    user.getHwModel(),
+                    deviceState.getFirmwareCapabilities()));
         }
         if (!user.getPublicKey().isEmpty()) {
             node.setPublicKey(user.getPublicKey().toByteArray());
@@ -702,17 +707,16 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
-    private void maybeSeedDirectContactFromNodeInfo(MeshProtos.MeshPacket packet, NodeData node) {
+    private void maybePrepareDirectThreadFromNodeInfo(MeshProtos.MeshPacket packet, NodeData node) {
         if (protocolHandler == null || node == null) { return; }
         if (packet.getFrom() == 0 || packet.getFrom() == deviceState.getMyNodeNum()) { return; }
         if (packet.getTo() != deviceState.getMyNodeNum()) { return; }
 
-        byte[] publicKey = node.getPublicKey();
-        if (publicKey == null || publicKey.length == 0) { return; }
+        String nodeId = node.getNodeId();
+        if (nodeId == null || nodeId.isBlank()) { return; }
 
-        deviceState.ensureDirectMessageThread(node.getNodeId());
-        MessageService.seedPeerContactForPki(protocolHandler, deviceState, node);
-        log.debug("Prepared local PKI contact for {} after directed NODEINFO_APP", node.getNodeId());
+        deviceState.ensureDirectMessageThread(nodeId);
+        log.debug("Prepared local direct message thread for {} after directed NODEINFO_APP", nodeId);
     }
 
     private void handlePositionResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {
@@ -758,6 +762,7 @@ public class MessageListenerService implements FromRadioListener {
 
             NodeData node = deviceState.getOrCreateNode(fromNum);
             TelemetryEntry entry = new TelemetryEntry(ts, node.getNodeId());
+            entry.setPacketId(Integer.toUnsignedLong(packet.getId()));
             TelemetryProtos.Telemetry.VariantCase variantCase = telemetry.getVariantCase();
             entry.setTelemetryVariant(variantCase.name());
             if (!node.hasName()) {
@@ -820,9 +825,18 @@ public class MessageListenerService implements FromRadioListener {
             entry.setHopStart(packet.getHopStart());
             entry.setHopLimit(packet.getHopLimit());
 
-            deviceState.addTelemetryEntry(entry);
             String ownerNodeId = String.format("!%08x", deviceState.getMyNodeNum());
-            NodeCacheService.getInstance().persistTelemetry(entry, ownerNodeId);
+            boolean stored = NodeCacheService.getInstance().persistTelemetry(
+                    entry,
+                    ownerNodeId,
+                    deviceState.getFirmwareCapabilities().firmware28OrNewer());
+            if (stored) {
+                deviceState.addTelemetryEntry(entry);
+            } else {
+                log.debug("Skipped duplicate firmware 2.8 telemetry replay packet {} from !{}",
+                        Long.toUnsignedString(entry.getPacketId()),
+                        Integer.toHexString(fromNum));
+            }
         } catch (InvalidProtocolBufferException e) {
             log.warn("Failed to parse Telemetry from TELEMETRY_APP packet from !{}", Integer.toHexString(fromNum), e);
         }
@@ -1064,7 +1078,9 @@ public class MessageListenerService implements FromRadioListener {
             node.setRole(owner.getRole().name());
         }
         if (owner.getHwModel() != MeshProtos.HardwareModel.UNSET || node.getHwModel() == null) {
-            node.setHwModel(owner.getHwModel().name());
+            node.setHwModel(HardwareModelNames.forFirmware(
+                    owner.getHwModel(),
+                    deviceState.getFirmwareCapabilities()));
         }
         if (!owner.getPublicKey().isEmpty()) {
             node.setPublicKey(owner.getPublicKey().toByteArray());

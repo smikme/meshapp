@@ -1,5 +1,6 @@
 package com.meshtastic.client.lua.api;
 
+import com.meshtastic.client.utils.AppPreferences;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -31,6 +32,7 @@ import java.util.Set;
  * This is not a wrapper around the system {@code curl} binary. Requests are
  * performed through Java {@link HttpClient}, while local and private addresses,
  * methods, headers, timeouts, and response size are constrained by the API.
+ * Address and URL-credential checks can be disabled from application settings.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -288,12 +290,15 @@ public final class LuaCurlApi {
         if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
             throw new LuaError("mesh.curl: only http and https are allowed");
         }
-        if (uri.getUserInfo() != null) {
-            throw new LuaError("mesh.curl: credentials in URL are not allowed");
-        }
         String host = uri.getHost();
         if (host == null || host.isBlank()) {
             throw new LuaError("mesh.curl: host is required");
+        }
+        if (AppPreferences.isLuaCurlSecurityRestrictionsDisabled()) {
+            return;
+        }
+        if (uri.getUserInfo() != null) {
+            throw new LuaError("mesh.curl: credentials in URL are not allowed");
         }
         try {
             for (InetAddress address : InetAddress.getAllByName(host)) {

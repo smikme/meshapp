@@ -478,7 +478,27 @@ public final class SelfUpdateLauncher {
             }
             result.add(arg);
         }
-        return result;
+        return withRequiredNativeAccess(result);
+    }
+
+    static List<String> withRequiredNativeAccess(List<String> input) {
+        java.util.LinkedHashSet<String> modules = new java.util.LinkedHashSet<>();
+        List<String> result = new ArrayList<>();
+        for (String arg : input) {
+            if (arg.startsWith("--enable-native-access=")) {
+                String configured = arg.substring("--enable-native-access=".length());
+                java.util.Arrays.stream(configured.split(","))
+                        .map(String::trim)
+                        .filter(module -> !module.isEmpty())
+                        .forEach(modules::add);
+            } else {
+                result.add(arg);
+            }
+        }
+        modules.add("javafx.graphics");
+        modules.add("ALL-UNNAMED");
+        result.add("--enable-native-access=" + String.join(",", modules));
+        return List.copyOf(result);
     }
 
     private static boolean skipJvmArgWithValue(String arg) {

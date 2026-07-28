@@ -1544,9 +1544,7 @@ abstract class FormChatUi extends FormChatBase {
 
     protected String currentOwnerNodeId() {
         if (remoteRpcState != null) {
-            return boundConnectionId == null || boundConnectionId.isBlank()
-                    ? "remote"
-                    : "remote:" + boundConnectionId;
+            return AppPreferences.remoteChatOwnerId(boundConnectionId);
         }
         return Optional.ofNullable(state)
                 .map(deviceState -> deviceState.getOwnerNodeId())

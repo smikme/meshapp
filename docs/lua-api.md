@@ -389,7 +389,7 @@ local body = mesh.json.encode({
 
 ## `mesh.curl`
 
-HTTP(S) requests are executed by the built-in Java HTTP client. Access to local, private, link-local and multicast addresses is blocked. URLs with credentials are also blocked.
+HTTP(S) requests are executed by the built-in Java HTTP client. By default, access to local, private, link-local and multicast addresses is blocked, and URLs with credentials are also blocked. These network security restrictions can be disabled in the application settings.
 
 | Function | Return | Purpose |
 |----------|--------|---------|

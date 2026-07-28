@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "sections": {
     "owner_info": {
       "summary": "Имя устройства и короткий позывной, которые видят другие пользователи сети.",
@@ -2864,6 +2864,106 @@
           "description": "Оперативная роль TAK: Кинолог/K9."
         }
       }
+    },
+    "meshtastic.Config.SecurityConfig.packet_signature_policy": {
+      "summary": "Определяет правила приёма и проверки подписанных mesh-пакетов.",
+      "whenToUse": "Изменяйте только для ноды с поддержкой XEdDSA, если сеть использует подписи пакетов.",
+      "defaultBehavior": "Значение по умолчанию сохраняет совместимость с обычным неподписанным трафиком."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.flags": {
+      "summary": "Выбирает включённые рассылки и предложения Mesh Beacon.",
+      "whenToUse": "Включайте только необходимые этой ноде функции маяка.",
+      "defaultBehavior": "Без флагов рассылки Mesh Beacon отключены."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_send_as_node": {
+      "summary": "Отправляет маяк от имени этой ноды.",
+      "whenToUse": "Включите, если получатели должны видеть ноду-источник маяка.",
+      "defaultBehavior": "При отключении прошивка использует стандартное представление источника маяка."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_message": {
+      "summary": "Текст, добавляемый в рассылки Mesh Beacon.",
+      "whenToUse": "Укажите короткое описание маяка или его назначения.",
+      "defaultBehavior": "Пустое значение не добавляет пользовательский текст."
+    },
+    "meshtastic.ChannelSettings.channel_num": {
+      "summary": "Номер канала для цели рассылки Mesh Beacon.",
+      "whenToUse": "Выберите локальный канал, настройки которого следует объявлять.",
+      "defaultBehavior": "Ноль означает основной канал."
+    },
+    "meshtastic.ChannelSettings.psk": {
+      "summary": "Предварительный ключ, объявляемый для целевого канала.",
+      "whenToUse": "Задайте его, только если маяк должен распространять ключ канала.",
+      "defaultBehavior": "Пустое значение не объявляет пользовательский ключ."
+    },
+    "meshtastic.ChannelSettings.name": {
+      "summary": "Имя, объявляемое для целевого канала.",
+      "whenToUse": "Используйте узнаваемое имя принимающей mesh-сети.",
+      "defaultBehavior": "Пустое имя оставляет стандартное именование прошивки."
+    },
+    "meshtastic.ChannelSettings.id": {
+      "summary": "Числовой идентификатор целевого канала.",
+      "whenToUse": "Задавайте только когда требуется конкретный идентификатор канала.",
+      "defaultBehavior": "Ноль оставляет выбор идентификатора прошивке."
+    },
+    "meshtastic.ChannelSettings.uplink_enabled": {
+      "summary": "Объявляет передачу целевого канала в MQTT.",
+      "whenToUse": "Включите для отправки пакетов этого канала в MQTT.",
+      "defaultBehavior": "Передача в MQTT отключена."
+    },
+    "meshtastic.ChannelSettings.downlink_enabled": {
+      "summary": "Объявляет приём MQTT-пакетов в целевой канал.",
+      "whenToUse": "Включите для доставки MQTT-пакетов в этот канал.",
+      "defaultBehavior": "Приём из MQTT отключён."
+    },
+    "meshtastic.ModuleSettings.position_precision": {
+      "summary": "Точность координат, объявляемая для целевого канала.",
+      "whenToUse": "Уменьшите точность, если участникам нужны только приблизительные координаты.",
+      "defaultBehavior": "Прошивка использует стандартную точность."
+    },
+    "meshtastic.ModuleSettings.is_muted": {
+      "summary": "Отключает трафик модулей в целевом канале.",
+      "whenToUse": "Включите, если сообщения модулей не должны отправляться в этот канал.",
+      "defaultBehavior": "Трафик модулей не отключён."
+    },
+    "meshtastic.ChannelSettings.module_settings": {
+      "summary": "Настройки модулей для объявляемого целевого канала.",
+      "whenToUse": "Измените их для особых правил приватности или отключения модулей.",
+      "defaultBehavior": "Используются стандартные настройки прошивки."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_channel": {
+      "summary": "Добавляет настройки канала в предложения Mesh Beacon.",
+      "whenToUse": "Включите, если соседним нодам следует предложить настроенный канал.",
+      "defaultBehavior": "Предложения канала отключены."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_region": {
+      "summary": "Добавляет радиорегион в предложения Mesh Beacon.",
+      "whenToUse": "Включите, если получателям следует предложить регион этой ноды.",
+      "defaultBehavior": "Предложения региона отключены."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_preset": {
+      "summary": "Добавляет пресет LoRa в предложения Mesh Beacon.",
+      "whenToUse": "Включите, если получателям следует предложить пресет модема этой ноды.",
+      "defaultBehavior": "Предложения пресета отключены."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_channel": {
+      "summary": "Рассылает Mesh Beacon в настроенном канале.",
+      "whenToUse": "Включите для отправки маяков через выбранный канал.",
+      "defaultBehavior": "Рассылка по каналу отключена."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_region": {
+      "summary": "Рассылает Mesh Beacon для настроенного региона.",
+      "whenToUse": "Включите для объявления данных, связанных с выбранным регионом.",
+      "defaultBehavior": "Рассылка по региону отключена."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_preset": {
+      "summary": "Рассылает Mesh Beacon с настроенным пресетом.",
+      "whenToUse": "Включите для объявления данных, связанных с выбранным пресетом.",
+      "defaultBehavior": "Рассылка по пресету отключена."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_interval_secs": {
+      "summary": "Интервал между рассылками Mesh Beacon в секундах.",
+      "whenToUse": "Выберите большой интервал, подходящий для низкой пропускной способности mesh-сети.",
+      "defaultBehavior": "Ноль отключает периодическую рассылку; остальные значения должны соблюдать минимум прошивки."
     }
   }
 }

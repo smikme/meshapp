@@ -40,12 +40,16 @@ public final class AppUi {
         default void updateHeader(String shortName, String longName, String nodeId) {
         }
 
-        default void requestBlePasskey(String deviceAddress,
+        default void requestBlePasskey(long requestId,
+                                       String deviceAddress,
                                        IntConsumer onSubmit,
                                        Runnable onCancel) {
             if (onCancel != null) {
                 onCancel.run();
             }
+        }
+
+        default void dismissBlePasskey(long requestId) {
         }
 
         default boolean isPrimaryWindowFocused() {
@@ -84,10 +88,15 @@ public final class AppUi {
         BRIDGE.get().updateHeader(shortName, longName, nodeId);
     }
 
-    public static void requestBlePasskey(String deviceAddress,
+    public static void requestBlePasskey(long requestId,
+                                         String deviceAddress,
                                          IntConsumer onSubmit,
                                          Runnable onCancel) {
-        BRIDGE.get().requestBlePasskey(deviceAddress, onSubmit, onCancel);
+        BRIDGE.get().requestBlePasskey(requestId, deviceAddress, onSubmit, onCancel);
+    }
+
+    public static void dismissBlePasskey(long requestId) {
+        BRIDGE.get().dismissBlePasskey(requestId);
     }
 
     public static boolean isPrimaryWindowFocused() {

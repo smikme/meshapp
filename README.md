@@ -145,9 +145,11 @@ Route check history is stored separately for each node. A saved route can be ope
   <img src="docs/screenshots/map-w.jpg" width="49%" alt="Map - light theme"/>
 </p>
 
-The map shows nodes with coordinates and saved routes. Network OpenStreetMap tiles, local cache, and an offline tile directory in `z/x/y.png|jpg|jpeg` format are supported.
+The map shows nodes with coordinates and saved routes. Interactive OpenStreetMap tiles, an HTTP-compliant local cache, and a pre-existing offline tile directory in `z/x/y.png|jpg|jpeg` format are supported.
 
-The map includes search, filters, jump to your own device, overview of all nodes with coordinates, night mode, distance measurement, and rectangular area selection. The selected area can be downloaded for use without internet access; the download can be paused or canceled.
+The map includes search, filters, jump to your own device, overview of all nodes with coordinates, night mode, distance measurement, and rectangular area selection. MeshApp requests only tiles visible in the current interactive viewport and does not bulk-download OpenStreetMap areas. For offline work, connect a tile directory obtained separately from a source whose terms permit offline use.
+
+An alternative interactive provider can be selected at startup with the JVM properties `meshapp.map.tileSource.url`, `meshapp.map.tileSource.id`, `meshapp.map.tileSource.attribution`, `meshapp.map.tileSource.minZoom`, and `meshapp.map.tileSource.maxZoom`. The URL template must contain `{z}`, `{x}`, and `{y}`. Runtime configuration never enables bulk downloading.
 
 ---
 
@@ -188,6 +190,10 @@ After connecting, MeshApp performs the initial exchange with the device:
 - Meshtastic: settings exchange
 - MeshCore KISS: negotiation through `SetHardware`
 - MeshCore Companion: exchange startup through `APP_START`
+
+For Meshtastic firmware 2.8.0 and newer, MeshApp supports the compact initial
+node database followed by background position and telemetry replay. Older
+firmware keeps the legacy connection flow.
 
 ### MeshCore
 
@@ -245,6 +251,10 @@ Configuration can be exported and imported:
 
 - `.mcf` - full configuration copy
 - `.mtp` - template without personal and secret data
+
+Firmware 2.8 settings are enabled only when the target node reports version
+2.8.0 or newer. This includes legal region/preset combinations, packet
+signature policy, Mesh Beacon, and the 24-byte UTF-8 long-name limit.
 
 The interface can also clear the local H2 database: messages, reactions, telemetry, node cache, and packet log.
 

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.zip.ZipEntry;
@@ -18,6 +19,17 @@ class SelfUpdateLauncherTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void payloadAlwaysEnablesJavaFxNativeAccess() {
+        var args = SelfUpdateLauncher.withRequiredNativeAccess(List.of(
+                "-Xmx512m",
+                "--enable-native-access=ALL-UNNAMED"
+        ));
+
+        assertEquals(1, args.stream().filter(arg -> arg.startsWith("--enable-native-access=")).count());
+        assertTrue(args.contains("--enable-native-access=ALL-UNNAMED,javafx.graphics"));
+    }
 
     @Test
     void detectsPackagedMacAppAndPlansManagedPayloadRoot() throws Exception {

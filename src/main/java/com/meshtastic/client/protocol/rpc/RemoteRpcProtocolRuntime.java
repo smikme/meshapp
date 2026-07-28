@@ -8,6 +8,7 @@ import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.ProtocolRuntime;
 import com.meshtastic.client.protocol.ProtocolRuntimeContext;
 import com.meshtastic.client.system.AppUi;
+import com.meshtastic.client.utils.AppPreferences;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -82,7 +83,10 @@ public final class RemoteRpcProtocolRuntime implements ProtocolRuntime<RemoteRpc
                 : new JsonObject();
         NotificationManager.showRemoteNotification(
                 stringField(object, "title", "MeshApp"),
-                stringField(object, "body", ""));
+                stringField(object, "body", ""),
+                AppPreferences.remoteChatOwnerId(context.connectionId()),
+                stringField(object, "chatType", ""),
+                stringField(object, "chatKey", ""));
         AppUi.setChatUnreadDot(true);
     }
 

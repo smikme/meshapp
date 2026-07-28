@@ -60,6 +60,8 @@ public final class SessionCrashLogManager {
     static final String FATAL_MARKER_FILE_NAME = "fatal-marker.json";
     static final String SESSION_STATE_FILE_NAME = "session-state.json";
     static final String JFR_DUMP_FILE_NAME = "last.jfr";
+    static final String HEAP_DUMP_EXTENSION = ".hprof";
+    static final String DISABLED_PROPERTY = "meshapp.sessionLog.disabled";
 
     private static final Object LOCK = new Object();
     private static final Gson GSON = new GsonBuilder()
@@ -144,6 +146,9 @@ public final class SessionCrashLogManager {
 
     public static void append(ILoggingEvent event) {
         synchronized (LOCK) {
+            if (isDisabled()) {
+                return;
+            }
             if (suspendedForTests) {
                 return;
             }
@@ -168,6 +173,10 @@ public final class SessionCrashLogManager {
                 System.err.println("[MeshApp] Failed to append session log: " + e.getMessage());
             }
         }
+    }
+
+    private static boolean isDisabled() {
+        return Boolean.getBoolean(DISABLED_PROPERTY);
     }
 
     public static void markNormalShutdown() {
@@ -688,23 +697,66 @@ public final class SessionCrashLogManager {
         long now = System.currentTimeMillis();
         for (Path path : pendingEntries) {
             long ageMillis = now - safeLastModifiedMillis(path);
-            if (ageMillis > MAX_PENDING_AGE.toMillis()) {
+            if (ageMillis > MAX_PENDING_AGE.toMillis() && !isProtectedPendingEntry(path)) {
                 deleteRecursivelyQuietly(path);
             }
         }
 
         pendingEntries = listPendingEntriesOrdered();
         while (pendingEntries.size() > MAX_PENDING_BUNDLES) {
-            deleteRecursivelyQuietly(pendingEntries.remove(0));
+            Path oldest = removeOldestUnprotectedEntry(pendingEntries);
+            if (oldest == null) {
+                break;
+            }
+            deleteRecursivelyQuietly(oldest);
         }
 
         pendingEntries = listPendingEntriesOrdered();
         long totalBytes = pendingEntries.stream().mapToLong(SessionCrashLogManager::computePathSize).sum();
         while (totalBytes > MAX_PENDING_BYTES && !pendingEntries.isEmpty()) {
-            Path oldest = pendingEntries.remove(0);
+            Path oldest = removeOldestUnprotectedEntry(pendingEntries);
+            if (oldest == null) {
+                break;
+            }
             totalBytes -= computePathSize(oldest);
             deleteRecursivelyQuietly(oldest);
         }
+    }
+
+    private static Path removeOldestUnprotectedEntry(List<Path> pendingEntries) {
+        for (int i = 0; i < pendingEntries.size(); i++) {
+            Path candidate = pendingEntries.get(i);
+            if (!isProtectedPendingEntry(candidate)) {
+                return pendingEntries.remove(i);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isProtectedPendingEntry(Path path) {
+        return containsHeapDump(path);
+    }
+
+    private static boolean containsHeapDump(Path path) {
+        if (!Files.exists(path)) {
+            return false;
+        }
+        if (Files.isRegularFile(path)) {
+            return isHeapDumpFile(path);
+        }
+        try (Stream<Path> files = Files.walk(path)) {
+            return files
+                    .filter(Files::isRegularFile)
+                    .anyMatch(SessionCrashLogManager::isHeapDumpFile);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean isHeapDumpFile(Path path) {
+        Path fileName = path.getFileName();
+        return fileName != null
+                && fileName.toString().toLowerCase(Locale.ROOT).endsWith(HEAP_DUMP_EXTENSION);
     }
 
     private static List<Path> listPendingEntriesOrdered() {

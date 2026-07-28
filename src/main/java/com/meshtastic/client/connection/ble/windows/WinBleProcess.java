@@ -49,6 +49,8 @@ public final class WinBleProcess implements BlePlatform {
     private static final Gson GSON = new Gson();
     private static final String START_TIMEOUT_SECONDS_PROPERTY =
             "meshapp.windowsBle.helperStartTimeoutSeconds";
+    private static final String SESSION_LOG_DISABLED_PROPERTY =
+            "meshapp.sessionLog.disabled";
     private static final Duration START_TIMEOUT =
             configuredPositiveDuration(START_TIMEOUT_SECONDS_PROPERTY, Duration.ofSeconds(45));
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(10);
@@ -347,7 +349,11 @@ public final class WinBleProcess implements BlePlatform {
             String line;
             while ((line = reader.readLine()) != null) {
                 rememberHelperOutput("stdout", line);
-                log.debug("[win-ble-helper] {}", line);
+                if (shouldLogHelperOutputAtInfo(line)) {
+                    log.info("[win-ble-helper] {}", line);
+                } else {
+                    log.debug("[win-ble-helper] {}", line);
+                }
             }
         } catch (IOException ignored) {
         }
@@ -523,10 +529,21 @@ public final class WinBleProcess implements BlePlatform {
         command.add("-XX:+IgnoreUnrecognizedVMOptions");
         command.add("--enable-native-access=ALL-UNNAMED");
         command.add("--sun-misc-unsafe-memory-access=allow");
+        command.add("-D" + SESSION_LOG_DISABLED_PROPERTY + "=true");
         command.add("-cp");
         command.add(helperClasspath());
         command.add(WinBleHelperMain.class.getName());
         return java.util.List.copyOf(command);
+    }
+
+    private static boolean shouldLogHelperOutputAtInfo(String line) {
+        if (line == null) {
+            return false;
+        }
+        return line.startsWith("[meshble]")
+                || line.contains(" INFO ")
+                || line.contains(" WARN ")
+                || line.contains(" ERROR ");
     }
 
     private static String helperClasspath() {

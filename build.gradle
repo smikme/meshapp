@@ -6,15 +6,49 @@ import groovy.xml.XmlParser
 import java.time.LocalDate
 import java.time.ZoneOffset
 
+/*
+ * MeshApp build layout
+ * ====================
+ *
+ * This file intentionally remains self-contained: packaging tasks share closures and values,
+ * while the Gradle Groovy DSL cannot export them type-safely across multiple script plugins.
+ * Consistent SECTION headings provide navigation through the file.
+ *
+ *  1. Plugins and build inputs       — Java/JavaFX versions and launch options.
+ *  2. Application runtime            — main class and required JVM permissions.
+ *  3. Versioning and dependencies    — release version, toolchain, and libraries.
+ *  4. Generated sources/resources    — protobuf, Buildship, version, and trust resources.
+ *  5. Platform native libraries      — dylib/DLL/SO for macOS, Windows, and Linux.
+ *  6. Compilation and tests          — javac and test JVM adaptation by JDK type.
+ *  7. Packaging foundation           — shared helpers for installDist and jpackage.
+ *  8. macOS packaging security       — install names, signing, and notarization.
+ *  9. Linux/Flatpak packaging        — AppImage, metadata, manifest, and DEB control.
+ * 10. Developer launchers            — javadoc, GUI, terminal, and RPC launchers.
+ * 11. Self-update artifacts          — layout, archive, and release verification.
+ * 12. Native installers              — jpackage, AppImage, and Flatpak tasks.
+ * 13. macOS development launcher     — temporary .app for local execution.
+ *
+ * Important responsibility boundaries:
+ * - applicationDefaultJvmArgs describes the installed GUI application's JVM;
+ * - the test task computes native access separately because JavaFX may be on the classpath
+ *   or embedded in Liberica Full JDK as a named module;
+ * - packaging helpers move JavaFX JARs from the classpath to a dedicated module path.
+ */
+
+// ============================================================================
+// SECTION 1: Plugins and build inputs
+// ============================================================================
+
 plugins {
 	id 'java'
 	id 'application'
-	id 'org.graalvm.buildtools.native' version '0.10.6'
+	id 'org.graalvm.buildtools.native' version '1.1.4'
 	id 'com.google.protobuf' version '0.10.0'
 	id 'org.openjfx.javafxplugin' version '0.1.0'
 	id 'io.github.jwharm.flatpak-gradle-generator' version '1.7.0'
 }
 
+// Versions can be overridden with -P...; defaults match CI and release builds.
 def javaVersion = providers.gradleProperty('meshappJavaVersion')
 		.map { it.toString().trim().toInteger() }
 		.orElse(25)
@@ -47,6 +81,7 @@ def jmxDebugPort = providers.gradleProperty('jmxDebugPort')
 		.map { it.toString().trim() }
 		.orElse('9010')
 
+// JMX is enabled only for an explicitly requested debug/profiler launch and listens on localhost.
 def jmxDebugJvmArgs = {
 	def port = jmxDebugPort.get()
 	if (!(port ==~ /\d{1,5}/)) {
@@ -68,6 +103,7 @@ def jmxDebugJvmArgs = {
 	]
 }
 
+// VisualVM helpers stay outside baseRuntimeJvmArgs so normal launches retain CDS and JVMCI.
 def visualVmProfilerJvmArgs = {
 	return [
 		'-Xshare:off',
@@ -84,20 +120,30 @@ def visualVmSoftwareRenderingJvmArgs = {
 	]
 }
 
+// ============================================================================
+// SECTION 2: Application runtime and JavaFX module access
+// ============================================================================
+
+// Arguments shared safely by GUI, terminal, and RPC launchers.
 def baseRuntimeJvmArgs = {
 	return [
 		'-Xmx512m',
 		'-Xms128m',
 		'-XX:+IgnoreUnrecognizedVMOptions',
 		'--sun-misc-unsafe-memory-access=allow',
-		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log'
+		'-XX:ErrorFile=%h/.meshapp/logs/diagnostics/active/hs_err_pid%p.log',
+		'-XX:+HeapDumpOnOutOfMemoryError',
+		'-XX:HeapDumpPath=%h/.meshapp/logs/diagnostics/active/heapdump_pid%p.hprof'
 	]
 }
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
+	// JavaFX 25 calls restricted native APIs and uses internal APIs for window integration.
+	// These permissions must reach every generated start script and jpackage launcher.
 	def jvmArgs = baseRuntimeJvmArgs() + [
 //		'-Dprism.order=sw',
+		'--enable-native-access=javafx.graphics,ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/javafx.stage=ALL-UNNAMED',
 		'--add-exports', 'javafx.graphics/com.sun.javafx.scene=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk=ALL-UNNAMED',
@@ -133,6 +179,11 @@ javafx {
 	}
 }
 
+// ============================================================================
+// SECTION 3: Versioning, Java toolchain, repositories and dependencies
+// ============================================================================
+
+// Accepts vX.Y.Z and X.Y.Z. Other Git labels are not treated as release versions.
 def parseReleaseVersionInfo = { rawTag ->
 	if (rawTag == null) {
 		return null
@@ -153,6 +204,7 @@ def parseReleaseVersionInfo = { rawTag ->
 }
 
 def resolveReleaseVersionInfo = {
+	// Order matters: explicit release inputs take precedence over tags on the current commit.
 	def candidates = [
 		findProperty('releaseTag')?.toString(),
 		findProperty('meshappVersion')?.toString(),
@@ -226,6 +278,7 @@ java {
 }
 
 repositories {
+	// The offline repository serves Flatpak builder; Maven Central remains the dev-build fallback.
 	maven { url = file('offline-repository') }
 	mavenCentral()
 }
@@ -243,6 +296,7 @@ configurations.configureEach {
 }
 
 dependencies {
+	// Runtime/application dependencies.
 	implementation 'com.google.protobuf:protobuf-java:4.33.4'
 	implementation 'com.googlecode.lanterna:lanterna:3.1.5'
 	implementation 'com.miglayout:miglayout-javafx:11.4.2'
@@ -265,6 +319,7 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// Generates the Maven artifact list used by a fully offline Flatpak build.
 tasks.flatpakGradleGenerator {
 	def sourceArch = (findProperty('flatpakSourcesArch') ?: '').toString().trim()
 	outputFile = file(sourceArch ? "flatpak-sources-${sourceArch}.json" : 'flatpak-sources.json')
@@ -292,7 +347,14 @@ protobuf {
 	}
 }
 
+// ============================================================================
+// SECTION 4: Generated sources and generated runtime resources
+// ============================================================================
+
 def generatedResourcesDir = layout.buildDirectory.dir('generated/resources')
+
+// Eclipse Buildship/JDTLS validates the classpath before Gradle runs generators.
+// Both protobuf plugin naming schemes are listed for IDE and Gradle version compatibility.
 def buildshipGeneratedClasspathDirs = [
 		layout.buildDirectory.dir('generated/source/proto/main/java'),
 		layout.buildDirectory.dir('generated/source/proto/test/java'),
@@ -338,7 +400,7 @@ jar {
 	exclude 'macos/**'
 }
 
-// Generate version.properties on every build.
+// Always generated: dirty state and commit count can change without changing Gradle inputs.
 tasks.register('generateVersionProperties') {
 	def outputDir = generatedResourcesDir
 	outputs.dir(outputDir)
@@ -365,6 +427,7 @@ def updatePublicKey = providers.gradleProperty('meshappUpdateEd25519PublicKey')
 		.orElse('')
 
 tasks.register('generateUpdateTrustResources') {
+	// An empty key means a dev build; remove stale output so it cannot leak into the JAR.
 	def publicKeyFile = generatedResourcesDir.map { it.file('update/ed25519-public-key.txt') }
 	inputs.property('meshappUpdateEd25519PublicKey', updatePublicKey)
 	outputs.file(publicKeyFile)
@@ -408,14 +471,17 @@ def linuxJnaResourcePrefix = {
 	}
 }
 
-// ============================================================
-// macOS Serial: build libmeshapp-serial.dylib for the safe ioctl wrapper.
-// Usage: ./gradlew buildSerialNative, or automatically through processResources on macOS.
-// ============================================================
+// ============================================================================
+// SECTION 5: Platform native libraries
+// ============================================================================
+// Each task exists only on its target OS and is wired into processResources. Outputs go to
+// generated resources, so builds never modify tracked src/main/resources files.
+
+// macOS Serial: libmeshapp-serial.dylib is a safe C wrapper around ioctl.
 if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 	tasks.register('buildSerialNative') {
 		group = 'build'
-		description = 'Собрать libmeshapp-serial.dylib для macOS serial modem-line control'
+		description = 'Build libmeshapp-serial.dylib for macOS serial modem-line control'
 
 		def nativeDir = file('native/macos-serial')
 		def resourcePrefix = macOsJnaResourcePrefix()
@@ -444,14 +510,14 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 			if (compile.exitValue() != 0) {
 				throw new GradleException("macOS serial native build failed (exit ${compile.exitValue()})")
 			}
-			logger.lifecycle("buildSerialNative: dylib собран в ${dylibDest}")
+			logger.lifecycle("buildSerialNative: dylib built at ${dylibDest}")
 		}
 	}
 	tasks.named('processResources') { dependsOn 'buildSerialNative' }
 
 	tasks.register('buildTrayNative') {
 		group = 'build'
-		description = 'Собрать libmeshapp-tray.dylib для macOS status item'
+		description = 'Build libmeshapp-tray.dylib for the macOS status item'
 
 		def nativeDir = file('native/macos-tray')
 		def resourcePrefix = macOsJnaResourcePrefix()
@@ -490,20 +556,17 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 			if (compile.exitValue() != 0) {
 				throw new GradleException("macOS tray native build failed (exit ${compile.exitValue()})")
 			}
-			logger.lifecycle("buildTrayNative: dylib собран в ${dylibDest}")
+			logger.lifecycle("buildTrayNative: dylib built at ${dylibDest}")
 		}
 	}
 	tasks.named('processResources') { dependsOn 'buildTrayNative' }
 }
 
-// ============================================================
-// Windows BLE: build meshapp-ble.dll from native/windows-ble/.
-// Usage: ./gradlew buildBleNative, or automatically through processResources on Windows.
-// ============================================================
+// Windows BLE: meshapp-ble.dll wraps WinRT BLE and requires the MSVC x64 generator.
 if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 	tasks.register('buildBleNative') {
 		group = 'build'
-		description = 'Собрать meshapp-ble.dll (WinRT BLE) через CMake'
+		description = 'Build meshapp-ble.dll (WinRT BLE) with CMake'
 
 		def nativeDir = file('native/windows-ble')
 		def buildDir = new File(nativeDir, 'build')
@@ -515,14 +578,12 @@ if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 
 		doLast {
 			// CMake configure
-			if (!new File(buildDir, 'CMakeCache.txt').exists()) {
-				def cfg = new ProcessBuilder('cmake', '-B', 'build', '-A', 'x64')
-					.directory(nativeDir).redirectErrorStream(true).start()
-				def cfgOut = cfg.inputStream.text
-				cfg.waitFor()
-				if (cfgOut) logger.lifecycle(cfgOut.trim())
-				if (cfg.exitValue() != 0) throw new GradleException("CMake configure failed (exit ${cfg.exitValue()})")
-			}
+			def cfg = new ProcessBuilder('cmake', '-B', 'build', '-A', 'x64')
+				.directory(nativeDir).redirectErrorStream(true).start()
+			def cfgOut = cfg.inputStream.text
+			cfg.waitFor()
+			if (cfgOut) logger.lifecycle(cfgOut.trim())
+			if (cfg.exitValue() != 0) throw new GradleException("CMake configure failed (exit ${cfg.exitValue()})")
 			// CMake build
 			def bld = new ProcessBuilder('cmake', '--build', 'build', '--config', 'Release')
 				.directory(nativeDir).redirectErrorStream(true).start()
@@ -536,21 +597,18 @@ if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 				dllOutput.toPath(), dllDest.toPath(),
 				java.nio.file.StandardCopyOption.REPLACE_EXISTING
 			)
-			logger.lifecycle("buildBleNative: DLL скопирован в ${dllDest}")
+			logger.lifecycle("buildBleNative: DLL copied to ${dllDest}")
 		}
 	}
 	tasks.named('processResources') { dependsOn 'buildBleNative' }
 }
 
-// ============================================================
-// Linux BLE: build libmeshapp-ble.so from native/linux-ble/.
-// Usage: ./gradlew buildBleNative, or automatically through processResources on Linux.
-// Requires libsystemd-dev on Ubuntu/Debian or systemd-devel on Fedora/RHEL.
-// ============================================================
+// Linux BLE: libmeshapp-ble.so wraps the BlueZ sd-bus API.
+// Build dependency: libsystemd-dev (Debian/Ubuntu) or systemd-devel (Fedora/RHEL).
 if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 	tasks.register('buildBleNative') {
 		group = 'build'
-		description = 'Собрать libmeshapp-ble.so (BlueZ BLE) через CMake'
+		description = 'Build libmeshapp-ble.so (BlueZ BLE) with CMake'
 
 		def nativeDir = file('native/linux-ble')
 		def buildDir = new File(nativeDir, 'build')
@@ -564,14 +622,12 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 
 		doLast {
 			// CMake configure
-			if (!new File(buildDir, 'CMakeCache.txt').exists()) {
-				def cfg = new ProcessBuilder('cmake', '-B', 'build', '-DCMAKE_BUILD_TYPE=Release')
-					.directory(nativeDir).redirectErrorStream(true).start()
-				def cfgOut = cfg.inputStream.text
-				cfg.waitFor()
-				if (cfgOut) logger.lifecycle(cfgOut.trim())
-				if (cfg.exitValue() != 0) throw new GradleException("CMake configure failed (exit ${cfg.exitValue()})")
-			}
+			def cfg = new ProcessBuilder('cmake', '-B', 'build', '-DCMAKE_BUILD_TYPE=Release')
+				.directory(nativeDir).redirectErrorStream(true).start()
+			def cfgOut = cfg.inputStream.text
+			cfg.waitFor()
+			if (cfgOut) logger.lifecycle(cfgOut.trim())
+			if (cfg.exitValue() != 0) throw new GradleException("CMake configure failed (exit ${cfg.exitValue()})")
 			// CMake build
 			def bld = new ProcessBuilder('cmake', '--build', 'build')
 				.directory(nativeDir).redirectErrorStream(true).start()
@@ -585,7 +641,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 				soOutput.toPath(), soDest.toPath(),
 				java.nio.file.StandardCopyOption.REPLACE_EXISTING
 			)
-			logger.lifecycle("buildBleNative: SO скопирован в ${soDest}")
+			logger.lifecycle("buildBleNative: shared library copied to ${soDest}")
 		}
 	}
 	tasks.named('processResources') { dependsOn 'buildBleNative' }
@@ -596,9 +652,42 @@ tasks.withType(JavaCompile).configureEach {
 	options.release = javaReleaseVersion
 }
 
+// ============================================================================
+// SECTION 6: Compilation and tests
+// ============================================================================
+
 tasks.named('test') {
 	useJUnitPlatform()
-	jvmArgs '--enable-native-access=ALL-UNNAMED', '--sun-misc-unsafe-memory-access=allow'
+	// Do not configure native access statically: regular OpenJDK loads JavaFX from the classpath,
+	// while Liberica Full JDK contains javafx.graphics in its runtime image as a named module.
+	def testJavaLauncher = javaToolchains.launcherFor {
+		languageVersion = JavaLanguageVersion.of(javaVersion)
+	}
+	javaLauncher = testJavaLauncher
+	jvmArgs '--sun-misc-unsafe-memory-access=allow'
+	def testPreferencesDir = layout.buildDirectory.dir('test-java-preferences').get().asFile
+	systemProperty 'java.util.prefs.userRoot', testPreferencesDir.absolutePath
+	systemProperty 'java.util.prefs.systemRoot', new File(testPreferencesDir, 'system').absolutePath
+	doFirst {
+		testPreferencesDir.mkdirs()
+		new File(testPreferencesDir, 'system').mkdirs()
+		// Inspect the selected Gradle toolchain rather than java from PATH or JAVA_HOME.
+		def javaExecutable = testJavaLauncher.get().executablePath.asFile.absolutePath
+		def moduleProcess = new ProcessBuilder(javaExecutable, '--list-modules')
+			.redirectErrorStream(true)
+			.start()
+		def modules = moduleProcess.inputStream.getText('UTF-8')
+		moduleProcess.waitFor()
+		if (moduleProcess.exitValue() != 0) {
+			throw new GradleException("Failed to inspect test Java modules: ${modules.trim()}")
+		}
+		def nativeAccess = modules.readLines().any { it.startsWith('javafx.graphics@') }
+			? '--enable-native-access=javafx.graphics,ALL-UNNAMED'
+			: '--enable-native-access=ALL-UNNAMED'
+		setJvmArgs((getJvmArgs() ?: []).findAll {
+			!it.toString().startsWith('--enable-native-access=')
+		} + nativeAccess)
+	}
 	if (org.gradle.internal.os.OperatingSystem.current().isLinux()
 			&& !System.getenv('DISPLAY')?.trim()
 			&& !System.getenv('WAYLAND_DISPLAY')?.trim()) {
@@ -616,6 +705,8 @@ def resolveReleasePackageVersion = {
 }
 
 def resolvePackageVersion = { os ->
+	// Native package managers require numeric versions. Releases use the Git tag, while dev
+	// builds receive a reproducible numeric fallback derived from commit count and hash.
 	def releasePackageVersion = resolveReleasePackageVersion()
 	if (releasePackageVersion != null) {
 		return releasePackageVersion
@@ -652,7 +743,14 @@ def resolveFlatpakReleaseDate = {
 	return LocalDate.now(ZoneOffset.UTC).toString()
 }
 
+// ============================================================================
+// SECTION 7: Shared packaging foundation
+// ============================================================================
+// Helpers in this section publish nothing. They prepare one runtime layout shared by
+// installDist, jpackage, AppImage, Flatpak, and self-update payloads.
+
 def resolvePackagingJavaHome = {
+	// PACKAGING_JAVA_HOME separates the build JDK from a JDK suitable for jlink.
 	def configuredJavaHome = (findProperty('packagingJavaHome') ?: System.getenv('PACKAGING_JAVA_HOME'))
 		?.toString()
 		?.trim()
@@ -694,6 +792,8 @@ def buildPackagingJlinkOptions = {
 }
 
 def relocateJavaFxJars = { File libDir ->
+	// The Gradle application plugin creates a classpath distribution. For stable JavaFX startup,
+	// move only javafx-* JARs into lib/fx and load them as named modules.
 	def fxDir = new File(libDir, "fx")
 	fxDir.mkdirs()
 	libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
@@ -706,6 +806,8 @@ def relocateJavaFxJars = { File libDir ->
 }
 
 def patchUnixStartScriptForJavaFx = { File scriptFile ->
+	// startScripts cannot describe a mixed classpath/module-path layout. Patch only two exact,
+	// expected lines and leave the remainder of the generated script untouched.
 	if (!scriptFile.isFile()) {
 		return
 	}
@@ -754,6 +856,7 @@ def patchWindowsStartScriptForJavaFx = { File scriptFile ->
 }
 
 def writeWindowsRpcServerLauncherProperties = { File propertiesFile ->
+	// jpackage creates this secondary launcher for the headless RPC server; it needs a console.
 	propertiesFile.parentFile.mkdirs()
 
 	def properties = new Properties()
@@ -773,6 +876,7 @@ def writeWindowsRpcServerLauncherProperties = { File propertiesFile ->
 }
 
 def copyDirectory = { File sourceDir, File targetDir ->
+	// Files.walk preserves symbolic links, which matters for macOS bundles and runtime layouts.
 	if (!sourceDir.isDirectory()) {
 		throw new GradleException("copyDirectory: source directory not found: ${sourceDir}")
 	}
@@ -805,6 +909,8 @@ def copyDirectory = { File sourceDir, File targetDir ->
 }
 
 def preparePackagingLibDir = { os, installDir, stagingRoot ->
+	// Return a directory suitable for jpackage --input or an archiver. It combines the application
+	// JAR, platform native libraries, and the dedicated JavaFX module directory.
 	if (stagingRoot.exists()) {
 		stagingRoot.deleteDir()
 	}
@@ -832,7 +938,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 				new File(libDir, bleDll.name).toPath(),
 				java.nio.file.StandardCopyOption.REPLACE_EXISTING
 			)
-			logger.lifecycle("packaging: meshapp-ble.dll скопирован в lib/")
+			logger.lifecycle("packaging: meshapp-ble.dll copied to lib/")
 		}
 
 		def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
@@ -867,7 +973,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 				)
 			}
 		}
-		logger.lifecycle("packaging: jSerialComm.dll (${jSerialCommArch}) извлечён в lib/")
+		logger.lifecycle("packaging: jSerialComm.dll (${jSerialCommArch}) extracted into lib/")
 	}
 
 	// Linux: copy libmeshapp-ble.so (BlueZ BLE) into lib/ for packaging.
@@ -879,7 +985,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 				new File(libDir, bleSo.name).toPath(),
 				java.nio.file.StandardCopyOption.REPLACE_EXISTING
 			)
-			logger.lifecycle("packaging: libmeshapp-ble.so скопирован в lib/")
+			logger.lifecycle("packaging: libmeshapp-ble.so copied to lib/")
 		}
 	}
 
@@ -901,6 +1007,16 @@ def prepareLinuxPackagingResources = {
 	)
 
 	def linuxScriptsDir = file('src/jpackage/linux')
+	def desktopTemplate = new File(linuxScriptsDir, 'MeshApp.desktop')
+	if (!desktopTemplate.isFile()) {
+		throw new GradleException("packaging: Linux desktop template not found: ${desktopTemplate}")
+	}
+	java.nio.file.Files.copy(
+		desktopTemplate.toPath(),
+		new File(linuxResourceDir, desktopTemplate.name).toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
+
 	['postinstall', 'postrm'].each { scriptName ->
 		def source = new File(linuxScriptsDir, scriptName)
 		if (source.exists()) {
@@ -927,6 +1043,7 @@ def resolveBuildOption = { String propertyName, String envName ->
 }
 
 def executePackagingCommand = { List<?> args, String failureMessage, File workingDir = projectRootDir, boolean logOutput = true ->
+	// Shared stdout and exit-code handling prevents packaging tasks from hiding the tool error.
 	def process = new ProcessBuilder(args.collect { it.toString() })
 		.directory(workingDir)
 		.redirectErrorStream(true)
@@ -942,7 +1059,15 @@ def executePackagingCommand = { List<?> args, String failureMessage, File workin
 	return output
 }
 
+// ============================================================================
+// SECTION 8: macOS dependency normalization, signing and notarization
+// ============================================================================
+// Pipeline: scan Mach-O files -> normalize install names -> reject external dependencies ->
+// sign nested code/bundle -> optionally submit notarization -> staple ticket.
+
 def collectMacDependencyScanFiles = { File appDir ->
+	// Scan executable and library files, not only the main launcher: an external dependency in
+	// any bundled dylib makes the application non-portable.
 	def scanFiles = [] as Set<File>
 
 	[new File(appDir, 'Contents/MacOS'), new File(appDir, 'Contents/runtime/Contents/MacOS')].each { dir ->
@@ -1002,6 +1127,7 @@ def readMacInstallName = { File binary, String taskName ->
 }
 
 def isAllowedMacNativeDependency = { String dependency ->
+	// Allow system frameworks/dylibs and bundle-relative references (@rpath/@loader_path/etc.).
 	dependency.startsWith('@rpath/')
 		|| dependency.startsWith('@loader_path/')
 		|| dependency.startsWith('@executable_path/')
@@ -1030,6 +1156,7 @@ def normalizeMacBundleInstallNames = { File appDir, String taskName ->
 }
 
 def assertMacBundleSelfContained = { File appDir, String taskName ->
+	// Fail before signing/notarization; a signature cannot fix absolute Homebrew paths.
 	if (!org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 		return
 	}
@@ -1083,6 +1210,8 @@ def appendMacSigningOptions = { List args, Map signingConfig, boolean includeEnt
 }
 
 def resolveMacSigningConfig = {
+	// Identity and team may come from a property or environment variable. A missing identity is
+	// valid for a local ad-hoc build, but not for a downloadable release DMG.
 	def keyUserName = resolveBuildOption('macSigningKeyUserName', 'MAC_SIGNING_KEY_USER_NAME')
 	if (!keyUserName) {
 		return null
@@ -1095,6 +1224,7 @@ def resolveMacSigningConfig = {
 }
 
 def resolveMacNotarizationConfig = {
+	// Support both a keychain profile and explicit Apple credentials. Return null for dev builds.
 	def keychainProfile = resolveBuildOption('macNotaryKeychainProfile', 'MAC_NOTARY_KEYCHAIN_PROFILE')
 	if (keychainProfile) {
 		return [mode: 'keychainProfile', keychainProfile: keychainProfile]
@@ -1135,6 +1265,7 @@ def resolveMacNotarizationConfig = {
 }
 
 def notarizeMacArtifact = { File artifact, Map notarizationConfig ->
+	// --wait is intentional: a release task completes only after the notary service responds.
 	if (notarizationConfig == null) {
 		return
 	}
@@ -1232,14 +1363,24 @@ def normalizeArtifactArch = {
 	}
 }
 
+// Self-update artifact names must remain stable between the native package and manifest.
 def resolveSelfUpdatePlatform = {
 	def os = org.gradle.internal.os.OperatingSystem.current()
 	def osName = os.isWindows() ? 'windows' : (os.isMacOsX() ? 'macos' : (os.isLinux() ? 'linux' : 'unknown'))
 	return "${osName}-${normalizeArtifactArch()}"
 }
 
+// ============================================================================
+// SECTION 9: Linux AppImage, Flatpak metadata and Debian control helpers
+// ============================================================================
+
 def flatpakAppId = 'app.privatepractice.meshapp'
+def flatpakTrayIconName = "${flatpakAppId}.tray"
 def flatpakMetadataDir = file('src/flatpak')
+def flatpakAppIndicatorModuleFile = new File(
+	flatpakMetadataDir,
+	'shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json'
+)
 def flatpakDesktopFileName = "${flatpakAppId}.desktop"
 def flatpakMetainfoFileName = "${flatpakAppId}.metainfo.xml"
 def flatpakLauncherFileName = 'MeshApp'
@@ -1249,6 +1390,7 @@ def resolveLinuxAppImageArch = {
 }
 
 def resolveAppImageTool = {
+	// Precedence: Gradle property -> environment -> PATH. An explicit path works well with CI caches.
 	def configuredPath = (findProperty('appimagetool') ?: System.getenv('APPIMAGETOOL'))?.toString()?.trim()
 	if (configuredPath) {
 		def configured = file(configuredPath)
@@ -1311,6 +1453,8 @@ def requirePackagingFile = { String relativePath, String taskName ->
 }
 
 def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
+	// jpackage first creates an app-image directory; appimagetool then converts it into a portable
+	// file. Both the regular AppImage and Flatpak pipelines reuse this helper.
 	def os = org.gradle.internal.os.OperatingSystem.current()
 	if (!os.isLinux()) {
 		throw new GradleException("${taskName} task is supported only on Linux")
@@ -1432,11 +1576,18 @@ def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource, S
 		new File(resourcesDir, "${flatpakAppId}.png").toPath(),
 		java.nio.file.StandardCopyOption.REPLACE_EXISTING
 	)
+	def trayIconSource = requirePackagingFile('src/main/resources/tray/linux/icon_32.png', 'flatpak')
+	java.nio.file.Files.copy(
+		trayIconSource.toPath(),
+		new File(resourcesDir, "${flatpakTrayIconName}.png").toPath(),
+		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+	)
 
 	return sourceDir
 }
 
 def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, String runtimeVersion, String sdk ->
+	def appIndicatorModule = requirePackagingFile(flatpakAppIndicatorModuleFile.path, 'flatpak')
 	def manifest = [
 		'app-id'         : flatpakAppId,
 		'runtime'        : runtime,
@@ -1454,9 +1605,10 @@ def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, 
 			'--device=all',
 			'--allow=bluetooth',
 			'--filesystem=home',
-			'--system-talk-name=org.bluez'
+			'--system-talk-name=org.bluez',
+			'--talk-name=org.kde.StatusNotifierWatcher'
 		],
-		'modules'        : [[
+		'modules'        : [appIndicatorModule.absolutePath, [
 			'name'          : 'meshapp',
 			'buildsystem'   : 'simple',
 			'build-commands': [
@@ -1465,7 +1617,8 @@ def writeFlatpakManifest = { File manifestFile, File sourceDir, String runtime, 
 				"install -Dm755 resources/${flatpakLauncherFileName} /app/bin/MeshApp",
 				"install -Dm644 resources/${flatpakDesktopFileName} /app/share/applications/${flatpakDesktopFileName}",
 				"install -Dm644 resources/${flatpakMetainfoFileName} /app/share/metainfo/${flatpakMetainfoFileName}",
-				"install -Dm644 resources/${flatpakAppId}.png /app/share/icons/hicolor/512x512/apps/${flatpakAppId}.png"
+				"install -Dm644 resources/${flatpakAppId}.png /app/share/icons/hicolor/512x512/apps/${flatpakAppId}.png",
+				"install -Dm644 resources/${flatpakTrayIconName}.png /app/share/icons/hicolor/32x32/apps/${flatpakTrayIconName}.png"
 			],
 			'sources'       : [[
 				'type': 'dir',
@@ -1495,6 +1648,8 @@ def normalizeDebDependencyToken = { String token ->
 }
 
 def normalizeDebControlDependencies = { String controlText ->
+	// jpackage may emit distro-specific alternatives in an unsuitable order. Normalization keeps
+	// every other control field intact and modifies only Depends.
 	def separator = controlText.contains('\r\n') ? '\r\n' : '\n'
 	def endsWithNewline = controlText.endsWith('\n') || controlText.endsWith('\r\n')
 	def normalized = controlText.readLines().collect { line ->
@@ -1561,10 +1716,11 @@ def patchLinuxDebControl = { File outputDir ->
 	}
 }
 
-// ============================================================
-// JavaDoc: generate documentation in docs/javadoc/.
-// Usage: ./gradlew javadoc.
-// ============================================================
+// ============================================================================
+// SECTION 10: Documentation and developer launchers
+// ============================================================================
+
+// JavaDoc: ./gradlew javadoc -> docs/javadoc. Generated protobuf classes are excluded.
 javadoc {
 	destinationDir = file("${projectDir}/docs/javadoc")
 	options.encoding = 'UTF-8'
@@ -1582,6 +1738,8 @@ javadoc {
 	failOnError = false
 }
 tasks.named("run") {
+	// GUI run always executes. On macOS, plain JavaExec does not create the correct Dock/Cmd+Tab
+	// identity, so this task delegates to the temporary .app launcher defined below.
 	outputs.upToDateWhen { false }
 	// macOS: redirect to runMac so the app appears in Dock and Cmd+Tab.
 	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
@@ -1593,7 +1751,7 @@ tasks.named("run") {
 
 tasks.register('runTerminal', JavaExec) {
 	group = 'application'
-	description = 'Запуск MeshApp в терминальном режиме Lanterna (--terminal)'
+	description = 'Run MeshApp in Lanterna terminal mode (--terminal)'
 	dependsOn classes
 	mainClass = application.mainClass
 	classpath = sourceSets.main.runtimeClasspath
@@ -1608,7 +1766,7 @@ tasks.register('runTerminal', JavaExec) {
 
 tasks.register('runRpcServer', JavaExec) {
 	group = 'application'
-	description = 'Запуск MeshApp в headless RPC server mode (--rpc-server)'
+	description = 'Run MeshApp in headless RPC server mode (--rpc-server)'
 	dependsOn classes
 	mainClass = application.mainClass
 	classpath = sourceSets.main.runtimeClasspath
@@ -1622,6 +1780,8 @@ tasks.register('runRpcServer', JavaExec) {
 }
 
 tasks.named('installDist') {
+	// The application plugin creates a classpath layout. This final step moves JavaFX to the
+	// module-path layout shared by jpackage and self-update.
 	doLast {
 		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		relocateJavaFxJars(new File(installDir, 'lib'))
@@ -1630,10 +1790,17 @@ tasks.named('installDist') {
 	}
 }
 
+// ============================================================================
+// SECTION 11: Self-update layouts, payload archives and release verification
+// ============================================================================
+// selfUpdateImage: user-writable layout with a current-version pointer.
+// selfUpdateArchive: platform payload consumed by the download manifest.
+// verifySelfUpdatePackage: strict release gate for the key, JAR entries, and native files.
+
 tasks.register('selfUpdateImage') {
 	dependsOn installDist
 	group = 'distribution'
-	description = 'Собрать user-writable MeshApp layout для non-privileged self-update'
+	description = 'Build a user-writable MeshApp layout for non-privileged self-update'
 
 	doLast {
 		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
@@ -1683,7 +1850,7 @@ tasks.register('selfUpdateArchive') {
 	dependsOn installDist
 	mustRunAfter tasks.named('jpackage')
 	group = 'distribution'
-	description = 'Собрать managed payload zip archive для self-update manifest'
+	description = 'Build the managed payload ZIP archive for the self-update manifest'
 	outputs.file(layout.buildDirectory.file("jpackage/${artifactName}"))
 	doLast {
 		def outputDir = layout.buildDirectory.dir('jpackage').get().asFile
@@ -1711,6 +1878,8 @@ tasks.register('selfUpdateArchive') {
 }
 
 def selfUpdateRequiredJarEntries = [
+	// Minimum payload contract: without these classes and resources, an update cannot be safely
+	// verified, installed, or updated again.
 	'com/meshtastic/client/AppVersion.class',
 	'com/meshtastic/client/notification/MacOsNotificationBroker.class',
 	'com/meshtastic/client/notification/MacOsNotificationService.class',
@@ -1818,7 +1987,7 @@ def verifyZipJarSelfUpdateEntries = { File zipFile, String zipJarEntry ->
 tasks.register('verifySelfUpdatePackage') {
 	dependsOn tasks.named('jpackage'), tasks.named('selfUpdateArchive')
 	group = 'verification'
-	description = 'Проверить native package и self-update payload до публикации релиза'
+	description = 'Verify the native package and self-update payload before release publication'
 
 	doLast {
 		def os = org.gradle.internal.os.OperatingSystem.current()
@@ -1926,15 +2095,17 @@ tasks.register('verifySelfUpdatePackage') {
 	}
 }
 
-// ============================================================
-// jpackage: create a native installer.
-// Windows: .msi, macOS: .dmg, Linux: .deb
-// Usage: ./gradlew jpackage.
-// ============================================================
+// ============================================================================
+// SECTION 12: Native installer tasks
+// ============================================================================
+
+// jpackage: Windows .msi, macOS .dmg, Linux .deb.
+// SECTION 7 prepares shared input. OS-specific post-processing stays inside this task so a
+// signing or control-file patch cannot accidentally be applied to the wrong platform.
 tasks.register('jpackage') {
 	dependsOn installDist
 	group = 'distribution'
-	description = 'Создать нативный инсталлятор через jpackage'
+	description = 'Create the native installer with jpackage'
 
 	doLast {
 		def os = org.gradle.internal.os.OperatingSystem.current()
@@ -2065,7 +2236,7 @@ tasks.register('jpackage') {
  <string>MeshApp uses Bluetooth to connect to Meshtastic devices.</string>
 </dict>""")
 					infoPlist.text = plistText
-					logger.lifecycle("jpackage: NSBluetoothAlwaysUsageDescription добавлен в Info.plist")
+					logger.lifecycle("jpackage: added NSBluetoothAlwaysUsageDescription to Info.plist")
 				}
 				plistText = infoPlist.text
 				if (!plistText.contains('NSLocalNetworkUsageDescription')) {
@@ -2074,7 +2245,7 @@ tasks.register('jpackage') {
  <string>MeshApp connects to Meshtastic devices on the local network.</string>
 </dict>""")
 					infoPlist.text = plistText
-					logger.lifecycle("jpackage: NSLocalNetworkUsageDescription добавлен в Info.plist")
+					logger.lifecycle("jpackage: added NSLocalNetworkUsageDescription to Info.plist")
 				}
 			}
 
@@ -2082,7 +2253,7 @@ tasks.register('jpackage') {
 			def assetsCar = file('src/main/resources/macos/Assets.car')
 			if (assetsCar.exists()) {
 				java.nio.file.Files.copy(assetsCar.toPath(), new File(resourcesDir, assetsCar.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-				logger.lifecycle("jpackage: Assets.car скопирован в бандл")
+				logger.lifecycle("jpackage: copied Assets.car into the bundle")
 			}
 
 			normalizeMacBundleInstallNames(appDir, 'jpackage')
@@ -2111,12 +2282,12 @@ tasks.register('jpackage') {
 					['codesign', '--verify', '--deep', '--strict', appDir.absolutePath],
 					"Signature verification failed for ${appDir.name}"
 				)
-				logger.lifecycle("jpackage: Developer ID подпись применена к ${appDir.name}")
+				logger.lifecycle("jpackage: applied Developer ID signature to ${appDir.name}")
 			} else {
 				// Local fallback: ad-hoc signing avoids immediate launch failures,
 				// but is not suitable for an internet-distributed DMG.
 				adHocSignMacBundle(appDir, entitlements)
-				logger.lifecycle("jpackage: ad-hoc подпись применена и верифицирована")
+				logger.lifecycle("jpackage: applied and verified the ad-hoc signature")
 			}
 
 			// Build the DMG.
@@ -2144,20 +2315,18 @@ tasks.register('jpackage') {
 			} else if (macSigningConfig != null) {
 				logger.warn("jpackage: DMG signed with Developer ID but not notarized; Gatekeeper may still block downloaded builds")
 			}
-			logger.lifecycle("jpackage: DMG создан в ${outputDir}")
+			logger.lifecycle("jpackage: created DMG in ${outputDir}")
 		}
 	}
 }
 
-// ============================================================
-// AppImage: create a portable Linux AppImage from the jpackage app-image.
+// AppImage: portable Linux image built from a temporary jpackage app-image directory.
 // Usage: ./gradlew appImage [-Pappimagetool=/path/to/appimagetool.AppImage].
-// ============================================================
 tasks.register('appImage') {
 	dependsOn installDist
 	mustRunAfter tasks.named('jpackage')
 	group = 'distribution'
-	description = 'Собрать portable Linux AppImage'
+	description = 'Build the portable Linux AppImage'
 
 	doLast {
 		def os = org.gradle.internal.os.OperatingSystem.current()
@@ -2259,21 +2428,18 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 		}
 
 		appImageFile.setExecutable(true, false)
-		logger.lifecycle("appImage: AppImage создан в ${appImageFile}")
+		logger.lifecycle("appImage: created AppImage at ${appImageFile}")
 	}
 }
 
-// ============================================================
-// Flatpak: create a sandboxed Linux bundle with flatpak-builder.
-// Usage: ./gradlew flatpak.
-// Requires flatpak, flatpak-builder, and the installed runtime/SDK.
-// ============================================================
+// Flatpak: sandboxed Linux bundle. Requires flatpak-builder and installed runtime/SDK.
+// The pipeline also creates a local repository and the final single-file bundle.
 tasks.register('flatpak') {
 	dependsOn installDist
 	mustRunAfter tasks.named('jpackage')
 	mustRunAfter tasks.named('appImage')
 	group = 'distribution'
-	description = 'Собрать Linux Flatpak bundle'
+	description = 'Build the Linux Flatpak bundle'
 
 	doLast {
 		def os = org.gradle.internal.os.OperatingSystem.current()
@@ -2346,9 +2512,15 @@ tasks.register('flatpak') {
 			'flatpak: flatpak build-bundle failed'
 		)
 
-		logger.lifecycle("flatpak: Flatpak bundle создан в ${bundleFile}")
+		logger.lifecycle("flatpak: created Flatpak bundle at ${bundleFile}")
 	}
 }
+
+// ============================================================================
+// SECTION 13: macOS development .app launcher
+// ============================================================================
+// This bundle is not a release artifact. It exists only to provide the correct Dock identity
+// for ./gradlew run and an agent-style RPC process. SECTION 12 creates the release bundle.
 
 def prepareMacDebugAppBundle = { File appDir, boolean agentApp = false ->
 	def contentsDir = new File(appDir, "Contents")
@@ -2397,7 +2569,7 @@ ${agentPlist}\
 </dict>
 </plist>"""
 
-	// Собрать classpath и module-path из Gradle
+	// Split the regular classpath and JavaFX module path exactly as installDist/jpackage do.
 	def cpJars = []
 	def fxJars = []
 	sourceSets.main.runtimeClasspath.files.each { f ->
@@ -2410,7 +2582,7 @@ ${agentPlist}\
 	def cpStr = cpJars.join(':')
 	def fxStr = fxJars.join(':')
 
-	// Java из toolchain
+	// Launch with the same Java toolchain used to build the project.
 	def javaLauncher = javaToolchains.launcherFor {
 		languageVersion = JavaLanguageVersion.of(javaVersion)
 	}.get()
@@ -2462,7 +2634,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 	tasks.register('runMac') {
 		dependsOn classes
 		group = 'application'
-		description = 'Запуск на macOS через .app bundle (Dock + Cmd+Tab)'
+		description = 'Run on macOS through an .app bundle (Dock + Cmd+Tab)'
 
 		doLast {
 			def appDir = layout.buildDirectory.dir("tmp/MeshApp.app").get().asFile
@@ -2473,9 +2645,8 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 				appArgsList.addAll(gradleRunTask.args.collect { it.toString() })
 			}
 
-			// Запустить .app через 'open -W' (ждём завершения). Для отладочного
-			// multi-instance режима нужен '-n', иначе macOS активирует уже
-			// запущенный bundle и не передаст аргументы новому процессу.
+			// Launch through 'open -W' and wait for completion. Debug multi-instance mode needs
+			// '-n'; otherwise macOS activates an existing bundle and drops the new process args.
 			def openArgs = ['open']
 			if (appArgsList.any { it == '--no-single-instance' || it == '--allow-multiple-instances' }) {
 				openArgs << '-n'

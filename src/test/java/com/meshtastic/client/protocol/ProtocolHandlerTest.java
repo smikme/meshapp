@@ -184,6 +184,18 @@ class ProtocolHandlerTest {
                 .setFirmwareVersion("2.7.0")
                 .setExcludedModules(MeshProtos.ExcludedModules.STOREFORWARD_CONFIG_VALUE)
                 .build();
+        MeshProtos.LoRaRegionPresetMap regionPresetMap =
+                MeshProtos.LoRaRegionPresetMap.newBuilder()
+                        .addGroups(MeshProtos.LoRaPresetGroup.newBuilder()
+                                .addPresets(
+                                        ConfigProtos.Config.LoRaConfig.ModemPreset.LONG_FAST)
+                                .build())
+                        .addRegionGroups(MeshProtos.LoRaRegionPresets.newBuilder()
+                                .setRegion(
+                                        ConfigProtos.Config.LoRaConfig.RegionCode.US)
+                                .setGroupIndex(0)
+                                .build())
+                        .build();
         ChannelProtos.Channel channel = ChannelProtos.Channel.newBuilder().setIndex(3).build();
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(1)
@@ -197,6 +209,8 @@ class ProtocolHandlerTest {
         connection.emit(MeshProtos.FromRadio.newBuilder().setConfig(config).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setModuleConfig(moduleConfig).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setMetadata(metadata).build().toByteArray());
+        connection.emit(MeshProtos.FromRadio.newBuilder()
+                .setRegionPresets(regionPresetMap).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setChannel(channel).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setConfigCompleteId(99).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setRebooted(true).build().toByteArray());
@@ -204,12 +218,13 @@ class ProtocolHandlerTest {
         connection.emit(MeshProtos.FromRadio.newBuilder().setLogRecord(logRecord).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setQueueStatus(queueStatus).build().toByteArray());
 
-        assertTrue(listener.awaitEvents(11));
+        assertTrue(listener.awaitEvents(12));
         assertEquals(0x12345678, listener.myNodeNum.get());
         assertEquals(0xCAFEBABE, listener.nodeNum.get());
         assertEquals(ConfigProtos.Config.PayloadVariantCase.DEVICE, listener.configType);
         assertEquals(ModuleConfigProtos.ModuleConfig.PayloadVariantCase.MQTT, listener.moduleConfigType);
         assertEquals(MeshProtos.ExcludedModules.STOREFORWARD_CONFIG_VALUE, listener.metadataExcludedModules.get());
+        assertEquals(1, listener.regionPresetCount.get());
         assertEquals(3, listener.channelIndex.get());
         assertEquals(99, listener.configCompleteId.get());
         assertTrue(listener.rebooted.get());
@@ -641,10 +656,11 @@ class ProtocolHandlerTest {
         private final AtomicInteger channelIndex = new AtomicInteger();
         private final AtomicInteger configCompleteId = new AtomicInteger();
         private final AtomicInteger metadataExcludedModules = new AtomicInteger();
+        private final AtomicInteger regionPresetCount = new AtomicInteger();
         private final AtomicInteger packetFrom = new AtomicInteger();
         private final AtomicInteger queuePacketId = new AtomicInteger();
         private final AtomicBoolean rebooted = new AtomicBoolean(false);
-        private final CountDownLatch eventLatch = new CountDownLatch(11);
+        private final CountDownLatch eventLatch = new CountDownLatch(12);
         private volatile ConfigProtos.Config.PayloadVariantCase configType;
         private volatile ModuleConfigProtos.ModuleConfig.PayloadVariantCase moduleConfigType;
         private volatile String logMessage;
@@ -676,6 +692,13 @@ class ProtocolHandlerTest {
         @Override
         public void onDeviceMetadata(MeshProtos.DeviceMetadata metadata) {
             metadataExcludedModules.set(metadata.getExcludedModules());
+            seen();
+        }
+
+        @Override
+        public void onRegionPresets(
+                MeshProtos.LoRaRegionPresetMap regionPresetMap) {
+            regionPresetCount.set(regionPresetMap.getRegionGroupsCount());
             seen();
         }
 

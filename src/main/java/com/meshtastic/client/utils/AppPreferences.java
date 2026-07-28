@@ -16,6 +16,7 @@ public class AppPreferences {
     private AppPreferences() {} // utility class
 
     public static final String PREFERENCES_ROOT_PATH = "/meshapp";
+    public static final String PROP_PREFERENCES_ROOT_PATH = "meshapp.preferencesRootPath";
     public static final String KEY_DARK_MODE = "darkMode";
     public static final String KEY_RECENT_SEARCH = "recentSearch";
     public static final String KEY_RECENT_SEARCH_FAVORITE = "recentSearchFavorite";
@@ -33,6 +34,8 @@ public class AppPreferences {
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
     public static final String KEY_JFR_DIAGNOSTICS = "jfrDiagnostics";
+    public static final String KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED =
+            "luaCurlSecurityRestrictionsDisabled";
     public static final String KEY_LANGUAGE = "language";
     public static final String KEY_MEMORY_LIMIT_MB = "memoryLimitMb";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
@@ -119,7 +122,16 @@ public class AppPreferences {
     }
 
     public static void init() {
-        state = Preferences.userRoot().node(PREFERENCES_ROOT_PATH);
+        state = Preferences.userRoot().node(preferencesRootPath());
+    }
+
+    private static String preferencesRootPath() {
+        String configured = System.getProperty(PROP_PREFERENCES_ROOT_PATH);
+        if (configured == null || configured.isBlank()) {
+            return PREFERENCES_ROOT_PATH;
+        }
+        String trimmed = configured.trim();
+        return trimmed.startsWith("/") ? trimmed : "/" + trimmed;
     }
 
     private static Preferences state() {
@@ -229,6 +241,15 @@ public class AppPreferences {
 
     public static void setJfrDiagnosticsEnabled(boolean value) {
         state().putBoolean(KEY_JFR_DIAGNOSTICS, value);
+    }
+
+    public static boolean isLuaCurlSecurityRestrictionsDisabled() {
+        return state().getBoolean(KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED, false);
+    }
+
+    public static void setLuaCurlSecurityRestrictionsDisabled(boolean value) {
+        state().putBoolean(KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED, value);
+        flushState();
     }
 
     public static boolean isRemoteRpcServerEnabled() {
@@ -901,6 +922,15 @@ public class AppPreferences {
 
     public static void setChatMuted(String ownerId, String chatType, String chatKey, boolean muted) {
         setChatMuted(ownerId, composeChatPreferenceId(chatType, chatKey), muted);
+    }
+
+    /**
+     * Returns the local preference scope used for chats from one RPC connection.
+     */
+    public static String remoteChatOwnerId(String connectionId) {
+        return connectionId == null || connectionId.isBlank()
+                ? "remote"
+                : "remote:" + connectionId.trim();
     }
 
     public static String composeChatPreferenceId(String chatType, String chatKey) {

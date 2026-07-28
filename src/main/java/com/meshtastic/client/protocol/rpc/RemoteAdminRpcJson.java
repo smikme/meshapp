@@ -39,6 +39,7 @@ public final class RemoteAdminRpcJson {
         object.add("node", RemoteNodeJson.nodeToJson(session.targetNode(), false, false));
         putBytes(object, "owner", remoteState.getOwnerInfo());
         putBytes(object, "deviceMetadata", remoteState.getDeviceMetadata());
+        putBytes(object, "regionPresetMap", remoteState.getRegionPresetMap());
         object.add("configs", configsToJson(remoteState.getConfigs()));
         object.add("moduleConfigs", moduleConfigsToJson(remoteState.getModuleConfigs()));
         object.add("channels", channelsToJson(remoteState.getChannels()));
@@ -78,6 +79,11 @@ public final class RemoteAdminRpcJson {
         DeviceState remoteState = session.remoteState();
         parseBytes(object, "owner", MeshProtos.User::parseFrom, session::applyOwner);
         parseBytes(object, "deviceMetadata", MeshProtos.DeviceMetadata::parseFrom, remoteState::setDeviceMetadata);
+        parseBytes(
+                object,
+                "regionPresetMap",
+                MeshProtos.LoRaRegionPresetMap::parseFrom,
+                remoteState::setRegionPresetMap);
         for (ConfigProtos.Config config : configsFromJson(object, "configs")) {
             remoteState.addConfig(config);
         }

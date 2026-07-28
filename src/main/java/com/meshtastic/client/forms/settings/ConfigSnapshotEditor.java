@@ -18,6 +18,7 @@ import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.google.protobuf.Message;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.service.ConfigSnapshotService;
 import com.meshtastic.client.utils.ProtobufTreeBuilder;
 import java.util.ArrayList;
@@ -40,6 +41,90 @@ import org.meshtastic.proto.ModuleConfigProtos;
 public final class ConfigSnapshotEditor {
 
     private ConfigSnapshotEditor() {}
+
+    /**
+     * Validates a snapshot against the target firmware before mutating the editor.
+     */
+    public static Optional<String> validateCompatibility(
+        ConfigSnapshotService.ConfigSnapshot snapshot,
+        DeviceState state,
+        List<ConfigProtos.Config> originalConfigs,
+        List<ModuleConfigProtos.ModuleConfig> originalModuleConfigs
+    ) {
+        if (snapshot == null) {
+            return Optional.empty();
+        }
+        List<ConfigProtos.Config> configs = snapshot
+            .configs()
+            .stream()
+            .map(configJson -> mergeConfigPatch(configJson, originalConfigs))
+            .flatMap(Optional::stream)
+            .toList();
+        List<ModuleConfigProtos.ModuleConfig> moduleConfigs = snapshot
+            .moduleConfigs()
+            .stream()
+            .map(moduleJson ->
+                mergeModuleConfigPatch(moduleJson, originalModuleConfigs)
+            )
+            .flatMap(Optional::stream)
+            .toList();
+        boolean licensed = snapshot.ownerInfo() != null
+            ? snapshot.ownerInfo().isLicensed()
+            : state != null &&
+                state.getOwnerInfo() != null &&
+                state.getOwnerInfo().getIsLicensed();
+        ConfigChangeSet changes = new ConfigChangeSet(
+            snapshot.ownerInfo() != null,
+            snapshot.ownerInfo() != null
+                ? snapshot.ownerInfo().longName()
+                : null,
+            snapshot.ownerInfo() != null
+                ? snapshot.ownerInfo().shortName()
+                : null,
+            licensed,
+            false,
+            0,
+            0,
+            0,
+            false,
+            "",
+            configs,
+            moduleConfigs,
+            List.of()
+        );
+        return ConfigCompatibilityValidator.validate(
+            state,
+            changes,
+            originalConfigs
+        );
+    }
+
+    private static Optional<ConfigProtos.Config> mergeConfigPatch(
+        JsonObject configJson,
+        List<ConfigProtos.Config> originalConfigs
+    ) {
+        return resolveConfigVariantNumber(configJson).map(variantNumber -> {
+            ConfigProtos.Config base = ConfigProtobufSupport
+                .findOriginalConfig(originalConfigs, variantNumber)
+                .orElse(ConfigProtos.Config.getDefaultInstance());
+            return ConfigSnapshotService.mergeJsonIntoMessage(base, configJson);
+        });
+    }
+
+    private static Optional<ModuleConfigProtos.ModuleConfig> mergeModuleConfigPatch(
+        JsonObject moduleJson,
+        List<ModuleConfigProtos.ModuleConfig> originalModuleConfigs
+    ) {
+        return resolveModuleVariantNumber(moduleJson).map(variantNumber -> {
+            ModuleConfigProtos.ModuleConfig base = ConfigProtobufSupport
+                .findOriginalModuleConfig(
+                    originalModuleConfigs,
+                    variantNumber
+                )
+                .orElse(ModuleConfigProtos.ModuleConfig.getDefaultInstance());
+            return ConfigSnapshotService.mergeJsonIntoMessage(base, moduleJson);
+        });
+    }
 
     /**
      * Creates a snapshot from the current editor state.

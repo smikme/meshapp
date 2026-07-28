@@ -12,7 +12,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.List;
 import java.util.stream.Stream;
@@ -32,11 +35,13 @@ class SessionCrashLogManagerTest {
     @BeforeEach
     void setUp() {
         TestEnvironmentSupport.setUserHome(tempHome);
+        System.clearProperty(SessionCrashLogManager.DISABLED_PROPERTY);
         SessionCrashLogManager.resetForTests();
     }
 
     @AfterEach
     void tearDown() {
+        System.clearProperty(SessionCrashLogManager.DISABLED_PROPERTY);
         SessionCrashLogManager.resetForTests();
     }
 
@@ -120,6 +125,29 @@ class SessionCrashLogManagerTest {
     }
 
     @Test
+    void disabledSessionLogDoesNotTouchActiveBundleOnAppend() throws Exception {
+        Path activeLog = SessionCrashLogManager.getActiveLogPath();
+        Files.createDirectories(activeLog.getParent());
+        Files.writeString(activeLog, "parent session");
+        System.setProperty(SessionCrashLogManager.DISABLED_PROPERTY, "true");
+
+        LoggerContext context = new LoggerContext();
+        Logger logger = context.getLogger("test");
+        LoggingEvent event = new LoggingEvent(
+                SessionCrashLogManagerTest.class.getName(),
+                logger,
+                Level.INFO,
+                "helper log",
+                null,
+                null
+        );
+
+        SessionCrashLogManager.append(event);
+
+        assertEquals("parent session", Files.readString(activeLog));
+    }
+
+    @Test
     void prepareForLaunchClearsNormalExitMarkerWithoutOpeningCrashFlow() throws Exception {
         Path activeLog = SessionCrashLogManager.getActiveLogPath();
         Files.createDirectories(activeLog.getParent());
@@ -174,6 +202,35 @@ class SessionCrashLogManagerTest {
 
         try (Stream<Path> files = Files.list(SessionCrashLogManager.getPendingDir())) {
             assertTrue(files.count() <= 3, "pending diagnostics should be capped");
+        }
+    }
+
+    @Test
+    void prepareForLaunchKeepsHeapDumpBundleEvenWhenItExceedsPendingSizeLimit() throws Exception {
+        Path pendingDir = SessionCrashLogManager.getPendingDir();
+        Files.createDirectories(pendingDir);
+        Path bundle = pendingDir.resolve("heap-dump-bundle");
+        Files.createDirectories(bundle);
+        Files.writeString(bundle.resolve(SessionCrashLogManager.ACTIVE_LOG_NAME), "oom session");
+        createSparseFile(
+                bundle.resolve("heapdump_pid123.hprof"),
+                65L * 1024L * 1024L
+        );
+
+        SessionCrashLogManager.prepareForLaunch();
+
+        assertTrue(Files.exists(bundle), "heap dump crash bundle must not be pruned before it can be reported");
+        assertTrue(Files.exists(bundle.resolve("heapdump_pid123.hprof")));
+    }
+
+    private static void createSparseFile(Path file, long sizeBytes) throws Exception {
+        try (SeekableByteChannel channel = Files.newByteChannel(
+                file,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE
+        )) {
+            channel.position(sizeBytes - 1);
+            channel.write(ByteBuffer.wrap(new byte[] {0}));
         }
     }
 }

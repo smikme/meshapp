@@ -4,6 +4,7 @@ import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.ModuleConfigProtos;
 import org.meshtastic.proto.PowerMonProtos;
 
 import java.util.ArrayList;
@@ -79,6 +80,18 @@ public final class ConfigValueFormatter {
                     new BitmaskOption(PowerMonProtos.PowerMon.State.Screen_Drawing.getNumber(), "Screen Drawing"),
                     new BitmaskOption(PowerMonProtos.PowerMon.State.Wifi_On.getNumber(), "WiFi On"),
                     new BitmaskOption(PowerMonProtos.PowerMon.State.GPS_Active.getNumber(), "GPS Active")
+            )),
+            "meshtastic.ModuleConfig.MeshBeaconConfig.flags",
+            new BitmaskFieldSpec("settings.config.bitmask.off", List.of(
+                    new BitmaskOption(
+                            ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.Flags.FLAG_LISTEN_ENABLED_VALUE,
+                            "settings.config.meshBeacon.listen"),
+                    new BitmaskOption(
+                            ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.Flags.FLAG_BROADCAST_ENABLED_VALUE,
+                            "settings.config.meshBeacon.broadcast"),
+                    new BitmaskOption(
+                            ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.Flags.FLAG_LEGACY_SPLIT_VALUE,
+                            "settings.config.meshBeacon.legacySplit")
             ))
     );
 

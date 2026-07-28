@@ -3,6 +3,8 @@ syntax = "proto3";
 package meshtastic;
 
 import "meshtastic/atak.proto";
+import "meshtastic/channel.proto";
+import "meshtastic/config.proto";
 
 option csharp_namespace = "Meshtastic.Protobufs";
 option go_package = "github.com/meshtastic/go/generated";
@@ -858,6 +860,37 @@ message ModuleConfig {
   }
 
   /*
+   * MeshBeacon module config, introduced in firmware 2.8.
+   */
+  message MeshBeaconConfig {
+    enum Flags {
+      FLAG_NONE = 0;
+      FLAG_LISTEN_ENABLED = 1;
+      FLAG_BROADCAST_ENABLED = 2;
+      FLAG_LEGACY_SPLIT = 4;
+    }
+
+    uint32 flags = 1;
+    uint32 broadcast_send_as_node = 3;
+    string broadcast_message = 4;
+    ChannelSettings broadcast_offer_channel = 5;
+    Config.LoRaConfig.RegionCode broadcast_offer_region = 6;
+    optional Config.LoRaConfig.ModemPreset broadcast_offer_preset = 7;
+    ChannelSettings broadcast_on_channel = 8;
+    Config.LoRaConfig.RegionCode broadcast_on_region = 9;
+    optional Config.LoRaConfig.ModemPreset broadcast_on_preset = 10;
+    uint32 broadcast_interval_secs = 11;
+
+    message BroadcastTarget {
+      optional Config.LoRaConfig.ModemPreset preset = 1;
+      Config.LoRaConfig.RegionCode region = 2;
+      optional uint32 channel_index = 4;
+    }
+
+    repeated BroadcastTarget broadcast_targets = 13;
+  }
+
+  /*
    * TODO: REPLACE
    */
   oneof payload_variant {
@@ -940,6 +973,11 @@ message ModuleConfig {
      * TAK team/role configuration for TAK_TRACKER
      */
     TAKConfig tak = 16;
+
+    /*
+     * MeshBeacon module config
+     */
+    MeshBeaconConfig mesh_beacon = 17;
   }
 
   /*

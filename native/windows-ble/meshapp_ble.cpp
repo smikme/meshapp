@@ -51,14 +51,36 @@ using namespace Windows::Storage::Streams;
 
 /* ==================== Helpers (no WinRT deps) ==================== */
 
+static std::mutex g_log_mutex;
+static std::mutex g_last_error_mutex;
+static std::string g_last_error;
+
+static void set_last_error(std::string message) {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
+    g_last_error = std::move(message);
+}
+
+static void clear_last_error() {
+    set_last_error(std::string());
+}
+
+static std::string get_last_error_copy() {
+    std::lock_guard<std::mutex> lock(g_last_error_mutex);
+    return g_last_error;
+}
+
 static void log_msg(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     char buf[512];
     vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
+    std::lock_guard<std::mutex> lock(g_log_mutex);
     OutputDebugStringA(buf);
     OutputDebugStringA("\n");
+    std::fputs(buf, stdout);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
 }
 
 static std::string mac_to_string(uint64_t addr) {
@@ -241,6 +263,10 @@ static guid active_outbound_uuid() {
 
 static bool active_has_notify_trigger() {
     return active_profile() != PROFILE_MESHCORE;
+}
+
+static const char* active_profile_name() {
+    return active_profile() == PROFILE_MESHCORE ? "MeshCore Companion" : "Meshtastic";
 }
 
 /* ==================== Worker Thread ==================== */
@@ -906,7 +932,15 @@ MESHBLE_API void meshble_stop_scan(void) {
 }
 
 MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
-    if (!g_initialized || !address) return -1;
+    clear_last_error();
+    if (!g_initialized) {
+        set_last_error("Windows BLE backend is not initialized");
+        return -1;
+    }
+    if (!address) {
+        set_last_error("BLE address is missing");
+        return -1;
+    }
     std::string addr(address);
     auto step_timeout = std::chrono::milliseconds(timeout_ms > 0 ? timeout_ms : 10000);
     auto pairing_timeout = step_timeout;
@@ -919,7 +953,10 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
         return run_on_worker([addr, step_timeout, pairing_timeout]() -> int {
             do_disconnect();
             uint64_t mac = string_to_mac(addr.c_str());
-            if (mac == 0) return -2;
+            if (mac == 0) {
+                set_last_error("Invalid BLE address: " + addr);
+                return -2;
+            }
 
             try {
                 log_msg("[meshble] Connecting to %s ...", addr.c_str());
@@ -929,9 +966,14 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                         BluetoothLEDevice::FromBluetoothAddressAsync(mac),
                         step_timeout,
                         "FromBluetoothAddressAsync");
-                if (dev == nullptr) { log_msg("[meshble] Device not found"); return -2; }
+                if (dev == nullptr) {
+                    set_last_error("Device not found: " + addr);
+                    log_msg("[meshble] Device not found");
+                    return -2;
+                }
 
                 if (!ensure_paired(dev, addr, pairing_timeout)) {
+                    set_last_error("BLE pairing not completed or rejected for " + addr);
                     try { dev.Close(); } catch (...) {}
                     do_disconnect();
                     return -4;
@@ -945,7 +987,11 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                         BluetoothLEDevice::FromBluetoothAddressAsync(mac),
                         step_timeout,
                         "FromBluetoothAddressAsync(reopen)");
-                if (dev == nullptr) { log_msg("[meshble] Device not found after pairing"); return -2; }
+                if (dev == nullptr) {
+                    set_last_error("Device not found after pairing: " + addr);
+                    log_msg("[meshble] Device not found after pairing");
+                    return -2;
+                }
 
                 g_ble->device = dev;
                 g_ble->connection_status_token = g_ble->device.ConnectionStatusChanged(on_connection_status_changed);
@@ -957,8 +1003,19 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                                 BluetoothCacheMode::Uncached),
                         step_timeout,
                         "GetGattServicesForUuidAsync");
-                if (svc_result.Status() == GattCommunicationStatus::AccessDenied) { do_disconnect(); return -4; }
+                if (svc_result.Status() == GattCommunicationStatus::AccessDenied) {
+                    set_last_error("Access denied while discovering GATT service for " + addr);
+                    do_disconnect(); return -4;
+                }
                 if (svc_result.Status() != GattCommunicationStatus::Success || svc_result.Services().Size() == 0) {
+                    set_last_error(std::string("GATT service discovery failed for ")
+                            + addr
+                            + " profile="
+                            + active_profile_name()
+                            + " status="
+                            + gatt_status_str(svc_result.Status())
+                            + " services="
+                            + std::to_string(svc_result.Services().Size()));
                     do_disconnect(); return -3;
                 }
                 g_ble->service = svc_result.Services().GetAt(0);
@@ -971,6 +1028,10 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                         : nullptr;
 
                 if (!g_ble->to_radio || !g_ble->from_radio) {
+                    set_last_error(std::string("Required GATT characteristics not found for ")
+                            + addr
+                            + " profile="
+                            + active_profile_name());
                     log_msg("[meshble] Required characteristics not found");
                     do_disconnect(); return -3;
                 }
@@ -1005,16 +1066,37 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                 return 0;
 
             } catch (const async_timeout_error& e) {
+                set_last_error(std::string("Connect timeout for ") + addr + ": " + e.what());
                 log_msg("[meshble] Connect timeout: %s", e.what());
                 do_disconnect(); return -1;
             } catch (const hresult_error& e) {
+                set_last_error(std::string("WinRT connect error for ")
+                        + addr
+                        + ": "
+                        + winrt::to_string(e.message()));
                 log_msg("[meshble] Connect error: %ls", e.message().c_str());
                 do_disconnect(); return -3;
+            } catch (const std::exception& e) {
+                set_last_error(std::string("Connect error for ") + addr + ": " + e.what());
+                do_disconnect(); return -3;
             } catch (...) {
+                set_last_error("Unknown connect error for " + addr);
                 do_disconnect(); return -3;
             }
         });
-    } catch (...) { return -3; }
+    } catch (const std::exception& e) {
+        set_last_error(std::string("Connect worker error for ") + addr + ": " + e.what());
+        return -3;
+    } catch (...) {
+        set_last_error("Unknown connect worker error for " + addr);
+        return -3;
+    }
+}
+
+MESHBLE_API const char* meshble_get_last_error(void) {
+    static thread_local std::string copy;
+    copy = get_last_error_copy();
+    return copy.empty() ? nullptr : copy.c_str();
 }
 
 MESHBLE_API void meshble_disconnect(void) {

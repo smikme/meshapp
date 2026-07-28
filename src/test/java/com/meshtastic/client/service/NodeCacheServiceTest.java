@@ -113,6 +113,42 @@ class NodeCacheServiceTest {
     }
 
     @Test
+    void firmware28ReplayTelemetryIsDeduplicatedByPacketIdentity() {
+        TelemetryEntry first =
+                new TelemetryEntry(1_700_000_000L, "!bbbbbbbb");
+        first.setPacketId(0xF1234567L);
+        first.setTelemetryVariant("DEVICE_METRICS");
+        first.setBatteryLevel(80);
+
+        TelemetryEntry replay =
+                new TelemetryEntry(1_700_000_000L, "!bbbbbbbb");
+        replay.setPacketId(0xF1234567L);
+        replay.setTelemetryVariant("DEVICE_METRICS");
+        replay.setBatteryLevel(80);
+
+        assertTrue(service.persistTelemetry(first, "!aaaaaaaa", true));
+        assertFalse(service.persistTelemetry(replay, "!aaaaaaaa", true));
+        assertEquals(1, service.countTelemetryEntries("!aaaaaaaa"));
+        assertEquals(
+                0xF1234567L,
+                service.loadTelemetryHistory(10, "!aaaaaaaa")
+                        .getFirst()
+                        .getPacketId());
+    }
+
+    @Test
+    void legacyTelemetryKeepsExistingDuplicateBehavior() {
+        TelemetryEntry entry =
+                new TelemetryEntry(1_700_000_000L, "!bbbbbbbb");
+        entry.setPacketId(77);
+        entry.setTelemetryVariant("DEVICE_METRICS");
+
+        assertTrue(service.persistTelemetry(entry, "!aaaaaaaa", false));
+        assertTrue(service.persistTelemetry(entry, "!aaaaaaaa", false));
+        assertEquals(2, service.countTelemetryEntries("!aaaaaaaa"));
+    }
+
+    @Test
     void enrichFromCacheMemoizesDbHitForSubsequentLookups() throws Exception {
         NodeData persisted = new NodeData(0xA0065360);
         persisted.setNodeId("!a0065360");

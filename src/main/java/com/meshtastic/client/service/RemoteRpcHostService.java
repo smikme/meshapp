@@ -950,6 +950,7 @@ public final class RemoteRpcHostService {
         DeviceState snapshotState = session.remoteState();
         snapshotState.setOwnerInfo(state.getOwnerInfo());
         snapshotState.setDeviceMetadata(state.getDeviceMetadata());
+        snapshotState.setRegionPresetMap(state.getRegionPresetMap());
         synchronized (state.getConfigs()) {
             for (ConfigProtos.Config config : state.getConfigs()) {
                 snapshotState.addConfig(config);

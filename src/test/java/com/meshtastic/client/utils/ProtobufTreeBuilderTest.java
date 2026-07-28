@@ -2,13 +2,17 @@ package com.meshtastic.client.utils;
 
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.model.ConfigTreeItem;
+import com.meshtastic.client.model.FirmwareCapabilities;
+import com.meshtastic.client.model.FirmwareVersion;
 import javafx.scene.control.TreeItem;
 import org.junit.jupiter.api.Test;
 import org.meshtastic.proto.ConfigProtos;
+import org.meshtastic.proto.ModuleConfigProtos;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -174,6 +178,58 @@ class ProtobufTreeBuilderTest {
 
         assertEquals(2, ignoreIncomingGroup.getChildren().size());
         assertNull(ignoreIncomingGroup.getChildren().get(1).getValue().getValue());
+    }
+
+    @Test
+    void firmware28MeshBeaconSupportsRepeatedBroadcastTargets() {
+        ModuleConfigProtos.ModuleConfig config =
+                ModuleConfigProtos.ModuleConfig.newBuilder()
+                        .setMeshBeacon(
+                                ModuleConfigProtos.ModuleConfig.MeshBeaconConfig
+                                        .newBuilder()
+                                        .addBroadcastTargets(
+                                                ModuleConfigProtos.ModuleConfig
+                                                        .MeshBeaconConfig
+                                                        .BroadcastTarget
+                                                        .newBuilder()
+                                                        .setRegion(
+                                                                ConfigProtos.Config
+                                                                        .LoRaConfig
+                                                                        .RegionCode.US)
+                                                        .setChannelIndex(2)
+                                                        .build())
+                                        .build())
+                        .build();
+        MeshtasticConfigCompatibility.Context compatibility =
+                new MeshtasticConfigCompatibility.Context(
+                        new FirmwareCapabilities(
+                                Optional.of(new FirmwareVersion(2, 8, 0)),
+                                true,
+                                true),
+                        null,
+                        0);
+
+        TreeItem<ConfigTreeItem> root =
+                ProtobufTreeBuilder.buildModuleConfigTree(
+                        List.of(config),
+                        compatibility);
+        TreeItem<ConfigTreeItem> section = root.getChildren().getFirst();
+        TreeItem<ConfigTreeItem> targets =
+                findChildByFieldName(section, "broadcast_targets");
+
+        assertNotNull(targets);
+        assertEquals(2, targets.getChildren().size());
+        assertTrue(targets.getChildren().getLast().getValue().hasAction());
+
+        TreeItem<ConfigTreeItem> target = targets.getChildren().getFirst();
+        TreeItem<ConfigTreeItem> removeAction =
+                target.getChildren().getLast();
+        removeAction.getValue().getAction().run();
+
+        ModuleConfigProtos.ModuleConfig rebuilt =
+                ProtobufTreeBuilder.rebuildModuleConfig(section, config);
+        assertEquals(0, rebuilt.getMeshBeacon().getBroadcastTargetsCount());
+        assertTrue(targets.getValue().isModified());
     }
 
     private static TreeItem<ConfigTreeItem> findChildByFieldName(TreeItem<ConfigTreeItem> parent, String fieldName) {

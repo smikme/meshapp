@@ -43,10 +43,12 @@ public final class JavaFxAppUiBridge implements AppUi.Bridge {
     }
 
     @Override
-    public void requestBlePasskey(String deviceAddress,
+    public void requestBlePasskey(long requestId,
+                                  String deviceAddress,
                                   IntConsumer onSubmit,
                                   Runnable onCancel) {
         runLater(() -> PasskeyDialog.show(
+                requestId,
                 deviceAddress,
                 passkey -> {
                     if (onSubmit != null) {
@@ -58,6 +60,11 @@ public final class JavaFxAppUiBridge implements AppUi.Bridge {
                         onCancel.run();
                     }
                 }));
+    }
+
+    @Override
+    public void dismissBlePasskey(long requestId) {
+        runLater(() -> PasskeyDialog.dismiss(requestId));
     }
 
     @Override

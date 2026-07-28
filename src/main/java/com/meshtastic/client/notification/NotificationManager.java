@@ -124,12 +124,32 @@ public class NotificationManager {
         RemoteNotificationManagerHolder.INSTANCE.showRawNotification(title, message);
     }
 
+    /**
+     * Shows an RPC chat notification when that chat is not muted locally for
+     * the originating RPC connection.
+     */
+    public static void showRemoteNotification(String title,
+                                              String message,
+                                              String notificationOwnerId,
+                                              String chatType,
+                                              String chatKey) {
+        if (!areChatNotificationsEnabled(notificationOwnerId, chatType, chatKey)) {
+            return;
+        }
+        RemoteNotificationManagerHolder.INSTANCE.showRawNotification(title, message);
+    }
+
     // --- Private ---
 
     private boolean isChatActive(String chatType, String chatKey) {
         BiPredicate<String, String> checker = activeChatChecker;
         if (checker == null) { return false; }
         return checker.test(chatType, chatKey);
+    }
+
+    static boolean areChatNotificationsEnabled(String ownerId, String chatType, String chatKey) {
+        return AppPreferences.isNotificationsEnabled()
+                && !AppPreferences.isChatMuted(ownerId, chatType, chatKey);
     }
 
     private void showRawNotification(String title, String message) {

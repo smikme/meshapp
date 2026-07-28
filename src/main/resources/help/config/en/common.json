@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "sections": {
     "owner_info": {
       "summary": "Device name and short callsign visible to other users on the mesh.",
@@ -2864,6 +2864,106 @@
           "description": "TAK operational role: K9."
         }
       }
+    },
+    "meshtastic.Config.SecurityConfig.packet_signature_policy": {
+      "summary": "Controls how signed mesh packets are accepted and verified.",
+      "whenToUse": "Change this only when the node supports XEdDSA and your mesh uses packet signatures.",
+      "defaultBehavior": "The firmware default keeps compatibility with ordinary unsigned traffic."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.flags": {
+      "summary": "Selects which Mesh Beacon broadcasts and offers are enabled.",
+      "whenToUse": "Enable only the beacon features required by this node.",
+      "defaultBehavior": "With no flags set, Mesh Beacon broadcasts are disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_send_as_node": {
+      "summary": "Sends beacon broadcasts using this node's identity.",
+      "whenToUse": "Enable it when receivers should identify the beacon source as this node.",
+      "defaultBehavior": "Disabled broadcasts use the firmware's default beacon identity behavior."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_message": {
+      "summary": "Text included in Mesh Beacon broadcasts.",
+      "whenToUse": "Use a short message that identifies the beacon or its purpose.",
+      "defaultBehavior": "An empty value sends no custom beacon text."
+    },
+    "meshtastic.ChannelSettings.channel_num": {
+      "summary": "Channel number used by a Mesh Beacon broadcast target.",
+      "whenToUse": "Choose the local channel whose settings should be advertised.",
+      "defaultBehavior": "Channel zero refers to the primary channel."
+    },
+    "meshtastic.ChannelSettings.psk": {
+      "summary": "Pre-shared key advertised for the target channel.",
+      "whenToUse": "Set it only when the beacon is intended to distribute that channel key.",
+      "defaultBehavior": "An empty key does not advertise a custom channel key."
+    },
+    "meshtastic.ChannelSettings.name": {
+      "summary": "Name advertised for the target channel.",
+      "whenToUse": "Use the same recognizable channel name as the receiving mesh.",
+      "defaultBehavior": "An empty name uses the firmware's default channel naming."
+    },
+    "meshtastic.ChannelSettings.id": {
+      "summary": "Numeric identifier advertised for the target channel.",
+      "whenToUse": "Set it only when a specific channel identifier is required.",
+      "defaultBehavior": "Zero leaves channel identification to the firmware defaults."
+    },
+    "meshtastic.ChannelSettings.uplink_enabled": {
+      "summary": "Advertises MQTT uplink for the target channel.",
+      "whenToUse": "Enable it when packets on this channel should be forwarded to MQTT.",
+      "defaultBehavior": "MQTT uplink is disabled."
+    },
+    "meshtastic.ChannelSettings.downlink_enabled": {
+      "summary": "Advertises MQTT downlink for the target channel.",
+      "whenToUse": "Enable it when MQTT packets should be delivered to this channel.",
+      "defaultBehavior": "MQTT downlink is disabled."
+    },
+    "meshtastic.ModuleSettings.position_precision": {
+      "summary": "Position precision advertised for the target channel.",
+      "whenToUse": "Reduce precision when channel members should receive only an approximate location.",
+      "defaultBehavior": "The firmware uses its standard position precision."
+    },
+    "meshtastic.ModuleSettings.is_muted": {
+      "summary": "Marks module traffic on the target channel as muted.",
+      "whenToUse": "Enable it when module messages should not be emitted on this channel.",
+      "defaultBehavior": "Module traffic is not muted."
+    },
+    "meshtastic.ChannelSettings.module_settings": {
+      "summary": "Per-channel module settings included in the advertised target.",
+      "whenToUse": "Adjust these settings when the advertised channel needs custom privacy or mute behavior.",
+      "defaultBehavior": "Firmware defaults are used for module behavior."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_channel": {
+      "summary": "Includes channel settings in Mesh Beacon offers.",
+      "whenToUse": "Enable it when nearby nodes should be offered the configured channel.",
+      "defaultBehavior": "Channel offers are disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_region": {
+      "summary": "Includes the radio region in Mesh Beacon offers.",
+      "whenToUse": "Enable it when receivers should be offered this node's region.",
+      "defaultBehavior": "Region offers are disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_preset": {
+      "summary": "Includes the LoRa preset in Mesh Beacon offers.",
+      "whenToUse": "Enable it when receivers should be offered this node's modem preset.",
+      "defaultBehavior": "Preset offers are disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_channel": {
+      "summary": "Broadcasts Mesh Beacon information on the configured channel.",
+      "whenToUse": "Enable it to send beacons through the selected channel.",
+      "defaultBehavior": "Channel-based beacon broadcasting is disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_region": {
+      "summary": "Broadcasts Mesh Beacon information for the configured region.",
+      "whenToUse": "Enable it to announce information tied to the selected region.",
+      "defaultBehavior": "Region-based beacon broadcasting is disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_preset": {
+      "summary": "Broadcasts Mesh Beacon information using the configured preset.",
+      "whenToUse": "Enable it to announce information tied to the selected modem preset.",
+      "defaultBehavior": "Preset-based beacon broadcasting is disabled."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_interval_secs": {
+      "summary": "Interval in seconds between Mesh Beacon broadcasts.",
+      "whenToUse": "Set a long interval appropriate for low-bandwidth mesh traffic.",
+      "defaultBehavior": "Zero disables periodic broadcasts; non-zero values must meet the firmware minimum."
     }
   }
 }

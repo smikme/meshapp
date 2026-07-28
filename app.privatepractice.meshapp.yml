@@ -13,12 +13,15 @@ finish-args:
   - --device=all
   - --allow=bluetooth
   - --system-talk-name=org.bluez
+  - --talk-name=org.kde.StatusNotifierWatcher
   - --filesystem=xdg-documents:create
   - --filesystem=xdg-download:create
   - --env=PATH=/app/jre/bin:/app/bin:/usr/bin
   - --env=JAVA_HOME=/app/jre
 
 modules:
+  - src/flatpak/shared-modules/libayatana-appindicator/libayatana-appindicator-gtk3.json
+
   - name: openjdk
     buildsystem: simple
     build-commands:
@@ -56,6 +59,7 @@ modules:
       - install -Dm644 src/main/resources/logo/icon_512.png /app/share/icons/hicolor/512x512/apps/app.privatepractice.meshapp.png
       - install -Dm644 src/main/resources/logo/icon_256.png /app/share/icons/hicolor/256x256/apps/app.privatepractice.meshapp.png
       - install -Dm644 src/main/resources/logo/icon_128.png /app/share/icons/hicolor/128x128/apps/app.privatepractice.meshapp.png
+      - install -Dm644 src/main/resources/tray/linux/icon_32.png /app/share/icons/hicolor/32x32/apps/app.privatepractice.meshapp.tray.png
       - install -Dm644 LICENSE /app/share/licenses/app.privatepractice.meshapp/LICENSE
       - install -Dm644 src/main/resources/emoji/LICENSE /app/share/licenses/app.privatepractice.meshapp/emoji/LICENSE
       - install -Dm644 src/main/resources/emoji/LICENSE-GRAPHICS /app/share/licenses/app.privatepractice.meshapp/emoji/LICENSE-GRAPHICS

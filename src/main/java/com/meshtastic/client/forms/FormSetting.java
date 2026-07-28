@@ -3,6 +3,7 @@ package com.meshtastic.client.forms;
 import com.meshtastic.client.forms.settings.ApplicationSettingsPanelFactory;
 import com.meshtastic.client.forms.settings.ConfigChangeCollector;
 import com.meshtastic.client.forms.settings.ConfigChangeSet;
+import com.meshtastic.client.forms.settings.ConfigCompatibilityValidator;
 import com.meshtastic.client.forms.settings.ConfigHelpPopupController;
 import com.meshtastic.client.forms.settings.ConfigPanelFactory;
 import com.meshtastic.client.forms.settings.ConfigProtobufSupport;
@@ -863,6 +864,16 @@ public class FormSetting extends Form {
             configStatusLabel.setText(I18n.t("settings.config.status.noChanges"));
             return;
         }
+        Optional<String> compatibilityError =
+            ConfigCompatibilityValidator.validate(
+                state,
+                changes,
+                originalConfigs
+            );
+        if (compatibilityError.isPresent()) {
+            configStatusLabel.setText(compatibilityError.get());
+            return;
+        }
         Optional<String> excludedModuleName = ConfigSaveController.firstExcludedModuleName(
             state.getDeviceMetadata(),
             changes.moduleConfigs()
@@ -1024,6 +1035,18 @@ public class FormSetting extends Form {
     }
 
     private void syncRepeatedEditorSlots(ConfigTreeItem editedItem) {
+        TreeItem<ConfigTreeItem> root = currentEditorRoot();
+        if (root != null
+                && state != null
+                && ProtobufTreeBuilder.adjustLoRaPresetAfterRegionEdit(
+                    root,
+                    editedItem,
+                    state.getFirmwareCapabilities(),
+                    state.getRegionPresetMap()
+                )) {
+            refreshConfigTreeView();
+            return;
+        }
         if (
             editedItem == null ||
             editedItem.getFieldDescriptor() == null ||
@@ -1032,7 +1055,6 @@ public class FormSetting extends Form {
             return;
         }
 
-        TreeItem<ConfigTreeItem> root = currentEditorRoot();
         if (root == null) {
             return;
         }

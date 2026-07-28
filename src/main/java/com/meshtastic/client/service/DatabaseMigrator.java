@@ -37,7 +37,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 23;
+    static final int CURRENT_VERSION = 24;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -211,6 +211,7 @@ public final class DatabaseMigrator {
             if (version < 21) { migrateToV21(connection); version = 21; }
             if (version < 22) { migrateToV22(connection); version = 22; }
             if (version < 23) { migrateToV23(connection); version = 23; }
+            if (version < 24) { migrateToV24(connection); version = 24; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -904,6 +905,27 @@ public final class DatabaseMigrator {
     private static void migrateToV23(Connection connection) throws SQLException {
         createChatThreadsTable(connection);
         log.info("Migration v23: created explicit chat threads table");
+    }
+
+    /** v24: packet identity used to deduplicate firmware 2.8 telemetry replay. */
+    private static void migrateToV24(Connection connection) throws SQLException {
+        if (!tableExists(connection, "TELEMETRY_HISTORY")) {
+            log.info("Migration v24: skipped telemetry packet ID because telemetry_history is absent");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            addColumnIfMissing(
+                    stmt,
+                    connection,
+                    "TELEMETRY_HISTORY",
+                    "PACKET_ID",
+                    "packet_id BIGINT DEFAULT 0");
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_telemetry_replay_packet
+                    ON telemetry_history (owner_node_id, node_id, packet_id, telemetry_variant)
+                    """);
+        }
+        log.info("Migration v24: added telemetry replay packet identity");
     }
 
     private static void createChatThreadsTable(Connection connection) throws SQLException {

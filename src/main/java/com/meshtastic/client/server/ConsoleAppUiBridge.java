@@ -33,7 +33,10 @@ final class ConsoleAppUiBridge implements AppUi.Bridge {
     }
 
     @Override
-    public void requestBlePasskey(String deviceAddress, java.util.function.IntConsumer onSubmit, Runnable onCancel) {
+    public void requestBlePasskey(long requestId,
+                                  String deviceAddress,
+                                  java.util.function.IntConsumer onSubmit,
+                                  Runnable onCancel) {
         log.warn("BLE passkey requested for {}, but console RPC server mode cannot prompt interactively",
                 deviceAddress != null && !deviceAddress.isBlank() ? deviceAddress : "unknown device");
         if (onCancel != null) {
