@@ -14,7 +14,7 @@ import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.utils.AppPreferences;
 
 import javafx.application.Platform;
-import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.layout.HBox;
 
 import java.util.ArrayList;
@@ -42,7 +42,13 @@ import org.slf4j.LoggerFactory;
 abstract class FormChatMessages extends FormChatUi {
 
     private static final Logger log = LoggerFactory.getLogger(FormChatMessages.class);
-    private static final int VIEWPORT_ANCHOR_RESTORE_PULSES = 6;
+    private record LiveRefreshData(List<MeshMessage> newMessages,
+                                   Map<Integer, MeshMessage> metadataByPacketId,
+                                   boolean databaseRewound) {}
+
+    private record MessageWindow(List<MeshMessage> messages,
+                                 int olderCount,
+                                 int newerCount) {}
 
     /**
      * Loads the latest {@code PAGE_SIZE} messages from the database.
@@ -50,50 +56,85 @@ abstract class FormChatMessages extends FormChatUi {
      * of the unread range instead of the absolute bottom.
      */
     protected void loadInitialMessages(boolean restoreSavedState) {
+        loadInitialMessages(restoreSavedState, () -> {});
+    }
+
+    @Override
+    protected void loadInitialMessages(boolean restoreSavedState, Runnable afterLoad) {
         if (selectedChat == null) { return; }
         if (remoteRpcState != null) {
-            loadRemoteInitialMessages(restoreSavedState);
+            loadRemoteInitialMessages(restoreSavedState, afterLoad);
             return;
         }
         pendingStatusLabels.clear();
         suspendScrollStateSync();
+        MessageDbService db = MessageDbService.getInstance();
+        ChatItem requestChat = selectedChat;
+        long generation = scrollOperationGeneration;
+        initialMessageLoadGeneration = generation;
+        initialMessageLoadPending = true;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        String loadedChatKey = chatScrollCacheKey(requestChat);
 
-        try {
-            MessageDbService db = MessageDbService.getInstance();
-            String chatType = currentChatType();
-            String chatKey = currentChatKey();
-            String ownerNodeId = currentOwnerNodeId();
+        clearLoadedMessageState();
+        loadedChatScrollCacheKey = loadedChatKey;
+        messageRows.clear();
 
-            List<MeshMessage> msgs = db.loadLast(chatType, chatKey, PAGE_SIZE, ownerNodeId);
-            attachReactions(msgs);
-
-            String loadedChatKey = chatScrollCacheKey(selectedChat);
-            clearLoadedMessageState();
-            loadedChatScrollCacheKey = loadedChatKey;
-            messageContainer.getChildren().clear();
-            for (MeshMessage msg : msgs) {
-                appendLoadedMessageRow(msg);
+        supplyChatDb(() -> {
+            List<MeshMessage> messages = db.loadLast(chatType, chatKey, PAGE_SIZE, ownerNodeId);
+            attachReactions(messages, chatType, chatKey, ownerNodeId);
+            return messages;
+        }).whenComplete((messages, error) -> Platform.runLater(() -> {
+            try {
+                if (error != null) {
+                    log.error("Failed to load initial chat messages", error);
+                    return;
+                }
+                if (!isCurrentScrollOperation(generation)
+                        || selectedChat == null
+                        || !chatItemMatches(selectedChat, requestChat)
+                        || !Objects.equals(ownerNodeId, currentOwnerNodeId())) {
+                    return;
+                }
+                applyLocalInitialMessages(messages, loadedChatKey, restoreSavedState);
+                afterLoad.run();
+            } finally {
+                if (initialMessageLoadGeneration == generation) {
+                    initialMessageLoadPending = false;
+                }
+                resumeScrollStateSyncLater();
             }
+        }));
+    }
 
-            updateLoadedBoundsAfterInitialLoad(msgs);
-            allHistoryLoaded = msgs.size() < PAGE_SIZE;
-            allNewerHistoryLoaded = true;
-            loadingOlderMessages = false;
-            loadingNewerMessages = false;
-            newMessageWhileScrolled = 0;
-            updateScrollDownBadge();
-            requestMessageViewportLayout();
-
-            if (restoreSavedState && restoreSavedScrollPosition()) {
-                openingChatUnreadCount = 0;
-                refreshUnreadTailIndicatorLater();
-                return;
-            }
-            positionInitialMessages(openingChatUnreadCount);
-            openingChatUnreadCount = 0;
-        } finally {
-            resumeScrollStateSyncLater();
+    private void applyLocalInitialMessages(List<MeshMessage> messages,
+                                           String loadedChatKey,
+                                           boolean restoreSavedState) {
+        clearLoadedMessageState();
+        loadedChatScrollCacheKey = loadedChatKey;
+        messageRows.clear();
+        for (MeshMessage message : messages) {
+            appendLoadedMessageRow(message);
         }
+
+        updateLoadedBoundsAfterInitialLoad(messages);
+        allHistoryLoaded = messages.size() < PAGE_SIZE;
+        allNewerHistoryLoaded = true;
+        loadingOlderMessages = false;
+        loadingNewerMessages = false;
+        newMessageWhileScrolled = 0;
+        updateScrollDownBadge();
+        requestMessageViewportLayout();
+
+        if (restoreSavedState && restoreSavedScrollPosition()) {
+            openingChatUnreadCount = 0;
+            refreshUnreadTailIndicatorLater();
+            return;
+        }
+        positionInitialMessages(openingChatUnreadCount);
+        openingChatUnreadCount = 0;
     }
 
     private void updateLoadedBoundsAfterInitialLoad(List<MeshMessage> messages) {
@@ -109,7 +150,7 @@ abstract class FormChatMessages extends FormChatUi {
         latestKnownDbId = newestLoadedDbId;
     }
 
-    private void loadRemoteInitialMessages(boolean restoreSavedState) {
+    private void loadRemoteInitialMessages(boolean restoreSavedState, Runnable afterLoad) {
         RemoteRpcState rpcState = remoteRpcState;
         ChatItem requestChat = selectedChat;
         if (rpcState == null || requestChat == null) {
@@ -117,6 +158,9 @@ abstract class FormChatMessages extends FormChatUi {
         }
         pendingStatusLabels.clear();
         suspendScrollStateSync();
+        long generation = scrollOperationGeneration;
+        initialMessageLoadGeneration = generation;
+        initialMessageLoadPending = true;
 
         rpcState.client()
                 .call("chat.messages",
@@ -125,7 +169,8 @@ abstract class FormChatMessages extends FormChatUi {
                         REMOTE_RPC_TIMEOUT)
                 .whenComplete((result, error) -> Platform.runLater(() -> {
                     try {
-                        if (!isRemoteChatRequestCurrent(rpcState, requestChat)) {
+                        if (!isCurrentScrollOperation(generation)
+                                || !isRemoteChatRequestCurrent(rpcState, requestChat)) {
                             return;
                         }
                         if (error != null) {
@@ -133,7 +178,11 @@ abstract class FormChatMessages extends FormChatUi {
                             return;
                         }
                         applyRemoteInitialMessages(requestChat, RemoteChatJson.parseMessages(result), restoreSavedState);
+                        afterLoad.run();
                     } finally {
+                        if (initialMessageLoadGeneration == generation) {
+                            initialMessageLoadPending = false;
+                        }
                         resumeScrollStateSyncLater();
                     }
                 }));
@@ -145,7 +194,7 @@ abstract class FormChatMessages extends FormChatUi {
         String loadedChatKey = chatScrollCacheKey(requestChat);
         clearLoadedMessageState();
         loadedChatScrollCacheKey = loadedChatKey;
-        messageContainer.getChildren().clear();
+        messageRows.clear();
         for (MeshMessage msg : messages) {
             appendLoadedMessageRow(msg);
         }
@@ -173,10 +222,12 @@ abstract class FormChatMessages extends FormChatUi {
         if (selectedChat == null) {
             return;
         }
+        scrollOperationGeneration++;
         openingChatUnreadCount = 0;
-        loadInitialMessages(false);
-        restorePendingCountdowns();
-        scrollToBottom();
+        loadInitialMessages(false, () -> {
+            restorePendingCountdowns();
+            scrollToBottom();
+        });
     }
 
     /**
@@ -191,31 +242,45 @@ abstract class FormChatMessages extends FormChatUi {
         loadingOlderMessages = true;
         ChatScrollState viewportAnchor = captureViewportAnchor();
         suspendScrollStateSync();
+        MessageDbService db = MessageDbService.getInstance();
+        ChatItem requestChat = selectedChat;
+        long generation = scrollOperationGeneration;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        long beforeDbId = oldestLoadedDbId;
 
-        try {
-            MessageDbService db = MessageDbService.getInstance();
-            String chatType = currentChatType();
-            String chatKey = currentChatKey();
-
-            List<MeshMessage> older = db.loadBefore(chatType, chatKey, oldestLoadedDbId, PAGE_SIZE, currentOwnerNodeId());
-
-            if (older.isEmpty()) {
-                allHistoryLoaded = true;
-                return;
-            }
-
-            prependOlderMessages(older);
-            allHistoryLoaded = older.size() < PAGE_SIZE;
-            trimLoadedWindowFromBottomIfNeeded();
-            requestMessageViewportLayout();
-            restoreViewportAnchorLater(viewportAnchor);
-        } finally {
-            Platform.runLater(() -> {
+        supplyChatDb(() -> {
+            List<MeshMessage> messages = db.loadBefore(
+                    chatType, chatKey, beforeDbId, PAGE_SIZE, ownerNodeId);
+            attachReactions(messages, chatType, chatKey, ownerNodeId);
+            return messages;
+        }).whenComplete((older, error) -> Platform.runLater(() -> {
+            try {
+                if (error != null) {
+                    log.error("Failed to load older chat messages", error);
+                    return;
+                }
+                if (!isCurrentScrollOperation(generation)
+                        || selectedChat == null
+                        || !chatItemMatches(selectedChat, requestChat)) {
+                    return;
+                }
+                if (older.isEmpty()) {
+                    allHistoryLoaded = true;
+                    return;
+                }
+                prependOlderMessages(older);
+                allHistoryLoaded = older.size() < PAGE_SIZE;
+                trimLoadedWindowFromBottomIfNeeded();
+                requestMessageViewportLayout();
+                restoreViewportAnchorLater(viewportAnchor);
+            } finally {
                 loadingOlderMessages = false;
                 refreshUnreadTailIndicator();
-            });
-            resumeScrollStateSyncLater();
-        }
+                resumeScrollStateSyncLater();
+            }
+        }));
     }
 
     protected void loadNewerMessages() {
@@ -227,36 +292,45 @@ abstract class FormChatMessages extends FormChatUi {
         loadingNewerMessages = true;
         ChatScrollState viewportAnchor = captureViewportAnchor();
         suspendScrollStateSync();
+        MessageDbService db = MessageDbService.getInstance();
+        ChatItem requestChat = selectedChat;
+        long generation = scrollOperationGeneration;
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        long afterDbId = newestLoadedDbId;
 
-        try {
-            MessageDbService db = MessageDbService.getInstance();
-            String chatType = currentChatType();
-            String chatKey = currentChatKey();
-
-            List<MeshMessage> newer = db.loadAfter(
-                    chatType,
-                    chatKey,
-                    newestLoadedDbId,
-                    PAGE_SIZE,
-                    currentOwnerNodeId());
-
-            if (newer.isEmpty()) {
+        supplyChatDb(() -> {
+            List<MeshMessage> messages = db.loadAfter(
+                    chatType, chatKey, afterDbId, PAGE_SIZE, ownerNodeId);
+            attachReactions(messages, chatType, chatKey, ownerNodeId);
+            return messages;
+        }).whenComplete((newer, error) -> Platform.runLater(() -> {
+            try {
+                if (error != null) {
+                    log.error("Failed to load newer chat messages", error);
+                    return;
+                }
+                if (!isCurrentScrollOperation(generation)
+                        || selectedChat == null
+                        || !chatItemMatches(selectedChat, requestChat)) {
+                    return;
+                }
+                if (newer.isEmpty()) {
+                    allNewerHistoryLoaded = newestLoadedDbId >= latestKnownDbId;
+                    return;
+                }
+                appendNewerMessages(newer);
+                trimLoadedWindowFromTopIfNeeded();
                 allNewerHistoryLoaded = newestLoadedDbId >= latestKnownDbId;
-                return;
-            }
-
-            appendNewerMessages(newer);
-            trimLoadedWindowFromTopIfNeeded();
-            allNewerHistoryLoaded = newestLoadedDbId >= latestKnownDbId;
-            requestMessageViewportLayout();
-            restoreViewportAnchorLater(viewportAnchor);
-        } finally {
-            Platform.runLater(() -> {
+                requestMessageViewportLayout();
+                restoreViewportAnchorLater(viewportAnchor);
+            } finally {
                 loadingNewerMessages = false;
                 refreshUnreadTailIndicator();
-            });
-            resumeScrollStateSyncLater();
-        }
+                resumeScrollStateSyncLater();
+            }
+        }));
     }
 
     /**
@@ -271,31 +345,88 @@ abstract class FormChatMessages extends FormChatUi {
         }
         boolean wasAtLiveTail = formVisible && isAtLiveTail();
         ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail ? captureViewportAnchor() : null;
+        ChatItem requestChat = selectedChat;
+        long generation = scrollOperationGeneration;
         String chatType = currentChatType();
         String chatKey = currentChatKey();
         String ownerNodeId = currentOwnerNodeId();
-
-        // Refresh delivery statuses for sent messages, including ACK and NAK.
         MessageDbService db = MessageDbService.getInstance();
-        refreshPendingDeliveryStatuses(db, chatType, chatKey, ownerNodeId);
-        Set<Long> metadataChangedDbIds = syncLoadedMqttMetadata(db, chatType, chatKey, ownerNodeId);
+        long afterDbId = latestKnownDbId;
+        List<MeshMessage> loadedSnapshot = List.copyOf(loadedMessages);
+        List<Integer> metadataPacketIds = loadedSnapshot.stream()
+                .filter(message -> message.isViaMqtt()
+                        || pendingStatusLabels.containsKey(message.getPacketId()))
+                .map(MeshMessage::getPacketId)
+                .filter(packetId -> packetId != 0)
+                .distinct()
+                .toList();
 
-        List<MeshMessage> newMsgs = db.loadAfter(chatType, chatKey, latestKnownDbId, currentOwnerNodeId());
-        if (reloadAfterDatabaseResetIfNeeded(db, chatType, chatKey, newMsgs)) {
-            return;
-        }
-        if (newMsgs.isEmpty()) {
+        supplyChatDb(() -> {
+            List<MeshMessage> newMessages = db.loadAfter(
+                    chatType, chatKey, afterDbId, ownerNodeId);
+            attachReactions(newMessages, chatType, chatKey, ownerNodeId);
+            Map<Integer, MeshMessage> metadata = db.findByPacketIds(
+                    metadataPacketIds, chatType, chatKey, ownerNodeId);
+            List<MeshMessage> latest = newMessages.isEmpty()
+                    ? db.loadLast(chatType, chatKey, 1, ownerNodeId)
+                    : List.of();
+            boolean rewound = newMessages.isEmpty()
+                    && hasDatabaseRewind(afterDbId, latest, loadedSnapshot);
+            return new LiveRefreshData(newMessages, metadata, rewound);
+        }).whenComplete((data, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                log.error("Failed to refresh current chat", error);
+                return;
+            }
+            if (!isCurrentScrollOperation(generation)
+                    || selectedChat == null
+                    || !chatItemMatches(selectedChat, requestChat)) {
+                return;
+            }
+            if (data.databaseRewound()) {
+                loadInitialMessages(false);
+                return;
+            }
+            Set<Long> metadataChangedDbIds = applyLoadedMetadata(data.metadataByPacketId());
+            refreshPendingStatusLabels(data.metadataByPacketId());
+            if (!data.newMessages().isEmpty()) {
+                handleNewMessages(data.newMessages(), preservedScrollState, wasAtLiveTail);
+                refreshMessageSearchResults(false);
+            }
             if (formVisible) {
                 refreshLoadedMessageRows(metadataChangedDbIds);
             }
+        }));
+    }
+
+    private Set<Long> applyLoadedMetadata(Map<Integer, MeshMessage> metadataByPacketId) {
+        if (metadataByPacketId == null || metadataByPacketId.isEmpty()) {
+            return Set.of();
+        }
+        Set<Long> changedDbIds = new HashSet<>();
+        for (MeshMessage loaded : loadedMessages) {
+            MeshMessage updated = metadataByPacketId.get(loaded.getPacketId());
+            if (updated != null && copyLoadedMessageMetadata(loaded, updated)) {
+                changedDbIds.add(loaded.getDbId());
+            }
+        }
+        return changedDbIds;
+    }
+
+    private void refreshPendingStatusLabels(Map<Integer, MeshMessage> metadataByPacketId) {
+        if (metadataByPacketId == null || metadataByPacketId.isEmpty()) {
             return;
         }
-
-        handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
-        refreshMessageSearchResults(false);
-        if (formVisible) {
-            refreshLoadedMessageRows(metadataChangedDbIds);
-        }
+        pendingStatusLabels.entrySet().removeIf(entry -> {
+            MeshMessage updated = metadataByPacketId.get(entry.getKey());
+            if (updated == null || updated.getStatus() == null
+                    || updated.getStatus() == MeshMessage.DeliveryStatus.SENDING) {
+                return false;
+            }
+            MeshMessage loaded = syncLoadedMessageMetadata(updated);
+            bubbleFactory.refreshStatusLabel(entry.getValue(), loaded != null ? loaded : updated);
+            return !shouldKeepTrackingRecipientAck(entry.getKey(), updated);
+        });
     }
 
     protected void processMessageChangeEvents(List<MessageChangeEvent> events) {
@@ -532,9 +663,7 @@ abstract class FormChatMessages extends FormChatUi {
     private boolean applyMessageChangeEvent(MessageChangeEvent event) {
         return switch (event.kind()) {
             case NEW_MESSAGE -> {
-                refreshCurrentChat();
-                refreshMessageMetadata(event);
-                yield true;
+                yield appendLocalIncomingMessage(event);
             }
             case REACTION_CHANGED -> refreshMessageReactions(event.targetPacketId());
             case STATUS_CHANGED -> refreshMessageStatus(event);
@@ -547,6 +676,27 @@ abstract class FormChatMessages extends FormChatUi {
         };
     }
 
+    private boolean appendLocalIncomingMessage(MessageChangeEvent event) {
+        MeshMessage message = event.message();
+        if (message == null || message.getDbId() <= 0) {
+            return false;
+        }
+        MeshMessage loaded = findLoadedMessage(event);
+        if (loaded != null) {
+            copyLoadedMessageMetadata(loaded, message);
+            refreshRenderedMessageRow(loaded);
+            return true;
+        }
+
+        boolean wasAtLiveTail = formVisible && isAtLiveTail();
+        ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail
+                ? captureViewportAnchor()
+                : null;
+        handleNewMessages(List.of(message), preservedScrollState, wasAtLiveTail);
+        refreshMessageSearchResults(false);
+        return true;
+    }
+
     private boolean refreshMessageReactions(int targetPacketId) {
         if (targetPacketId == 0) {
             return false;
@@ -556,13 +706,31 @@ abstract class FormChatMessages extends FormChatUi {
             return true;
         }
 
-        attachReactions(List.of(message));
-        MessageBubbleFactory.RenderedMessageRow rendered = loadedRenderedMessageRows.get(message.getDbId());
-        if (rendered == null) {
-            return true;
-        }
-        bubbleFactory.refreshRenderedReactions(rendered, message);
-        requestMessageViewportLayoutLater();
+        long dbId = message.getDbId();
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        long generation = scrollOperationGeneration;
+        supplyChatDb(() -> MessageDbService.getInstance()
+                .loadReactionsByTargetPacketIds(
+                        chatType, chatKey, ownerNodeId, List.of(targetPacketId))
+                .getOrDefault(targetPacketId, List.of()))
+                .whenComplete((reactions, error) -> Platform.runLater(() -> {
+                    if (error != null || !isCurrentScrollOperation(generation)) {
+                        return;
+                    }
+                    MeshMessage current = findLoadedMessageByDbId(dbId);
+                    if (current == null) {
+                        return;
+                    }
+                    current.setReactions(reactions);
+                    MessageBubbleFactory.RenderedMessageRow rendered =
+                            loadedRenderedMessageRows.get(dbId);
+                    if (rendered != null) {
+                        bubbleFactory.refreshRenderedReactions(rendered, current);
+                        requestMessageViewportLayoutLater();
+                    }
+                }));
         return true;
     }
 
@@ -574,8 +742,8 @@ abstract class FormChatMessages extends FormChatUi {
 
         MeshMessage updated = event.message();
         if (updated == null && event.packetId() != 0) {
-            updated = MessageDbService.getInstance()
-                    .findByPacketId(event.packetId(), currentChatType(), currentChatKey(), currentOwnerNodeId());
+            refreshMessageFromDatabaseAsync(event, true);
+            return true;
         }
         if (updated != null) {
             copyLoadedMessageMetadata(message, updated);
@@ -598,8 +766,8 @@ abstract class FormChatMessages extends FormChatUi {
 
         MeshMessage updated = event.message();
         if (updated == null && event.packetId() != 0) {
-            updated = MessageDbService.getInstance()
-                    .findByPacketId(event.packetId(), currentChatType(), currentChatKey(), currentOwnerNodeId());
+            refreshMessageFromDatabaseAsync(event, false);
+            return true;
         }
         if (updated != null) {
             copyLoadedMessageMetadata(message, updated);
@@ -615,6 +783,38 @@ abstract class FormChatMessages extends FormChatUi {
             requestMessageViewportLayoutLater();
         }
         return true;
+    }
+
+    private void refreshMessageFromDatabaseAsync(MessageChangeEvent event, boolean statusOnly) {
+        int packetId = event.packetId();
+        String chatType = currentChatType();
+        String chatKey = currentChatKey();
+        String ownerNodeId = currentOwnerNodeId();
+        long generation = scrollOperationGeneration;
+        supplyChatDb(() -> MessageDbService.getInstance()
+                .findByPacketId(packetId, chatType, chatKey, ownerNodeId))
+                .whenComplete((updated, error) -> Platform.runLater(() -> {
+                    if (error != null || updated == null || !isCurrentScrollOperation(generation)) {
+                        return;
+                    }
+                    MeshMessage current = findLoadedMessageByPacketId(packetId);
+                    if (current == null) {
+                        return;
+                    }
+                    copyLoadedMessageMetadata(current, updated);
+                    MessageBubbleFactory.RenderedMessageRow rendered =
+                            loadedRenderedMessageRows.get(current.getDbId());
+                    if (rendered == null) {
+                        return;
+                    }
+                    bubbleFactory.refreshRenderedStatus(rendered, current);
+                    bubbleFactory.refreshRenderedMetadata(rendered, current);
+                    if (!statusOnly) {
+                        current.setReactions(updated.getReactions());
+                        bubbleFactory.refreshRenderedReactions(rendered, current);
+                    }
+                    requestMessageViewportLayoutLater();
+                }));
     }
 
     private MeshMessage findLoadedMessage(MessageChangeEvent event) {
@@ -661,50 +861,12 @@ abstract class FormChatMessages extends FormChatUi {
         return null;
     }
 
-    private void refreshPendingDeliveryStatuses(MessageDbService db,
-                                                String chatType,
-                                                String chatKey,
-                                                String ownerNodeId) {
-        pendingStatusLabels.entrySet().removeIf(entry ->
-                refreshPendingDeliveryStatus(db, chatType, chatKey, ownerNodeId, entry.getKey(), entry.getValue()));
-    }
-
-    private boolean refreshPendingDeliveryStatus(MessageDbService db,
-                                                 String chatType,
-                                                 String chatKey,
-                                                 String ownerNodeId,
-                                                 int packetId,
-                                                 Label statusLabel) {
-        MeshMessage updated = db.findByPacketId(packetId, chatType, chatKey, ownerNodeId);
-        if (updated == null || updated.getStatus() == null
-                || updated.getStatus() == MeshMessage.DeliveryStatus.SENDING) {
-            return false;
-        }
-
-        MeshMessage loaded = syncLoadedMessageMetadata(updated);
-        bubbleFactory.refreshStatusLabel(statusLabel, loaded != null ? loaded : updated);
-        return !shouldKeepTrackingRecipientAck(packetId, updated);
-    }
-
     private boolean shouldKeepTrackingRecipientAck(int packetId, MeshMessage updated) {
         return state != null
                 && updated != null
                 && updated.isDirectMessage()
                 && updated.getStatus() == MeshMessage.DeliveryStatus.DELIVERED
                 && state.getMessageStore().getPendingAcks().containsKey(packetId);
-    }
-
-    private boolean reloadAfterDatabaseResetIfNeeded(MessageDbService db,
-                                                     String chatType,
-                                                     String chatKey,
-                                                     List<MeshMessage> newMessages) {
-        if (!newMessages.isEmpty() || !shouldReloadChatAfterDatabaseReset(db, chatType, chatKey)) {
-            return false;
-        }
-
-        loadInitialMessages(false);
-        refreshLoadedMessageRows();
-        return true;
     }
 
     private void handleNewMessages(List<MeshMessage> newMessages,
@@ -750,15 +912,6 @@ abstract class FormChatMessages extends FormChatUi {
         refreshUnreadTailIndicatorLater();
     }
 
-    protected boolean shouldReloadChatAfterDatabaseReset(MessageDbService db, String chatType, String chatKey) {
-        if (db == null || chatType == null || chatKey == null || selectedChat == null || latestKnownDbId <= 0) {
-            return false;
-        }
-
-        List<MeshMessage> latest = db.loadLast(chatType, chatKey, 1, currentOwnerNodeId());
-        return hasDatabaseRewind(latestKnownDbId, latest, loadedMessages);
-    }
-
     static boolean hasDatabaseRewind(long latestKnownDbId,
                                      List<MeshMessage> latestFromDb,
                                      List<MeshMessage> loadedMessages) {
@@ -794,28 +947,6 @@ abstract class FormChatMessages extends FormChatUi {
                 markAsRead(chat);
             }
         });
-    }
-
-    protected Set<Long> syncLoadedMqttMetadata(MessageDbService db,
-                                        String chatType,
-                                        String chatKey,
-                                        String ownerNodeId) {
-        if (db == null || chatType == null || chatKey == null || ownerNodeId == null) {
-            return Set.of();
-        }
-        Set<Long> changedDbIds = new HashSet<>();
-        for (MeshMessage loaded : loadedMessages) {
-            if (loaded.getPacketId() == 0 || !loaded.isViaMqtt()) {
-                continue;
-            }
-            MeshMessage updated = db.findByPacketId(loaded.getPacketId(), chatType, chatKey, ownerNodeId);
-            if (updated != null) {
-                if (copyLoadedMessageMetadata(loaded, updated)) {
-                    changedDbIds.add(loaded.getDbId());
-                }
-            }
-        }
-        return changedDbIds;
     }
 
     protected MeshMessage syncLoadedMessageMetadata(MeshMessage updated) {
@@ -895,14 +1026,29 @@ abstract class FormChatMessages extends FormChatUi {
         return loaded.getPacketId() != 0 && loaded.getPacketId() == updated.getPacketId();
     }
 
-    /**
-     * Reflects a locally sent message in the open chat immediately.
-     * It still goes through the database-backed path used by the ordinary
-     * message listener, keeping rendering and delivery statuses consistent.
-     */
-    protected void refreshCurrentChatAfterLocalSend() {
-        reloadChatList();
+    /** Reflects a locally persisted outgoing message without waiting for a DB reload. */
+    protected void refreshCurrentChatAfterLocalSend(MeshMessage sentMessage) {
+        // Sending explicitly moves the user to the live tail. Invalidate older
+        // pagination and saved-anchor callbacks before they can restore a stale
+        // viewport after the outgoing row has been appended.
+        scrollOperationGeneration++;
+        reloadChatListAsync();
+        if (appendLocallySentMessage(sentMessage)) {
+            scrollToBottom();
+            return;
+        }
         jumpToLatestMessages();
+    }
+
+    protected boolean appendLocallySentMessage(MeshMessage sentMessage) {
+        if (sentMessage == null || sentMessage.getDbId() <= 0 || selectedChat == null
+                || initialMessageLoadPending || !isLoadedMessageWindowFor(selectedChat)
+                || !allNewerHistoryLoaded) {
+            return false;
+        }
+        MessageChangeEvent event = MessageChangeEvent.newMessage(
+                currentChatType(), currentChatKey(), currentOwnerNodeId(), sentMessage);
+        return appendLocalIncomingMessage(event);
     }
 
     protected void refreshCurrentChatAfterLocalReaction() {
@@ -931,7 +1077,7 @@ abstract class FormChatMessages extends FormChatUi {
         applyMessageSearchHighlight(rendered.row(), msg.getDbId());
         loadedRenderedMessageRows.put(msg.getDbId(), rendered);
         loadedMessageRows.put(msg.getDbId(), rendered.row());
-        messageContainer.getChildren().add(rendered.row());
+        messageRows.add(rendered.row());
     }
 
     protected void prependLoadedMessageRow(MeshMessage msg) {
@@ -940,7 +1086,7 @@ abstract class FormChatMessages extends FormChatUi {
         applyMessageSearchHighlight(rendered.row(), msg.getDbId());
         loadedRenderedMessageRows.put(msg.getDbId(), rendered);
         loadedMessageRows.put(msg.getDbId(), rendered.row());
-        messageContainer.getChildren().addFirst(rendered.row());
+        messageRows.addFirst(rendered.row());
     }
 
     protected void prependOlderMessages(List<MeshMessage> older) {
@@ -980,7 +1126,7 @@ abstract class FormChatMessages extends FormChatUi {
                     HBox row = loadedMessageRows.remove(dbId);
                     loadedRenderedMessageRows.remove(dbId);
                     if (row != null) {
-                        messageContainer.getChildren().remove(row);
+                        messageRows.remove(row);
                     }
                     return selectedMessageDbIds.remove(dbId);
                 })
@@ -1012,10 +1158,21 @@ abstract class FormChatMessages extends FormChatUi {
         if (remoteRpcState != null || messages == null || messages.isEmpty() || selectedChat == null) {
             return Set.of();
         }
+        return attachReactions(
+                messages,
+                currentChatType(),
+                currentChatKey(),
+                currentOwnerNodeId());
+    }
+
+    private Set<Long> attachReactions(List<MeshMessage> messages,
+                                      String chatType,
+                                      String chatKey,
+                                      String ownerNodeId) {
+        if (messages == null || messages.isEmpty()) {
+            return Set.of();
+        }
         MessageDbService db = MessageDbService.getInstance();
-        String chatType = currentChatType();
-        String chatKey = currentChatKey();
-        String ownerNodeId = currentOwnerNodeId();
         Map<Long, String> replyTextBefore = messages.stream()
                 .collect(java.util.stream.Collectors.toMap(
                         MeshMessage::getDbId,
@@ -1102,13 +1259,13 @@ abstract class FormChatMessages extends FormChatUi {
     private void rebuildLoadedMessageRows() {
         loadedMessageRows.clear();
         loadedRenderedMessageRows.clear();
-        messageContainer.getChildren().clear();
+        messageRows.clear();
         for (MeshMessage message : loadedMessages) {
             MessageBubbleFactory.RenderedMessageRow rendered = bubbleFactory.buildRendered(message);
             applyMessageSearchHighlight(rendered.row(), message.getDbId());
             loadedRenderedMessageRows.put(message.getDbId(), rendered);
             loadedMessageRows.put(message.getDbId(), rendered.row());
-            messageContainer.getChildren().add(rendered.row());
+            messageRows.add(rendered.row());
         }
         requestMessageViewportLayout();
     }
@@ -1154,11 +1311,7 @@ abstract class FormChatMessages extends FormChatUi {
                 && Objects.equals(left.getSenderName(), right.getSenderName());
     }
 
-    /**
-     * After switching from a short direct chat to a channel, ScrollPane can keep
-     * the previous viewport geometry until the next resize or pulse. Force one
-     * viewport invalidation while coalescing repeated requests.
-     */
+    /** Coalesces list layout invalidations into one JavaFX pulse. */
     protected void requestMessageViewportLayout() {
         requestMessageViewportLayout(false);
     }
@@ -1181,28 +1334,20 @@ abstract class FormChatMessages extends FormChatUi {
     protected void flushQueuedViewportLayout() {
         viewportLayoutDirty.getAndSet(false);
         relayoutMessageViewport();
-        Platform.runLater(() -> {
-            relayoutMessageViewport();
-            viewportLayoutQueued.set(false);
-            if (viewportLayoutDirty.get() && viewportLayoutQueued.compareAndSet(false, true)) {
-                Platform.runLater(this::flushQueuedViewportLayout);
-            }
-        });
+        viewportLayoutQueued.set(false);
+        if (viewportLayoutDirty.get() && viewportLayoutQueued.compareAndSet(false, true)) {
+            Platform.runLater(this::flushQueuedViewportLayout);
+        }
     }
 
     protected void relayoutMessageViewport() {
-        if (detailPane == null || messageArea == null || messageScrollPane == null || messageContainer == null) {
+        if (detailPane == null || messageArea == null || messageListView == null) {
             return;
         }
 
         detailPane.requestLayout();
         messageArea.requestLayout();
-        messageScrollPane.requestLayout();
-        messageContainer.requestLayout();
-
-        if (messageScrollPane.getScene() == null) {
-            return;
-        }
+        messageListView.requestLayout();
     }
 
     protected void suspendScrollStateSync() {
@@ -1210,18 +1355,18 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void resumeScrollStateSyncLater() {
-        Platform.runLater(() -> Platform.runLater(() -> {
+        Platform.runLater(() -> {
             if (scrollStateSyncSuspendCount > 0) {
                 scrollStateSyncSuspendCount--;
             }
             if (scrollStateSyncSuspendCount == 0) {
                 refreshAfterProgrammaticScroll();
             }
-        }));
+        });
     }
 
     private void refreshAfterProgrammaticScroll() {
-        if (selectedChat == null || messageScrollPane == null || messageContainer == null) {
+        if (selectedChat == null || messageListView == null) {
             return;
         }
         refreshUnreadTailIndicator();
@@ -1237,14 +1382,37 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected boolean isScrolledToBottom() {
-        if (messageContainer == null || messageScrollPane == null) {
+        if (messageListView == null || messageRows.isEmpty()) {
             return true;
         }
+        int lastVisible = lastVisibleMessageRowIndex();
+        if (lastVisible >= 0) {
+            return lastVisible >= messageRows.size() - 1;
+        }
+        return messageScrollBar == null
+                || messageScrollBar.getMax() <= messageScrollBar.getMin()
+                || messageScrollBar.getValue() >= messageScrollBar.getMax() - 0.0001;
+    }
 
-        return isScrolledToBottomFromMetrics(
-                messageContainer.getLayoutBounds().getHeight(),
-                messageScrollPane.getViewportBounds().getHeight(),
-                messageScrollPane.getVvalue());
+    private int firstVisibleMessageRowIndex() {
+        return visibleMessageRowIndices().stream().mapToInt(Integer::intValue).min().orElse(-1);
+    }
+
+    private int lastVisibleMessageRowIndex() {
+        return visibleMessageRowIndices().stream().mapToInt(Integer::intValue).max().orElse(-1);
+    }
+
+    private List<Integer> visibleMessageRowIndices() {
+        if (messageListView == null || messageListView.getSkin() == null) {
+            return List.of();
+        }
+        return messageListView.lookupAll(".list-cell").stream()
+                .filter(ListCell.class::isInstance)
+                .map(ListCell.class::cast)
+                .filter(cell -> cell.isVisible() && !cell.isEmpty() && cell.getIndex() >= 0)
+                .map(ListCell::getIndex)
+                .distinct()
+                .toList();
     }
 
     static boolean isScrolledToBottomFromMetrics(double contentHeight, double viewportHeight, double vvalue) {
@@ -1328,25 +1496,13 @@ abstract class FormChatMessages extends FormChatUi {
             return null;
         }
 
-        messageScrollPane.applyCss();
-        messageScrollPane.layout();
-        messageContainer.applyCss();
-        messageContainer.layout();
-
-        double contentHeight = messageContainer.getLayoutBounds().getHeight();
-        double viewportHeight = messageScrollPane.getViewportBounds().getHeight();
-        double maxOffset = Math.max(0, contentHeight - viewportHeight);
-        double topOffset = Math.max(0, Math.min(maxOffset, messageScrollPane.getVvalue() * maxOffset));
-
-        for (MeshMessage message : loadedMessages) {
-            HBox row = loadedMessageRows.get(message.getDbId());
-            if (row == null) {
-                continue;
-            }
-            double rowBottom = row.getBoundsInParent().getMaxY();
-            if (rowBottom >= topOffset) {
-                double rowTop = row.getBoundsInParent().getMinY();
-                return new ChatScrollState(message.getDbId(), Math.max(0, topOffset - rowTop), false);
+        int firstVisible = firstVisibleMessageRowIndex();
+        if (firstVisible >= 0 && firstVisible < messageRows.size()) {
+            HBox visibleRow = messageRows.get(firstVisible);
+            for (MeshMessage message : loadedMessages) {
+                if (loadedMessageRows.get(message.getDbId()) == visibleRow) {
+                    return new ChatScrollState(message.getDbId(), 0, false);
+                }
             }
         }
 
@@ -1363,26 +1519,17 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
         long generation = scrollOperationGeneration;
+        long commandGeneration = ++viewportScrollCommandGeneration;
         suspendScrollStateSync();
-        restoreViewportAnchorAcrossPulses(viewportAnchor, generation, VIEWPORT_ANCHOR_RESTORE_PULSES);
-    }
-
-    private void restoreViewportAnchorAcrossPulses(ChatScrollState viewportAnchor,
-                                                   long generation,
-                                                   int pulsesRemaining) {
         Platform.runLater(() -> {
             try {
-                if (!isCurrentScrollOperation(generation)) {
+                if (!isCurrentScrollOperation(generation)
+                        || commandGeneration != viewportScrollCommandGeneration) {
                     return;
                 }
                 alignMessageToViewport(viewportAnchor.anchorDbId(), viewportAnchor.anchorOffset());
-                if (pulsesRemaining > 1) {
-                    restoreViewportAnchorAcrossPulses(viewportAnchor, generation, pulsesRemaining - 1);
-                }
             } finally {
-                if (pulsesRemaining <= 1 || !isCurrentScrollOperation(generation)) {
-                    resumeScrollStateSyncLater();
-                }
+                resumeScrollStateSyncLater();
             }
         });
     }
@@ -1392,73 +1539,82 @@ abstract class FormChatMessages extends FormChatUi {
         if (savedState == null || savedState.atBottom()) {
             return false;
         }
-        ensureMessageLoaded(savedState.anchorDbId());
-        if (!loadedMessageRows.containsKey(savedState.anchorDbId())) {
-            return false;
-        }
-        restoreSavedScrollPosition(savedState);
+        ensureMessageLoaded(savedState.anchorDbId(), () -> restoreSavedScrollPosition(savedState));
         return true;
     }
 
     protected void ensureMessageLoaded(long dbId) {
-        if (remoteRpcState != null || selectedChat == null || dbId <= 0 || loadedMessageRows.containsKey(dbId)) {
-            return;
-        }
-
-        loadMessageWindowAround(dbId);
+        ensureMessageLoaded(dbId, () -> {});
     }
 
-    private void loadMessageWindowAround(long dbId) {
+    @Override
+    protected void ensureMessageLoaded(long dbId, Runnable afterLoad) {
+        if (selectedChat == null || dbId <= 0) {
+            return;
+        }
+        if (remoteRpcState != null || loadedMessageRows.containsKey(dbId)) {
+            afterLoad.run();
+            return;
+        }
+        loadMessageWindowAround(dbId, afterLoad);
+    }
+
+    private void loadMessageWindowAround(long dbId, Runnable afterLoad) {
         MessageDbService db = MessageDbService.getInstance();
+        ChatItem requestChat = selectedChat;
+        long generation = scrollOperationGeneration;
         String chatType = currentChatType();
         String chatKey = currentChatKey();
         String ownerNodeId = currentOwnerNodeId();
         int olderLimit = PAGE_SIZE / 2;
         int newerLimit = PAGE_SIZE - olderLimit - 1;
-
-        MeshMessage target = db.findByDbId(chatType, chatKey, dbId, ownerNodeId);
-        if (target == null) {
-            return;
-        }
-
-        List<MeshMessage> older = db.loadBefore(chatType, chatKey, dbId, olderLimit, ownerNodeId);
-        List<MeshMessage> newer = db.loadAfter(chatType, chatKey, dbId, newerLimit, ownerNodeId);
-        List<MeshMessage> window = new ArrayList<>(older.size() + 1 + newer.size());
-        window.addAll(older);
-        window.add(target);
-        window.addAll(newer);
-        attachReactions(window);
-
         long previousLatestKnownDbId = Math.max(latestKnownDbId, newestLoadedDbId);
-        clearLoadedMessageState();
-        loadedChatScrollCacheKey = chatScrollCacheKey(selectedChat);
-        messageContainer.getChildren().clear();
-        for (MeshMessage message : window) {
-            appendLoadedMessageRow(message);
-        }
-        recalcLoadedBounds();
-        allHistoryLoaded = older.size() < olderLimit;
-        allNewerHistoryLoaded = newer.size() < newerLimit;
-        if (allNewerHistoryLoaded) {
-            latestKnownDbId = newestLoadedDbId;
-        } else {
-            latestKnownDbId = Math.max(previousLatestKnownDbId, newestLoadedDbId);
-        }
+
+        supplyChatDb(() -> {
+            MeshMessage target = db.findByDbId(chatType, chatKey, dbId, ownerNodeId);
+            if (target == null) {
+                return null;
+            }
+            List<MeshMessage> older = db.loadBefore(
+                    chatType, chatKey, dbId, olderLimit, ownerNodeId);
+            List<MeshMessage> newer = db.loadAfter(
+                    chatType, chatKey, dbId, newerLimit, ownerNodeId);
+            List<MeshMessage> window = new ArrayList<>(older.size() + 1 + newer.size());
+            window.addAll(older);
+            window.add(target);
+            window.addAll(newer);
+            attachReactions(window, chatType, chatKey, ownerNodeId);
+            return new MessageWindow(window, older.size(), newer.size());
+        }).whenComplete((window, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                log.error("Failed to load chat window around message {}", dbId, error);
+                return;
+            }
+            if (window == null || !isCurrentScrollOperation(generation)
+                    || selectedChat == null || !chatItemMatches(selectedChat, requestChat)) {
+                return;
+            }
+            clearLoadedMessageState();
+            loadedChatScrollCacheKey = chatScrollCacheKey(selectedChat);
+            messageRows.clear();
+            for (MeshMessage message : window.messages()) {
+                appendLoadedMessageRow(message);
+            }
+            recalcLoadedBounds();
+            allHistoryLoaded = window.olderCount() < olderLimit;
+            allNewerHistoryLoaded = window.newerCount() < newerLimit;
+            latestKnownDbId = allNewerHistoryLoaded
+                    ? newestLoadedDbId
+                    : Math.max(previousLatestKnownDbId, newestLoadedDbId);
+            afterLoad.run();
+        }));
     }
 
     protected int getUnreadCount(ChatItem item) {
         if (item == null) {
             return 0;
         }
-        if (remoteRpcState != null) {
-            return item.getUnreadCount();
-        }
-
-        ChatDbKey key = ChatDbKey.from(item);
-        int totalCount = MessageDbService.getInstance().getUnreadEligibleMessageCount(
-                key.dbType(), key.dbKey(), currentOwnerNodeId());
-        int lastRead = lastReadCounts.getOrDefault(key.readKey(), 0);
-        return Math.max(0, totalCount - lastRead);
+        return item.getUnreadCount();
     }
 
     protected static boolean isUnreadEligible(MeshMessage message) {
@@ -1523,10 +1679,7 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void refreshUnreadTailIndicatorLater() {
-        Platform.runLater(() -> {
-            refreshUnreadTailIndicator();
-            Platform.runLater(this::refreshUnreadTailIndicator);
-        });
+        Platform.runLater(this::refreshUnreadTailIndicator);
     }
 
     protected void refreshUnreadTailIndicator() {
@@ -1559,16 +1712,7 @@ abstract class FormChatMessages extends FormChatUi {
             return 0;
         }
 
-        messageScrollPane.applyCss();
-        messageScrollPane.layout();
-        messageContainer.applyCss();
-        messageContainer.layout();
-
-        double contentHeight = messageContainer.getLayoutBounds().getHeight();
-        double viewportHeight = messageScrollPane.getViewportBounds().getHeight();
-        double maxOffset = Math.max(0, contentHeight - viewportHeight);
-        double currentOffset = Math.max(0, Math.min(maxOffset, messageScrollPane.getVvalue() * maxOffset));
-        double viewportBottom = currentOffset + viewportHeight - 1;
+        int lastVisibleRow = lastVisibleMessageRowIndex();
 
         int firstUnreadIndex = findFirstUnreadLoadedIndex(totalUnread);
         if (firstUnreadIndex < 0) {
@@ -1582,7 +1726,7 @@ abstract class FormChatMessages extends FormChatUi {
                 continue;
             }
             HBox row = loadedMessageRows.get(message.getDbId());
-            if (row != null && row.getBoundsInParent().getMinY() >= viewportBottom) {
+            if (row != null && messageRows.indexOf(row) > lastVisibleRow) {
                 unreadBelow++;
             }
         }
@@ -1599,22 +1743,37 @@ abstract class FormChatMessages extends FormChatUi {
         }
     }
 
-    /** Scrolls messages to the bottom after forcing layout. */
+    /** Scrolls the virtualized message list to its final row. */
     protected void scrollToBottom() {
         long generation = scrollOperationGeneration;
+        long commandGeneration = ++viewportScrollCommandGeneration;
+        suspendScrollStateSync();
+        scrollToBottomAcrossPulses(generation, commandGeneration, 3);
+    }
+
+    private void scrollToBottomAcrossPulses(long generation,
+                                            long commandGeneration,
+                                            int remainingPulses) {
         Platform.runLater(() -> {
-            if (!isCurrentScrollOperation(generation)) {
+            if (!isCurrentScrollOperation(generation)
+                    || commandGeneration != viewportScrollCommandGeneration
+                    || messageRows.isEmpty()) {
+                resumeScrollStateSyncLater();
                 return;
             }
-            messageScrollPane.applyCss();
-            messageScrollPane.layout();
-            messageScrollPane.setVvalue(1.0);
-        // Repeat on the next pulse because ScrollPane may not yet know the new content size.
-            Platform.runLater(() -> {
-                if (isCurrentScrollOperation(generation)) {
-                    messageScrollPane.setVvalue(1.0);
-                }
-            });
+            messageListView.scrollTo(messageRows.size() - 1);
+            messageListView.requestLayout();
+            if (messageScrollBar != null) {
+                messageScrollBar.setValue(messageScrollBar.getMax());
+            }
+            if (remainingPulses > 1) {
+                scrollToBottomAcrossPulses(
+                        generation, commandGeneration, remainingPulses - 1);
+                return;
+            }
+            newMessageWhileScrolled = 0;
+            updateScrollDownBadge();
+            resumeScrollStateSyncLater();
         });
     }
 
@@ -1627,9 +1786,18 @@ abstract class FormChatMessages extends FormChatUi {
 
     protected void scrollToMessage(long dbId, double anchorOffset) {
         long generation = scrollOperationGeneration;
-        ChatScrollState viewportAnchor = new ChatScrollState(dbId, anchorOffset, false);
+        long commandGeneration = ++viewportScrollCommandGeneration;
         suspendScrollStateSync();
-        restoreViewportAnchorAcrossPulses(viewportAnchor, generation, VIEWPORT_ANCHOR_RESTORE_PULSES);
+        Platform.runLater(() -> {
+            try {
+                if (isCurrentScrollOperation(generation)
+                        && commandGeneration == viewportScrollCommandGeneration) {
+                    alignMessageToViewport(dbId, anchorOffset);
+                }
+            } finally {
+                resumeScrollStateSyncLater();
+            }
+        });
     }
 
     protected void alignMessageToViewport(long dbId, double anchorOffset) {
@@ -1638,22 +1806,10 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
 
-        messageScrollPane.applyCss();
-        messageScrollPane.layout();
-        messageContainer.applyCss();
-        messageContainer.layout();
-
-        double contentHeight = messageContainer.getLayoutBounds().getHeight();
-        double viewportHeight = messageScrollPane.getViewportBounds().getHeight();
-        double maxOffset = Math.max(0, contentHeight - viewportHeight);
-        if (maxOffset <= 0) {
-            messageScrollPane.setVvalue(0.0);
-            return;
+        int index = messageRows.indexOf(target);
+        if (index >= 0) {
+            messageListView.scrollTo(index);
         }
-
-        double targetTop = Math.max(0, target.getBoundsInParent().getMinY() + anchorOffset - 12);
-        double vvalue = Math.min(1.0, targetTop / maxOffset);
-        messageScrollPane.setVvalue(vvalue);
     }
 
     /**
@@ -1714,7 +1870,7 @@ abstract class FormChatMessages extends FormChatUi {
         if (isCurrentChat(chatType, chatKey)) {
             appendSystemMessageToCurrentChat(systemMessage);
         }
-        reloadChatList();
+        reloadChatListAsync();
     }
 
     private void appendSystemMessageToCurrentChat(MeshMessage systemMessage) {

@@ -56,8 +56,8 @@ final class FormChatMessageSearchHost implements FormChatMessageSearchController
     }
 
     @Override
-    public void ensureMessageLoaded(long dbId) {
-        form.ensureMessageLoaded(dbId);
+    public void ensureMessageLoaded(long dbId, Runnable afterLoad) {
+        form.ensureMessageLoaded(dbId, afterLoad);
     }
 
     @Override

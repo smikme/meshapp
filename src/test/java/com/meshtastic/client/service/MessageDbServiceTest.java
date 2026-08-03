@@ -99,6 +99,43 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void findByPacketIdsLoadsOneScopedBatch() {
+        service.save(message("one", 101, 10), "channel", "0", "!owner");
+        service.save(message("two", 102, 20), "channel", "0", "!owner");
+        service.save(message("other-chat", 103, 30), "channel", "1", "!owner");
+        service.save(message("other-owner", 104, 40), "channel", "0", "!other");
+
+        Map<Integer, MeshMessage> loaded = service.findByPacketIds(
+                List.of(101, 102, 103, 104), "channel", "0", "!owner");
+
+        assertEquals(List.of(101, 102), loaded.keySet().stream().sorted().toList());
+        assertEquals("two", loaded.get(102).getText());
+    }
+
+    @Test
+    void getChatSummariesCombinesLatestMessageAndUnreadCount() {
+        service.save(message("first", 201, 10), "channel", "0", "!owner");
+        MeshMessage outgoing = new MeshMessage(
+                "!owner", "!peer", 0, "latest", 20, true);
+        outgoing.setPacketId(202);
+        service.save(outgoing, "channel", "0", "!owner");
+        service.save(message("dm", 203, 30), "dm", "!peer", "!owner");
+        service.save(message("other", 204, 40), "channel", "0", "!other");
+
+        Map<String, MessageDbService.ChatSummary> summaries = service.getChatSummaries("!owner");
+        MessageDbService.ChatSummary channel = summaries.get(
+                MessageDbService.chatSummaryKey("channel", "0"));
+        MessageDbService.ChatSummary direct = summaries.get(
+                MessageDbService.chatSummaryKey("dm", "!peer"));
+
+        assertEquals(2, summaries.size());
+        assertEquals("latest", channel.lastMessage().getText());
+        assertEquals(1, channel.unreadEligibleCount());
+        assertEquals("dm", direct.lastMessage().getText());
+        assertEquals(1, direct.unreadEligibleCount());
+    }
+
+    @Test
     void loadTracerouteResultsForNodeMatchesTargetResponseAndLegacyDmScope() {
         long targetNodeNum = Integer.toUnsignedLong(0x71A67CF5);
 

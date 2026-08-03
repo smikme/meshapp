@@ -96,7 +96,7 @@ final class FormChatMessageSearchController {
         Map<Long, HBox> loadedMessageRows();
 
         /** Loads enough history for the row with the given id to enter the window. */
-        void ensureMessageLoaded(long dbId);
+        void ensureMessageLoaded(long dbId, Runnable afterLoad);
 
         /** Schedules message-area layout before exact scrolling to a found row. */
         void requestMessageViewportLayout();
@@ -620,10 +620,11 @@ final class FormChatMessageSearchController {
             return;
         }
 
-        host.ensureMessageLoaded(highlightedDbId);
-        host.requestMessageViewportLayout();
-        refreshHighlight();
-        host.scrollToMessage(highlightedDbId, 0);
+        host.ensureMessageLoaded(highlightedDbId, () -> {
+            host.requestMessageViewportLayout();
+            refreshHighlight();
+            host.scrollToMessage(highlightedDbId, 0);
+        });
         updateControlsState();
     }
 

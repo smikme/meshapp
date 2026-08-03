@@ -6,7 +6,6 @@ import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.service.NodeCacheService;
-import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import java.util.List;
@@ -70,7 +69,10 @@ final class ChatNodeDisplayHelper {
      * @return {@code longName} when known, otherwise {@code !hex}
      */
     static String resolveNodeName(DeviceState state, int nodeNum) {
-        NodeData node = NodeUtils.resolveNode(state, nodeNum);
+        NodeData node = state != null ? state.getNodeDb().get(nodeNum) : null;
+        if (node == null) {
+            node = NodeCacheService.getInstance().getCached(String.format("!%08x", nodeNum));
+        }
         return firstNonBlank(
                 node != null ? node.getLongName() : null,
                 "!" + String.format("%08x", nodeNum)
@@ -227,10 +229,15 @@ final class ChatNodeDisplayHelper {
      * @return resolved node, or {@code null}
      */
     private static NodeData resolveNode(DeviceState state, String nodeId) {
-        return Optional.ofNullable(nodeId)
-                .filter(Predicate.not(String::isBlank))
-                .map(id -> NodeUtils.resolveNode(state, id))
-                .orElse(null);
+        if (isBlank(nodeId)) {
+            return null;
+        }
+        NodeData stateNode = state != null ? state.getNodeByNodeId(nodeId) : null;
+        if (stateNode != null && stateNode.hasName()) {
+            return stateNode;
+        }
+        NodeData cached = NodeCacheService.getInstance().getCached(nodeId);
+        return cached != null ? cached : stateNode;
     }
 
     /**

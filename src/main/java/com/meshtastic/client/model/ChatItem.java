@@ -230,6 +230,37 @@ public final class ChatItem {
         return UnicodeTextUtils.truncateWithSuffix(text, MAX_PREVIEW_LENGTH, "...");
     }
 
+    /** Returns an updated immutable item after a live message event. */
+    public ChatItem withLastMessage(MeshMessage message, int nextUnreadCount) {
+        return new ChatItem(
+                type,
+                displayName,
+                avatarText,
+                avatarColor,
+                message != null ? truncate(message.getText()) : lastMessageText,
+                message != null ? message.getTimestamp() : lastMessageTime,
+                Math.max(0, nextUnreadCount),
+                channelIndex,
+                peerNodeId,
+                muted);
+    }
+
+    /** Returns an updated immutable item without rebuilding the complete chat list. */
+    public ChatItem withUnreadCount(int nextUnreadCount) {
+        return new ChatItem(
+                type, displayName, avatarText, avatarColor,
+                lastMessageText, lastMessageTime, Math.max(0, nextUnreadCount),
+                channelIndex, peerNodeId, muted);
+    }
+
+    /** Returns an updated immutable item after toggling notifications. */
+    public ChatItem withMuted(boolean nextMuted) {
+        return new ChatItem(
+                type, displayName, avatarText, avatarColor,
+                lastMessageText, lastMessageTime, unreadCount,
+                channelIndex, peerNodeId, nextMuted);
+    }
+
     public ChatType getType() { return type; }
     public String getDisplayName() { return displayName; }
     public String getAvatarText() { return avatarText; }

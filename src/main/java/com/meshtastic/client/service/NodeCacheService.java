@@ -559,6 +559,14 @@ public final class NodeCacheService {
     }
 
     /**
+     * Non-blocking cache lookup for JavaFX render paths. Unlike {@link #get(String)},
+     * this method never touches H2.
+     */
+    public NodeData getCached(String nodeId) {
+        return nodeId == null ? null : cache.get(nodeId);
+    }
+
+    /**
      * Convenience lookup by node_num, converted to node_id.
      * Used where only the numeric identifier is available.
      */

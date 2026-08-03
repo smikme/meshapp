@@ -107,7 +107,7 @@ class FormChatTest {
             form.savedChatScrollStates.put(form.chatScrollCacheKey(channel), saved);
             form.formVisible = false;
 
-            form.messageScrollPane.setVvalue(1.0);
+            form.handleMessageScroll(1.0);
 
             FormChatBase.ChatScrollState actual = form.savedChatScrollStates.get(form.chatScrollCacheKey(channel));
             assertEquals(saved.anchorDbId(), actual.anchorDbId());
@@ -604,6 +604,45 @@ class FormChatTest {
     }
 
     @Test
+    void firstFormOpenRestartsInitialHistoryLoadInvalidatedAfterFormInit() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            try {
+                ConnectionManager manager = ConnectionManager.getInstance();
+                ConnectionEntry entry = new ConnectionEntry("first-open", "127.0.0.1", 4403);
+                manager.addEntry(entry);
+                entry.setConnected(true);
+                manager.setSelectedConnectionId(entry.getId());
+
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+                deviceStates(manager).put(entry.getId(), state);
+                AppPreferences.saveSelectedChat(entry.getId(), "channel:0");
+
+                MeshMessage persisted = incoming("history survives first open");
+                persisted.setPacketId(9001);
+                MessageDbService.getInstance().save(
+                        persisted, "channel", "0", state.getOwnerNodeId());
+
+                FormChat form = new FormChat();
+                form.formInit();
+                long initLoadGeneration = form.initialMessageLoadGeneration;
+
+                form.formOpen();
+
+                assertTrue(form.scrollOperationGeneration > initLoadGeneration);
+                assertEquals(form.scrollOperationGeneration, form.initialMessageLoadGeneration);
+                assertTrue(form.initialMessageLoadPending);
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+        waitForFxEvents();
+        waitForFxEvents();
+    }
+
+    @Test
     void reloadChatListRestoresPersistedSelectionWhenNoChatIsSelected() {
         onFxThread(() -> {
             String connectionId = "connection-persisted-selection";
@@ -888,7 +927,7 @@ class FormChatTest {
                 form.recalcLoadedBounds();
                 form.latestKnownDbId = first.getDbId();
                 form.formVisible = false;
-                form.messageScrollPane.setVvalue(0.42);
+                long scrollGeneration = form.scrollOperationGeneration;
 
                 FormChatBase.ChatScrollState saved =
                         new FormChatBase.ChatScrollState(first.getDbId(), 18.5, false);
@@ -898,11 +937,12 @@ class FormChatTest {
                 second.setPacketId(102);
                 db.save(second, "channel", "0", "!12345678");
 
-                form.refreshCurrentChat();
+                form.processMessageChangeEvents(List.of(MessageChangeEvent.newMessage(
+                        "channel", "0", "!12345678", second)));
 
                 assertEquals(2, form.loadedMessages.size());
                 assertFalse(form.viewportLayoutQueued.get());
-                assertEquals(0.42, form.messageScrollPane.getVvalue());
+                assertEquals(scrollGeneration, form.scrollOperationGeneration);
                 FormChatBase.ChatScrollState actual =
                         form.savedChatScrollStates.get(form.chatScrollCacheKey(channel));
                 assertEquals(saved.anchorDbId(), actual.anchorDbId());
@@ -913,6 +953,187 @@ class FormChatTest {
             }
             return null;
         });
+    }
+
+    @Test
+    void locallySentMessageIsAppendedImmediately() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                FormChat form = new FormChat();
+                form.state = state;
+                form.selectedChat = channel(0);
+                form.loadedChatScrollCacheKey = form.chatScrollCacheKey(form.selectedChat);
+                form.allNewerHistoryLoaded = true;
+
+                MeshMessage sent = outgoing("visible immediately");
+                sent.setPacketId(5001);
+                MessageDbService.getInstance().save(
+                        sent, "channel", "0", state.getOwnerNodeId());
+
+                assertTrue(form.appendLocallySentMessage(sent));
+                assertEquals(List.of(sent), form.loadedMessages);
+                assertEquals(1, form.messageRows.size());
+                assertTrue(form.loadedMessageRows.containsKey(sent.getDbId()));
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void livePreviewResortKeepsSelectedChannelByStableKey() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            try {
+                state.setMyNodeNum(0x12345678);
+                FormChat form = new FormChat();
+                form.state = state;
+                form.boundConnectionId = "selection-stable-after-resort";
+
+                ChatItem games = ChatItem.fromChannel(
+                        channelProto(3), incomingAt("old games", 10), 0, false);
+                ChatItem primary = ChatItem.fromChannel(
+                        channelProto(0), incomingAt("primary", 30), 0, false);
+                ChatItem szao = ChatItem.fromChannel(
+                        channelProto(2), incomingAt("szao", 20), 0, false);
+                form.chatItems.setAll(games, primary, szao);
+                form.selectedChat = games;
+                form.rememberSelectedChatForBoundConnection();
+                form.suppressSelectionListener = true;
+                try {
+                    form.chatListView.getSelectionModel().select(games);
+                } finally {
+                    form.suppressSelectionListener = false;
+                }
+
+                MeshMessage sent = new MeshMessage(
+                        state.getOwnerNodeId(), "!ffffffff", 3,
+                        "new games", 100, true);
+                sent.setDbId(100);
+                sent.setPacketId(20_003);
+                form.refreshChatListAfterMessageEvents(List.of(MessageChangeEvent.newMessage(
+                        "channel", "3", state.getOwnerNodeId(), sent)));
+
+                assertEquals(3, form.selectedChat.getChannelIndex());
+                assertEquals(3, form.chatListView.getSelectionModel().getSelectedItem().getChannelIndex());
+                assertEquals("channel:3", AppPreferences.loadSelectedChat(form.boundConnectionId));
+                assertEquals(3, form.chatListView.getItems().getFirst().getChannelIndex());
+            } finally {
+                state.shutdown();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void outgoingMessageRowStaysInsideVirtualizedViewport() {
+        onFxThread(() -> {
+            Stage stage = new Stage();
+            try {
+                FormChat form = new FormChat();
+                MeshMessage sent = outgoing("outgoing bubble");
+                sent.setDbId(501);
+                sent.setPacketId(5002);
+                form.appendLoadedMessageRow(sent);
+
+                StackPane root = new StackPane(form.messageListView);
+                Scene scene = new Scene(root, 700, 600);
+                stage.setScene(scene);
+                stage.show();
+                root.applyCss();
+                root.layout();
+
+                var row = form.messageRows.getFirst();
+                var rowBounds = row.localToScene(row.getBoundsInLocal());
+                var viewportBounds = form.messageListView.localToScene(
+                        form.messageListView.getBoundsInLocal());
+
+                assertTrue(row.prefWidthProperty().isBound());
+                assertTrue(row.getWidth() <= form.messageListView.getWidth() - 35.0);
+                assertTrue(rowBounds.getMaxX() <= viewportBounds.getMaxX() + 0.5);
+            } finally {
+                stage.close();
+            }
+            return null;
+        });
+    }
+
+    @Test
+    void localSendCancelsStaleAnchorAndPinsOutgoingMessageToBottom() {
+        AtomicReference<FormChat> formRef = new AtomicReference<>();
+        AtomicReference<Stage> stageRef = new AtomicReference<>();
+        AtomicReference<DeviceState> stateRef = new AtomicReference<>();
+        try {
+            onFxThread(() -> {
+                DeviceState state = new DeviceState();
+                state.setMyNodeNum(0x12345678);
+                state.addChannel(channelProto(0));
+
+                FormChat form = new FormChat();
+                form.state = state;
+                form.selectedChat = channel(0);
+                form.loadedChatScrollCacheKey = form.chatScrollCacheKey(form.selectedChat);
+                form.allNewerHistoryLoaded = true;
+                form.formVisible = true;
+                for (int i = 1; i <= 40; i++) {
+                    MeshMessage message = incoming("history " + i);
+                    message.setDbId(i);
+                    message.setPacketId(10_000 + i);
+                    form.appendLoadedMessageRow(message);
+                }
+                form.recalcLoadedBounds();
+                form.latestKnownDbId = form.newestLoadedDbId;
+
+                Stage stage = new Stage();
+                stage.setScene(new Scene(new StackPane(form.messageListView), 700, 600));
+                stage.show();
+                form.scrollToBottom();
+
+                formRef.set(form);
+                stageRef.set(stage);
+                stateRef.set(state);
+                return null;
+            });
+            waitForFxPulses(6);
+
+            onFxThread(() -> {
+                FormChat form = formRef.get();
+                FormChatBase.ChatScrollState staleAnchor =
+                        new FormChatBase.ChatScrollState(1, 0, false);
+                form.restoreViewportAnchorLater(staleAnchor);
+                long previousGeneration = form.scrollOperationGeneration;
+
+                MeshMessage sent = outgoing("new outgoing");
+                sent.setDbId(41);
+                sent.setPacketId(10_041);
+                form.refreshCurrentChatAfterLocalSend(sent);
+
+                assertEquals(previousGeneration + 1, form.scrollOperationGeneration);
+                return null;
+            });
+            waitForFxPulses(8);
+
+            onFxThread(() -> {
+                FormChat form = formRef.get();
+                assertEquals("new outgoing", form.loadedMessages.getLast().getText());
+                assertTrue(form.isScrolledToBottom());
+                assertFalse(form.scrollDownBtn.isVisible());
+                return null;
+            });
+        } finally {
+            onFxThread(() -> {
+                if (stageRef.get() != null) {
+                    stageRef.get().close();
+                }
+                if (stateRef.get() != null) {
+                    stateRef.get().shutdown();
+                }
+                return null;
+            });
+        }
     }
 
     @Test
@@ -1020,6 +1241,10 @@ class FormChatTest {
         return new MeshMessage("!00000002", "!ffffffff", 0, text, 10, false);
     }
 
+    private static MeshMessage incomingAt(String text, long timestamp) {
+        return new MeshMessage("!00000002", "!ffffffff", 0, text, timestamp, false);
+    }
+
     private static MeshMessage outgoing(String text) {
         return new MeshMessage("!00000001", "!ffffffff", 0, text, 10, true);
     }
@@ -1044,6 +1269,12 @@ class FormChatTest {
 
     private static void waitForFxEvents() {
         onFxThread(() -> null);
+    }
+
+    private static void waitForFxPulses(int count) {
+        for (int i = 0; i < count; i++) {
+            waitForFxEvents();
+        }
     }
 
     @SuppressWarnings("unchecked")

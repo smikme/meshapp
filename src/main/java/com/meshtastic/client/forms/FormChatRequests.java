@@ -62,7 +62,7 @@ abstract class FormChatRequests extends FormChatMessages {
                 pc.prefix + " ⏱ " + pc.remaining[0], System.currentTimeMillis() / 1000, false);
         tmp.setSystemMessage(true);
         HBox bubble = bubbleFactory.build(tmp);
-        messageContainer.getChildren().add(bubble);
+        messageRows.add(bubble);
         scrollToBottom();
         // buildSystemBubble returns HBox(botAvatar, VBox(textLabel, timeLabel)).
         VBox content = (VBox) bubble.getChildren().get(1);
@@ -87,7 +87,7 @@ abstract class FormChatRequests extends FormChatMessages {
     protected void finishCountdown(PendingCountdown pc) {
         pc.done[0] = true;
         pendingCountdowns.remove(pc);
-        messageContainer.getChildren().remove(pc.tempBubble);
+        messageRows.remove(pc.tempBubble);
     }
 
     /**
@@ -215,7 +215,7 @@ abstract class FormChatRequests extends FormChatMessages {
                 showRetryFailedToast(msg);
                 return false;
             }
-            reloadChatList();
+            reloadChatListAsync();
             return true;
         }
         if (!MessageService.retryMessage(protocolHandler, state, msg)) {
@@ -223,7 +223,7 @@ abstract class FormChatRequests extends FormChatMessages {
             return false;
         }
 
-        reloadChatList();
+        reloadChatListAsync();
         return true;
     }
 

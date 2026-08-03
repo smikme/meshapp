@@ -27,6 +27,12 @@ import java.util.*;
  */
 public final class MessageDbService {
 
+    /** Latest persisted message and unread-eligible total for one chat. */
+    public record ChatSummary(String chatType,
+                              String chatKey,
+                              MeshMessage lastMessage,
+                              int unreadEligibleCount) {}
+
     private static final Logger log = LoggerFactory.getLogger(MessageDbService.class);
     private static final String H2_FULLTEXT_WHITESPACE = " \t\n\r\f+\"*%&/()=?'!,.;:-_#@|^~`{}[]<>\\";
     private static final int MESSAGE_SEARCH_CANDIDATE_BATCH_SIZE = 256;
@@ -79,7 +85,7 @@ public final class MessageDbService {
     private void initDb() {
         try {
             closeStatements();
-            dbConnection = DatabaseProvider.getConnection();
+            dbConnection = DatabaseProvider.openServiceConnection();
             if (dbConnection == null) {
                 log.error("Message DB initialization skipped because database connection is unavailable");
                 return;
@@ -124,6 +130,11 @@ public final class MessageDbService {
                 stmt.execute("""
                     CREATE INDEX IF NOT EXISTS idx_msg_chat_packet
                     ON messages (owner_node_id, chat_type, chat_key, packet_id, id)
+                    """);
+
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_msg_chat_unread
+                    ON messages (owner_node_id, chat_type, chat_key, outgoing, id)
                     """);
 
                 stmt.execute("""
@@ -824,6 +835,51 @@ public final class MessageDbService {
             }
         } catch (SQLException e) {
             log.error("Failed to loadAfter({}, {}, {}, {})", chatType, chatKey, afterDbId, limit, e);
+        }
+        return result;
+    }
+
+    /**
+     * Loads messages for several packet ids in one round trip. This replaces the
+     * former chat live-update N+1 lookup path.
+     */
+    public Map<Integer, MeshMessage> findByPacketIds(Collection<Integer> packetIds,
+                                                     String chatType,
+                                                     String chatKey,
+                                                     String ownerNodeId) {
+        Map<Integer, MeshMessage> result = new HashMap<>();
+        if (dbConnection == null || packetIds == null || packetIds.isEmpty()) {
+            return result;
+        }
+        List<Integer> ids = packetIds.stream()
+                .filter(Objects::nonNull)
+                .filter(id -> id != 0)
+                .distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return result;
+        }
+
+        String placeholders = String.join(", ", Collections.nCopies(ids.size(), "?"));
+        String sql = "SELECT * FROM messages "
+                + "WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? "
+                + "AND packet_id IN (" + placeholders + ") ORDER BY id ASC";
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, chatType);
+            ps.setString(3, chatKey);
+            for (int i = 0; i < ids.size(); i++) {
+                ps.setInt(4 + i, ids.get(i));
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    MeshMessage message = readMessage(rs);
+                    result.put(message.getPacketId(), message);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to batch-load messages by packet ids ({}, {}, {})",
+                    ownerNodeId, chatType, chatKey, e);
         }
         return result;
     }
@@ -2077,6 +2133,55 @@ public final class MessageDbService {
     }
 
     /**
+     * Returns the latest message and unread-eligible total for every populated
+     * chat of an owner in one indexed query.
+     */
+    public Map<String, ChatSummary> getChatSummaries(String ownerNodeId) {
+        Map<String, ChatSummary> result = new LinkedHashMap<>();
+        if (dbConnection == null) {
+            return result;
+        }
+        String sql = """
+                SELECT m.*, summary.unread_eligible_count
+                FROM messages m
+                INNER JOIN (
+                    SELECT chat_type,
+                           chat_key,
+                           MAX(id) AS max_id,
+                           COUNT(CASE WHEN outgoing = FALSE THEN 1 END) AS unread_eligible_count
+                    FROM messages
+                    WHERE owner_node_id = ?
+                    GROUP BY chat_type, chat_key
+                ) summary ON m.id = summary.max_id
+                ORDER BY m.timestamp DESC
+                """;
+        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
+            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    MeshMessage lastMessage = readMessage(rs);
+                    String chatType = rs.getString("chat_type");
+                    String chatKey = rs.getString("chat_key");
+                    ChatSummary summary = new ChatSummary(
+                            chatType,
+                            chatKey,
+                            lastMessage,
+                            Math.max(0, rs.getInt("unread_eligible_count")));
+                    result.put(chatType + "\u0000" + chatKey, summary);
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Failed to load chat summaries for {}", ownerNodeId, e);
+        }
+        return result;
+    }
+
+    /** Stable map key used by {@link #getChatSummaries(String)}. */
+    public static String chatSummaryKey(String chatType, String chatKey) {
+        return chatType + "\u0000" + chatKey;
+    }
+
+    /**
      * Returns the number of messages in a chat for the given device.
      */
     public int getMessageCount(String chatType, String chatKey, String ownerNodeId) {
@@ -2250,16 +2355,35 @@ public final class MessageDbService {
         Map<String, Integer> result = new HashMap<>();
         if (dbConnection == null) { return result; }
         List<String[]> normalizations = new ArrayList<>();
-        try (PreparedStatement ps = dbConnection.prepareStatement(
-                "SELECT chat_type, chat_key, read_count FROM chat_read_counts WHERE owner_node_id = ?")) {
+        try (PreparedStatement ps = dbConnection.prepareStatement("""
+                SELECT counts.chat_type,
+                       counts.chat_key,
+                       counts.read_count,
+                       COALESCE(summary.total_count, 0) AS total_count,
+                       COALESCE(summary.eligible_count, 0) AS eligible_count
+                FROM chat_read_counts counts
+                LEFT JOIN (
+                    SELECT chat_type,
+                           chat_key,
+                           COUNT(*) AS total_count,
+                           COUNT(CASE WHEN outgoing = FALSE THEN 1 END) AS eligible_count
+                    FROM messages
+                    WHERE owner_node_id = ?
+                    GROUP BY chat_type, chat_key
+                ) summary
+                  ON counts.chat_type = summary.chat_type
+                 AND counts.chat_key = summary.chat_key
+                WHERE counts.owner_node_id = ?
+                """)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
+            ps.setString(2, ownerNodeId != null ? ownerNodeId : "");
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String type = rs.getString("chat_type");
                     String key = rs.getString("chat_key");
                     int count = rs.getInt("read_count");
-                    int totalMessages = getMessageCount(type, key, ownerNodeId);
-                    int eligibleCount = getUnreadEligibleMessageCount(type, key, ownerNodeId);
+                    int totalMessages = rs.getInt("total_count");
+                    int eligibleCount = rs.getInt("eligible_count");
                     if (totalMessages > 0 && count > eligibleCount) {
                         count = eligibleCount;
                         normalizations.add(new String[]{type, key, String.valueOf(count)});
@@ -2542,11 +2666,13 @@ public final class MessageDbService {
      */
     public void close() {
         closeStatements();
+        closeConnection();
         dbConnection = null;
     }
 
     public synchronized void prepareForDatabaseReset() {
         closeStatements();
+        closeConnection();
         dbConnection = null;
     }
 
@@ -2567,6 +2693,19 @@ public final class MessageDbService {
             updateStatusStmt = null;
             insertReactionStmt = null;
             updateReactionStatusStmt = null;
+        }
+    }
+
+    private void closeConnection() {
+        if (dbConnection == null) {
+            return;
+        }
+        try {
+            if (!dbConnection.isClosed()) {
+                dbConnection.close();
+            }
+        } catch (SQLException e) {
+            log.error("Error closing message DB connection", e);
         }
     }
 

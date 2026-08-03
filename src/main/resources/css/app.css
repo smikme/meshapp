@@ -2326,26 +2326,41 @@
     -fx-background-color: rgba(9, 105, 218, 0.12);
 }
 
-/* Область сообщений */
-.chat-message-scroll {
+/* Виртуализированная область сообщений */
+.chat-message-list {
     -fx-background-color: transparent;
     -fx-background: transparent;
+    -fx-padding: 7 0;
 }
 
-.chat-message-scroll > .viewport {
+.chat-message-list .virtual-flow,
+.chat-message-list .clipped-container,
+.chat-message-list .sheet,
+.chat-message-list .list-cell {
     -fx-background-color: transparent;
 }
 
-.chat-message-scroll .scroll-bar:vertical {
+.chat-message-list .list-cell {
+    -fx-padding: 3 15;
+}
+
+.chat-message-list .list-cell:filled:selected,
+.chat-message-list .list-cell:filled:focused {
+    -fx-background-color: transparent;
+}
+
+.chat-message-list .scroll-bar:vertical {
     -fx-pref-width: 6;
 }
 
-.chat-message-scroll .scroll-bar:vertical .thumb {
+.chat-message-list .scroll-bar:vertical .thumb {
     -fx-background-radius: 3;
 }
 
-.chat-message-container {
-    -fx-background-color: transparent;
+.chat-message-list .scroll-bar:horizontal {
+    -fx-opacity: 0;
+    -fx-max-height: 0;
+    -fx-pref-height: 0;
 }
 
 .chat-image-viewer-overlay {

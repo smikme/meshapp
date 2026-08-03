@@ -161,6 +161,18 @@ public final class DatabaseProvider {
     }
 
     /**
+     * Opens an additional connection for a service that performs work on its own
+     * executor. The primary connection is initialized first so migrations run
+     * exactly once before the service starts querying.
+     */
+    static synchronized Connection openServiceConnection() throws Exception {
+        if (getConnection() == null) {
+            return null;
+        }
+        return DriverManager.getConnection(resolveDatabaseUrl());
+    }
+
+    /**
      * Closes the database connection.
      * <p>
      * Called once during application shutdown, after services have closed their

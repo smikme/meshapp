@@ -31,18 +31,21 @@ import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.beans.value.ChangeListener;
 import javafx.css.PseudoClass;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
-import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
@@ -601,14 +604,14 @@ abstract class FormChatUi extends FormChatBase {
         placeholderBox = createPlaceholderBox();
         buildHeader();
         messageSelectionBar = createMessageSelectionBar();
-        messageContainer = createMessageContainer();
+        messageListView = createMessageListView();
         nameResolver = new ChatNameResolver(state);
         tracerouteView = createTracerouteView();
         bubbleFactory = createBubbleFactory();
         bubbleFactory.setTracerouteView(tracerouteView);
 
-        messageScrollPane = createMessageScrollPane();
-        messageArea = new StackPane(messageScrollPane, scrollDownWrapper);
+        createScrollDownWrapper();
+        messageArea = new StackPane(messageListView, scrollDownWrapper);
         registerMessageScrollListeners();
         chatInputBar = createChatInputBar();
         applyChatDetailGrowthConstraints();
@@ -774,17 +777,40 @@ abstract class FormChatUi extends FormChatBase {
         return hasText(script.getIcon()) ? script.getIcon().trim() : LuaScript.DEFAULT_ICON;
     }
 
-    private VBox createMessageContainer() {
-        VBox container = new VBox(6);
-        container.setPadding(new Insets(10, 15, 10, 15));
-        container.getStyleClass().add("chat-message-container");
-        container.setAlignment(Pos.BOTTOM_LEFT);
-        return container;
+    private ListView<HBox> createMessageListView() {
+        ListView<HBox> listView = new ListView<>(messageRows);
+        listView.getStyleClass().add("chat-message-list");
+        listView.setFocusTraversable(false);
+        listView.setCellFactory(ignored -> new ListCell<>() {
+            @Override
+            protected void updateItem(HBox row, boolean empty) {
+                HBox previous = getItem();
+                if (previous != null) {
+                    previous.prefWidthProperty().unbind();
+                    previous.maxWidthProperty().unbind();
+                }
+                super.updateItem(row, empty);
+                setText(null);
+                setGraphic(empty ? null : row);
+                if (!empty && row != null) {
+                    // Binding to the cell width creates a feedback loop because
+                    // the cell's preferred width includes its horizontal padding.
+                    // VirtualFlow then keeps widening the sheet and right-aligned
+                    // outgoing bubbles end up outside the visible viewport.
+                    var availableWidth = Bindings.max(0.0, listView.widthProperty().subtract(42.0));
+                    row.setMinWidth(0.0);
+                    row.prefWidthProperty().bind(availableWidth);
+                    row.maxWidthProperty().bind(availableWidth);
+                }
+            }
+        });
+        VBox.setVgrow(listView, Priority.ALWAYS);
+        return listView;
     }
 
     private TracerouteView createTracerouteView() {
         return new TracerouteView(
-                messageContainer.widthProperty(),
+                messageListView.widthProperty(),
                 nameResolver::resolveNodeName,
                 this::confirmDeleteMessage);
     }
@@ -792,7 +818,7 @@ abstract class FormChatUi extends FormChatBase {
     private MessageBubbleFactory createBubbleFactory() {
         MessageBubbleFactory factory = new MessageBubbleFactory(
                 state,
-                messageContainer.widthProperty(),
+                messageListView.widthProperty(),
                 new MessageBubbleFactory.BubbleActions() {
                     @Override public void startReply(MeshMessage msg) { FormChatUi.this.startReply(msg); }
                     @Override public void sendReaction(MeshMessage msg, String emoji) {
@@ -967,18 +993,6 @@ abstract class FormChatUi extends FormChatBase {
         }
     }
 
-    private ScrollPane createMessageScrollPane() {
-        ScrollPane scrollPane = new ScrollPane(messageContainer);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setFitToHeight(true);
-        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
-        scrollPane.getStyleClass().add("chat-message-scroll");
-        VBox.setVgrow(scrollPane, Priority.ALWAYS);
-        createScrollDownWrapper();
-        return scrollPane;
-    }
-
     private StackPane scrollDownWrapper;
 
     private void createScrollDownWrapper() {
@@ -1012,13 +1026,43 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void registerMessageScrollListeners() {
-        messageScrollPane.vvalueProperty().addListener((obs, oldVal, newVal) ->
-                handleMessageScroll(newVal.doubleValue()));
-        messageContainer.heightProperty().addListener((obs, oldH, newH) ->
-                keepLiveTailPinnedAfterResize());
+        messageListView.skinProperty().addListener((obs, oldSkin, newSkin) ->
+                Platform.runLater(this::bindMessageScrollBar));
+        messageListView.setOnScroll(event -> Platform.runLater(() ->
+                handleMessageScroll(messageScrollFraction())));
+        messageRows.addListener((javafx.collections.ListChangeListener<HBox>) change ->
+                Platform.runLater(this::bindMessageScrollBar));
+        Platform.runLater(this::bindMessageScrollBar);
     }
 
-    private void handleMessageScroll(double vvalue) {
+    private void bindMessageScrollBar() {
+        if (messageListView == null) {
+            return;
+        }
+        ScrollBar vertical = messageListView.lookupAll(".scroll-bar").stream()
+                .filter(ScrollBar.class::isInstance)
+                .map(ScrollBar.class::cast)
+                .filter(bar -> bar.getOrientation() == Orientation.VERTICAL)
+                .findFirst()
+                .orElse(null);
+        if (vertical == null || vertical == messageScrollBar) {
+            return;
+        }
+        messageScrollBar = vertical;
+        vertical.valueProperty().addListener((obs, oldValue, newValue) ->
+                handleMessageScroll(messageScrollFraction()));
+    }
+
+    private double messageScrollFraction() {
+        ScrollBar bar = messageScrollBar;
+        if (bar == null || bar.getMax() <= bar.getMin()) {
+            return 1.0;
+        }
+        return Math.max(0.0, Math.min(1.0,
+                (bar.getValue() - bar.getMin()) / (bar.getMax() - bar.getMin())));
+    }
+
+    protected void handleMessageScroll(double vvalue) {
         if (!formVisible || isScrollStateSyncSuspended()) {
             return;
         }
@@ -1062,19 +1106,6 @@ abstract class FormChatUi extends FormChatBase {
         if (!loadingOlderMessages && !isScrollStateSyncSuspended()) {
             saveCurrentChatScrollState();
         }
-    }
-
-    private void keepLiveTailPinnedAfterResize() {
-        if (!formVisible || isScrollStateSyncSuspended() || !isAtLiveTail()) {
-            return;
-        }
-
-        long generation = scrollOperationGeneration;
-        Platform.runLater(() -> {
-            if (isCurrentScrollOperation(generation) && !isScrollStateSyncSuspended() && isAtLiveTail()) {
-                messageScrollPane.setVvalue(1.0);
-            }
-        });
     }
 
     private void handleDetailPaneKeyPressed(KeyEvent event) {
@@ -1255,12 +1286,12 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
 
-        boolean sent = switch (selectedChat.getType()) {
+        MeshMessage sent = switch (selectedChat.getType()) {
             case CHANNEL -> sendChannelMessage(request);
             case DIRECT_MESSAGE -> sendDirectMessage(request);
         };
-        if (sent) {
-            refreshCurrentChatAfterLocalSend();
+        if (sent != null) {
+            refreshCurrentChatAfterLocalSend(sent);
         }
     }
 
@@ -1301,55 +1332,42 @@ abstract class FormChatUi extends FormChatBase {
                 }));
     }
 
-    private boolean sendChannelMessage(ChatInputBar.SendRequest request) {
-        return Optional.ofNullable(meshCoreCompanionRuntime)
-                .map(runtime -> Optional.ofNullable(runtime.sendChannelMessage(
-                        selectedChat.getChannelIndex(),
-                        request.text(),
-                        request.replyId())).isPresent())
-                .orElseGet(() -> {
-                    MessageService.sendChannelMessage(
-                            protocolHandler,
-                            state,
-                            selectedChat.getChannelIndex(),
-                            request.text(),
-                            request.replyId());
-                    return true;
-                });
+    private MeshMessage sendChannelMessage(ChatInputBar.SendRequest request) {
+        if (meshCoreCompanionRuntime != null) {
+            return meshCoreCompanionRuntime.sendChannelMessage(
+                    selectedChat.getChannelIndex(), request.text(), request.replyId());
+        }
+        return MessageService.sendChannelMessage(
+                protocolHandler,
+                state,
+                selectedChat.getChannelIndex(),
+                request.text(),
+                request.replyId());
     }
 
-    private boolean sendDirectMessage(ChatInputBar.SendRequest request) {
+    private MeshMessage sendDirectMessage(ChatInputBar.SendRequest request) {
         NodeData peerNode = NodeUtils.resolveNode(state, selectedChat.getPeerNodeId());
         if (Optional.ofNullable(peerNode).filter(NodeData::isUnmessagable).isPresent()) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.unmessagable"));
-            return false;
+            return null;
         }
 
-        return Optional.ofNullable(meshCoreCompanionRuntime)
-                .map(runtime -> {
-                    MeshMessage sent = runtime.sendDirectMessage(
-                            selectedChat.getPeerNodeId(),
-                            request.text(),
-                            request.replyId());
-                    if (Optional.ofNullable(sent).isPresent()) {
-                        return true;
-                    }
-                    Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.meshcoreDmContactMissing"));
-                    return false;
-                })
-                .orElseGet(() -> {
-                    MeshMessage sent = MessageService.sendDirectMessage(
-                            protocolHandler,
-                            state,
-                            selectedChat.getPeerNodeId(),
-                            request.text(),
-                            request.replyId());
-                    if (Optional.ofNullable(sent).isPresent()) {
-                        return true;
-                    }
-                    Toast.show(Toast.Type.ERROR, I18n.t("chat.toast.dmNodeMissing"));
-                    return false;
-                });
+        MeshMessage sent = meshCoreCompanionRuntime != null
+                ? meshCoreCompanionRuntime.sendDirectMessage(
+                        selectedChat.getPeerNodeId(), request.text(), request.replyId())
+                : MessageService.sendDirectMessage(
+                        protocolHandler,
+                        state,
+                        selectedChat.getPeerNodeId(),
+                        request.text(),
+                        request.replyId());
+        if (sent != null) {
+            return sent;
+        }
+        Toast.show(Toast.Type.ERROR, meshCoreCompanionRuntime != null
+                ? I18n.t("chat.toast.meshcoreDmContactMissing")
+                : I18n.t("chat.toast.dmNodeMissing"));
+        return null;
     }
 
     // Right pane: opening and closing chats.
@@ -1378,13 +1396,12 @@ abstract class FormChatUi extends FormChatBase {
         boolean exists = chatItems.stream()
                 .anyMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
                                && Objects.equals(item.getPeerNodeId(), peerNodeId));
-        if (!exists) {
-            chatItems.add(dm);
-        }
-
-        // Select the row while suppressing the listener to avoid opening it twice.
         suppressSelectionListener = true;
         try {
+            if (!exists) {
+                chatItems.add(dm);
+            }
+            // Select the row while suppressing the listener to avoid opening it twice.
             chatListView.getItems().stream()
                     .filter(item -> chatItemMatches(item, dm))
                     .findFirst()
@@ -1427,9 +1444,7 @@ abstract class FormChatUi extends FormChatBase {
             chatInputBar.cancelReply();
 
             // Load the latest messages from the database.
-            loadInitialMessages(true);
-            // Restore pending request bubbles such as traceroute and node info.
-            restorePendingCountdowns();
+            loadInitialMessages(true, this::restorePendingCountdowns);
 
             updateInputEnabled();
             updateResponsiveChatLayout();

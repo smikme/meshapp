@@ -29,7 +29,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
-import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ScrollBar;
 import javafx.scene.control.Separator;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
@@ -46,9 +46,13 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Shared state and contracts for the chat form implementation layers.
@@ -60,6 +64,13 @@ import java.util.function.Consumer;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 abstract class FormChatBase extends Form {
+
+    /** Serializes chat reads away from the JavaFX application thread. */
+    protected static final ExecutorService CHAT_DB_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "meshapp-chat-db");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     protected static final int REQUEST_TIMEOUT_SECONDS = 360;
     protected static final int UNREAD_FOCUS_THRESHOLD = 2;
@@ -92,8 +103,9 @@ abstract class FormChatBase extends Form {
     protected Separator headerSep;
 
     // Message area
-    protected ScrollPane messageScrollPane;
-    protected VBox messageContainer;
+    protected ListView<HBox> messageListView;
+    protected final ObservableList<HBox> messageRows = FXCollections.observableArrayList();
+    protected ScrollBar messageScrollBar;
     protected StackPane messageArea; // Wrapper: scrollPane plus the jump-down button.
     protected Button scrollDownBtn;
     protected Label scrollDownBadge;
@@ -129,6 +141,7 @@ abstract class FormChatBase extends Form {
     // Unread tracking: keys such as "ch:INDEX" or "dm:NODEID" map to read-message counts.
     protected final Map<String, Integer> lastReadCounts = new HashMap<>();
     protected final Set<String> pendingRemoteReadKeys = new LinkedHashSet<>();
+    protected final Set<String> pendingLocalReadKeys = new LinkedHashSet<>();
     /** Last selected channel or DM for each connection. */
     protected final Map<String, ChatSelection> selectedChatsByConnectionId = new HashMap<>();
 
@@ -226,6 +239,11 @@ abstract class FormChatBase extends Form {
     protected boolean formVisible;
     protected int scrollStateSyncSuspendCount;
     protected long scrollOperationGeneration;
+    /** Scroll generation for which the initial message window was requested. */
+    protected long initialMessageLoadGeneration = Long.MIN_VALUE;
+    protected boolean initialMessageLoadPending;
+    /** Latest programmatic viewport command; newer commands cancel queued older ones. */
+    protected long viewportScrollCommandGeneration;
     protected final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     protected final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
     protected final Queue<MessageChangeEvent> pendingMessageChanges = new ConcurrentLinkedQueue<>();
@@ -308,11 +326,15 @@ abstract class FormChatBase extends Form {
         } else {
             processMessageChangeEvents(events);
         }
-        reloadChatList();
+        refreshChatListAfterMessageEvents(events);
         messageRefreshQueued.set(false);
         if (messageRefreshDirty.get() && messageRefreshQueued.compareAndSet(false, true)) {
             Platform.runLater(this::flushQueuedMessageRefresh);
         }
+    }
+
+    protected static <T> CompletableFuture<T> supplyChatDb(Supplier<T> supplier) {
+        return CompletableFuture.supplyAsync(supplier, CHAT_DB_EXECUTOR);
     }
 
     private List<MessageChangeEvent> drainPendingMessageChanges() {
@@ -334,6 +356,8 @@ abstract class FormChatBase extends Form {
     protected abstract void refreshCurrentChat();
     protected abstract void processMessageChangeEvents(List<MessageChangeEvent> events);
     protected abstract void reloadChatList();
+    protected abstract void reloadChatListAsync();
+    protected abstract void refreshChatListAfterMessageEvents(List<MessageChangeEvent> events);
     protected abstract void rebindState();
     protected abstract void handleChatFontSizeChanged();
     protected abstract void saveCurrentChatScrollState();
@@ -357,7 +381,9 @@ abstract class FormChatBase extends Form {
     protected abstract int getUnreadCount(ChatItem item);
     protected abstract void refreshUnreadTailIndicator();
     protected abstract void loadInitialMessages(boolean restoreSavedState);
+    protected abstract void loadInitialMessages(boolean restoreSavedState, Runnable afterLoad);
     protected abstract void ensureMessageLoaded(long dbId);
+    protected abstract void ensureMessageLoaded(long dbId, Runnable afterLoad);
     protected abstract void scrollToMessage(long dbId, double anchorOffset);
     protected abstract void requestMessageViewportLayout();
     protected abstract void restorePendingCountdowns();
@@ -373,7 +399,7 @@ abstract class FormChatBase extends Form {
     protected abstract void clearSelectedMessages();
     protected abstract void deleteSelectedMessagesWithConfirmation();
     protected abstract boolean retryMessage(MeshMessage msg);
-    protected abstract void refreshCurrentChatAfterLocalSend();
+    protected abstract void refreshCurrentChatAfterLocalSend(MeshMessage sentMessage);
     protected abstract boolean handleBotCommand(ChatBotCommandHelper.ParsedBotCommand command);
     protected abstract List<NodeData> listBotCommandNodes();
     protected abstract boolean isCurrentChat(String chatType, String chatKey);

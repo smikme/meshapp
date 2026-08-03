@@ -37,7 +37,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 24;
+    static final int CURRENT_VERSION = 25;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -212,6 +212,7 @@ public final class DatabaseMigrator {
             if (version < 22) { migrateToV22(connection); version = 22; }
             if (version < 23) { migrateToV23(connection); version = 23; }
             if (version < 24) { migrateToV24(connection); version = 24; }
+            if (version < 25) { migrateToV25(connection); version = 25; }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -926,6 +927,25 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v24: added telemetry replay packet identity");
+    }
+
+    /** v25: covering index for chat summaries and unread counters. */
+    private static void migrateToV25(Connection connection) throws SQLException {
+        if (!tableExists(connection, "MESSAGES")
+                || !columnExists(connection, "MESSAGES", "OWNER_NODE_ID")
+                || !columnExists(connection, "MESSAGES", "CHAT_TYPE")
+                || !columnExists(connection, "MESSAGES", "CHAT_KEY")
+                || !columnExists(connection, "MESSAGES", "OUTGOING")) {
+            log.info("Migration v25: skipped chat summary index for incomplete legacy message schema");
+            return;
+        }
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_msg_chat_unread
+                    ON messages (owner_node_id, chat_type, chat_key, outgoing, id)
+                    """);
+        }
+        log.info("Migration v25: added chat summary/unread covering index");
     }
 
     private static void createChatThreadsTable(Connection connection) throws SQLException {

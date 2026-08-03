@@ -1,7 +1,6 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.service.ConnectionManager;
-import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.SystemForm;
 
@@ -26,8 +25,6 @@ public class FormChat extends FormChatData {
     public void formInit() {
         ConnectionManager.getInstance().addListener(connectionListener);
         TypographyManager.chatFontSizeProperty().addListener(chatFontSizeListener);
-        // Load persisted read counters from the database.
-        lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
         rebindState();
     }
 
@@ -38,6 +35,13 @@ public class FormChat extends FormChatData {
         rebindState();
         refreshResponsiveChatLayout();
         if (selectedChat != null) {
+            if (initialMessageLoadGeneration != scrollOperationGeneration) {
+                loadInitialMessages(true, this::restorePendingCountdowns);
+                return;
+            }
+            if (initialMessageLoadPending) {
+                return;
+            }
             suspendScrollStateSync();
             try {
                 requestMessageViewportLayout();
@@ -75,7 +79,6 @@ public class FormChat extends FormChatData {
 
     @Override
     public void formRefresh() {
-        reloadChatList();
-        reopenVisibleSelectedChatIfNeeded();
+        reloadChatListAsync(true);
     }
 }

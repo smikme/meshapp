@@ -158,7 +158,7 @@ public class MessageBubbleFactory {
      *
      * <p>The chat form keeps this object so it can update status, reactions,
      * quote previews, and meta indicators in place without replacing the whole
-     * row in {@code messageContainer}.
+     * row in the virtualized message list.
      */
     public static final class RenderedMessageRow {
         private final HBox row;
@@ -213,7 +213,7 @@ public class MessageBubbleFactory {
 
     /**
      * @param state current device state, or {@code null}
-     * @param containerWidthProp width property of messageContainer for maxWidth binding
+     * @param containerWidthProp width property of the message list for maxWidth binding
      * @param actions action callbacks for reply, traceroute, and deletion
      * @param pendingStatusLabels packetId -&gt; Label map for delivery-status tracking
      */

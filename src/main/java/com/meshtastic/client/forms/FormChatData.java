@@ -30,6 +30,7 @@ import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.application.Platform;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ContextMenu;
@@ -70,6 +71,9 @@ abstract class FormChatData extends FormChatRequests {
                                     RemoteRpcState remoteRpcState,
                                     String connectionId) {}
 
+    private record LocalChatListData(List<ChatItem> items,
+                                     Map<String, Integer> readCounts) {}
+
     protected void updateInputEnabled() {
         boolean canSend = (remoteRpcState != null
                 || (state != null && (protocolHandler != null || meshCoreCompanionRuntime != null)))
@@ -92,9 +96,9 @@ abstract class FormChatData extends FormChatRequests {
         boolean stateChanged = newState != this.state || newRemoteRpcState != this.remoteRpcState || connectionChanged;
 
         if (!stateChanged) {
-            refreshReadCounts();
-            reloadChatList();
+            prepareLocalChatListSkeletonIfNeeded();
             reopenVisibleSelectedChatIfNeeded();
+            reloadChatListAsync(true);
             return;
         }
 
@@ -114,13 +118,15 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         bindStateDependentComponents(newState);
-        refreshReadCounts();
+        if (remoteRpcState != null) {
+            lastReadCounts.clear();
+        } else {
+            prepareLocalChatListSkeletonIfNeeded();
+        }
         registerConnectedStateListeners(mgr);
 
-        reloadChatList();
-        if (stateChanged) {
-            reopenSelectedChatIfPossible();
-        }
+        reopenSelectedChatIfPossible();
+        reloadChatListAsync(true);
         updateInputEnabled();
     }
 
@@ -158,6 +164,7 @@ abstract class FormChatData extends FormChatRequests {
         remoteNodeFavoriteFlags.clear();
         remoteNodeIgnoredFlags.clear();
         pendingRemoteReadKeys.clear();
+        pendingLocalReadKeys.clear();
     }
 
     private void bindStateDependentComponents(DeviceState newState) {
@@ -167,15 +174,6 @@ abstract class FormChatData extends FormChatRequests {
         if (nameResolver != null) {
             nameResolver.setState(newState);
         }
-    }
-
-    private void refreshReadCounts() {
-        if (remoteRpcState != null) {
-            lastReadCounts.clear();
-            return;
-        }
-        lastReadCounts.clear();
-        lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
     }
 
     private void registerConnectedStateListeners(ConnectionManager mgr) {
@@ -293,12 +291,181 @@ abstract class FormChatData extends FormChatRequests {
 
         MessageDbService db = MessageDbService.getInstance();
         String ownerId = currentOwnerNodeId();
+        Map<String, MessageDbService.ChatSummary> summaries = db.getChatSummaries(ownerId);
         List<ChatItem> items = new ArrayList<>();
-        items.addAll(loadChannelChatItems(db, ownerId));
-        items.addAll(loadDirectChatItems(db, ownerId));
+        items.addAll(loadChannelChatItems(summaries, ownerId));
+        items.addAll(loadDirectChatItems(db, summaries, ownerId));
 
         applyChatItemsPreservingSelection(items);
         clearChatUnreadDotIfFormVisible();
+    }
+
+    @Override
+    protected void refreshChatListAfterMessageEvents(List<MessageChangeEvent> events) {
+        if (events == null || events.isEmpty()) {
+            reloadChatListAsync();
+            return;
+        }
+
+        boolean requiresFullReload = false;
+        for (MessageChangeEvent event : events) {
+            if (event == null || event.kind() == MessageChangeEvent.Kind.UNKNOWN
+                    || event.kind() == MessageChangeEvent.Kind.DELETE) {
+                requiresFullReload = true;
+                continue;
+            }
+            if (event.kind() != MessageChangeEvent.Kind.NEW_MESSAGE) {
+                continue;
+            }
+            requiresFullReload |= !patchChatListForNewMessage(event);
+        }
+        if (requiresFullReload) {
+            reloadChatListAsync();
+        } else {
+            clearChatUnreadDotIfFormVisible();
+        }
+    }
+
+    private boolean patchChatListForNewMessage(MessageChangeEvent event) {
+        MeshMessage message = event.message();
+        if (message == null || !event.hasChatScope()
+                || !Objects.equals(event.ownerNodeId(), currentOwnerNodeId())) {
+            return false;
+        }
+
+        for (int i = 0; i < chatItems.size(); i++) {
+            ChatItem current = chatItems.get(i);
+            if (!chatItemMatchesScope(current, event.chatType(), event.chatKey())) {
+                continue;
+            }
+            boolean viewingLiveTail = selectedChat != null
+                    && chatItemMatches(selectedChat, current)
+                    && formVisible
+                    && (isAtLiveTail()
+                        || pendingLocalReadKeys.contains(ChatDbKey.from(current).readKey()));
+            int unreadCount = current.getUnreadCount();
+            if (!message.isOutgoing()) {
+                unreadCount = viewingLiveTail ? 0 : unreadCount + 1;
+            }
+            replaceChatItem(i, current.withLastMessage(message, unreadCount));
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean chatItemMatchesScope(ChatItem item, String chatType, String chatKey) {
+        if (item == null || chatType == null || chatKey == null) {
+            return false;
+        }
+        return item.getType() == ChatItem.ChatType.CHANNEL
+                ? "channel".equals(chatType) && Integer.toString(item.getChannelIndex()).equals(chatKey)
+                : "dm".equals(chatType) && Objects.equals(item.getPeerNodeId(), chatKey);
+    }
+
+    private void replaceChatItem(int index, ChatItem replacement) {
+        ChatItem previous = chatItems.get(index);
+        boolean replacesSelectedChat = selectedChat != null
+                && chatItemMatches(selectedChat, previous);
+        suppressSelectionListener = true;
+        try {
+            // SortedList may move the updated item immediately. Suppress the
+            // selection listener before mutating the source list so ListView
+            // cannot interpret the old numeric index as a different chat.
+            chatItems.set(index, replacement);
+            if (replacesSelectedChat) {
+                selectedChat = replacement;
+                chatListView.getSelectionModel().select(replacement);
+            }
+        } finally {
+            suppressSelectionListener = false;
+        }
+    }
+
+    @Override
+    protected void reloadChatListAsync() {
+        reloadChatListAsync(false);
+    }
+
+    protected void reloadChatListAsync(boolean refreshReadCounts) {
+        if (remoteRpcState != null) {
+            reloadRemoteChatList();
+            return;
+        }
+        DeviceState requestState = state;
+        String requestOwnerId = currentOwnerNodeId();
+        String requestConnectionId = boundConnectionId;
+        if (requestState == null) {
+            chatItems.clear();
+            return;
+        }
+
+        Map<String, Integer> currentReadCounts = Map.copyOf(lastReadCounts);
+        supplyChatDb(() -> buildLocalChatItems(
+                        requestState,
+                        requestOwnerId,
+                        refreshReadCounts
+                                ? MessageDbService.getInstance().loadAllReadCounts(requestOwnerId)
+                                : currentReadCounts))
+                .whenComplete((data, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        return;
+                    }
+                    if (requestState != state
+                            || !Objects.equals(requestConnectionId, boundConnectionId)
+                            || !Objects.equals(requestOwnerId, currentOwnerNodeId())) {
+                        return;
+                    }
+                    if (refreshReadCounts) {
+                        lastReadCounts.clear();
+                        lastReadCounts.putAll(data.readCounts());
+                    }
+                    applyChatItemsPreservingSelection(data.items());
+                    clearChatUnreadDotIfFormVisible();
+                }));
+    }
+
+    private LocalChatListData buildLocalChatItems(DeviceState requestState,
+                                                  String ownerId,
+                                                  Map<String, Integer> readCounts) {
+        MessageDbService db = MessageDbService.getInstance();
+        Map<String, MessageDbService.ChatSummary> summaries = db.getChatSummaries(ownerId);
+        List<ChatItem> items = new ArrayList<>();
+        items.addAll(loadChannelChatItems(requestState, summaries, ownerId, readCounts));
+        items.addAll(loadDirectChatItems(requestState, db, summaries, ownerId, readCounts));
+        return new LocalChatListData(items, readCounts);
+    }
+
+    private void prepareLocalChatListSkeletonIfNeeded() {
+        if (state == null || remoteRpcState != null || !chatItems.isEmpty()) {
+            return;
+        }
+
+        List<ChatItem> items = new ArrayList<>();
+        for (ChannelProtos.Channel channel : state.getChannels()) {
+            if (channel.getRole() != ChannelProtos.Channel.Role.DISABLED) {
+                items.add(ChatItem.fromChannel(channel, (MeshMessage) null, 0,
+                        isMuted(currentOwnerNodeId(), ChatDbKey.channel(channel.getIndex()))));
+            }
+        }
+
+        Set<String> dmPeers = new LinkedHashSet<>(state.getAllDirectMessages().keySet());
+        ChatSelection savedSelection = selectedChatForBoundConnection();
+        if (savedSelection != null
+                && savedSelection.type() == ChatItem.ChatType.DIRECT_MESSAGE
+                && savedSelection.peerNodeId() != null
+                && !savedSelection.peerNodeId().isBlank()) {
+            dmPeers.add(savedSelection.peerNodeId());
+        }
+        for (String peerNodeId : dmPeers) {
+            ChatDbKey key = ChatDbKey.direct(peerNodeId);
+            NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+            if (peerNode == null) {
+                peerNode = NodeCacheService.getInstance().getCached(peerNodeId);
+            }
+            items.add(ChatItem.fromDirectMessage(
+                    peerNodeId, peerNode, (MeshMessage) null, 0, isMuted(currentOwnerNodeId(), key)));
+        }
+        applyChatItemsPreservingSelection(items);
     }
 
     private void reloadRemoteChatList() {
@@ -323,28 +490,59 @@ abstract class FormChatData extends FormChatRequests {
                 }));
     }
 
-    private List<ChatItem> loadChannelChatItems(MessageDbService db, String ownerId) {
-        Map<String, MeshMessage> lastMessages = db.getLastMessagePerChat("channel", ownerId);
+    private List<ChatItem> loadChannelChatItems(Map<String, MessageDbService.ChatSummary> summaries,
+                                                String ownerId) {
+        return loadChannelChatItems(state, summaries, ownerId);
+    }
+
+    private List<ChatItem> loadChannelChatItems(DeviceState sourceState,
+                                                Map<String, MessageDbService.ChatSummary> summaries,
+                                                String ownerId) {
+        return loadChannelChatItems(sourceState, summaries, ownerId, lastReadCounts);
+    }
+
+    private List<ChatItem> loadChannelChatItems(DeviceState sourceState,
+                                                Map<String, MessageDbService.ChatSummary> summaries,
+                                                String ownerId,
+                                                Map<String, Integer> readCounts) {
         List<ChatItem> items = new ArrayList<>();
 
-        for (ChannelProtos.Channel channel : state.getChannels()) {
+        for (ChannelProtos.Channel channel : sourceState.getChannels()) {
             if (channel.getRole() == ChannelProtos.Channel.Role.DISABLED) {
                 continue;
             }
             ChatDbKey key = ChatDbKey.channel(channel.getIndex());
+            MessageDbService.ChatSummary summary = summaries.get(
+                    MessageDbService.chatSummaryKey(key.dbType(), key.dbKey()));
             items.add(ChatItem.fromChannel(
                     channel,
-                    lastMessages.get(key.dbKey()),
-                    unreadCount(db, key, ownerId),
+                    summary != null ? summary.lastMessage() : null,
+                    unreadCount(summary, key, readCounts),
                     isMuted(ownerId, key)));
         }
         return items;
     }
 
-    private List<ChatItem> loadDirectChatItems(MessageDbService db, String ownerId) {
-        Map<String, MeshMessage> lastMessages = db.getLastMessagePerChat("dm", ownerId);
+    private List<ChatItem> loadDirectChatItems(MessageDbService db,
+                                               Map<String, MessageDbService.ChatSummary> summaries,
+                                               String ownerId) {
+        return loadDirectChatItems(state, db, summaries, ownerId);
+    }
+
+    private List<ChatItem> loadDirectChatItems(DeviceState sourceState,
+                                               MessageDbService db,
+                                               Map<String, MessageDbService.ChatSummary> summaries,
+                                               String ownerId) {
+        return loadDirectChatItems(sourceState, db, summaries, ownerId, lastReadCounts);
+    }
+
+    private List<ChatItem> loadDirectChatItems(DeviceState sourceState,
+                                               MessageDbService db,
+                                               Map<String, MessageDbService.ChatSummary> summaries,
+                                               String ownerId,
+                                               Map<String, Integer> readCounts) {
         Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers(ownerId));
-        dmPeers.addAll(state.getAllDirectMessages().keySet());
+        dmPeers.addAll(sourceState.getAllDirectMessages().keySet());
         ChatSelection savedSelection = selectedChatForBoundConnection();
         if (savedSelection != null
                 && savedSelection.type() == ChatItem.ChatType.DIRECT_MESSAGE
@@ -357,24 +555,28 @@ abstract class FormChatData extends FormChatRequests {
         List<ChatItem> items = new ArrayList<>();
         for (String peerNodeId : dmPeers) {
             ChatDbKey key = ChatDbKey.direct(peerNodeId);
+            MessageDbService.ChatSummary summary = summaries.get(
+                    MessageDbService.chatSummaryKey(key.dbType(), key.dbKey()));
             items.add(ChatItem.fromDirectMessage(
                     peerNodeId,
-                    resolvePeerNode(peerNodeId),
-                    lastMessages.get(peerNodeId),
-                    unreadCount(db, key, ownerId),
+                    resolvePeerNode(sourceState, peerNodeId),
+                    summary != null ? summary.lastMessage() : null,
+                    unreadCount(summary, key, readCounts),
                     isMuted(ownerId, key)));
         }
         return items;
     }
 
-    private NodeData resolvePeerNode(String peerNodeId) {
-        NodeData peerNode = state.getNodeByNodeId(peerNodeId);
+    private NodeData resolvePeerNode(DeviceState sourceState, String peerNodeId) {
+        NodeData peerNode = sourceState.getNodeByNodeId(peerNodeId);
         return peerNode != null ? peerNode : NodeCacheService.getInstance().get(peerNodeId);
     }
 
-    private int unreadCount(MessageDbService db, ChatDbKey key, String ownerId) {
-        int totalCount = db.getUnreadEligibleMessageCount(key.dbType(), key.dbKey(), ownerId);
-        int lastRead = lastReadCounts.getOrDefault(key.readKey(), 0);
+    private static int unreadCount(MessageDbService.ChatSummary summary,
+                                   ChatDbKey key,
+                                   Map<String, Integer> readCounts) {
+        int totalCount = summary != null ? summary.unreadEligibleCount() : 0;
+        int lastRead = readCounts.getOrDefault(key.readKey(), 0);
         return Math.max(0, totalCount - lastRead);
     }
 
@@ -454,8 +656,14 @@ abstract class FormChatData extends FormChatRequests {
         if (item == null) {
             return;
         }
-        AppPreferences.setChatMuted(currentOwnerNodeId(), ChatDbKey.from(item).preferenceId(), !item.isMuted());
-        reloadChatList();
+        boolean muted = !item.isMuted();
+        AppPreferences.setChatMuted(currentOwnerNodeId(), ChatDbKey.from(item).preferenceId(), muted);
+        for (int i = 0; i < chatItems.size(); i++) {
+            if (chatItemMatches(chatItems.get(i), item)) {
+                replaceChatItem(i, chatItems.get(i).withMuted(muted));
+                break;
+            }
+        }
     }
 
     /**
@@ -640,7 +848,7 @@ abstract class FormChatData extends FormChatRequests {
         loadedMessageRows.remove(msg.getDbId());
         loadedRenderedMessageRows.remove(msg.getDbId());
         recalcLoadedBounds();
-        messageContainer.getChildren().remove(bubbleRow);
+        messageRows.remove(bubbleRow);
         updateMessageSelectionBar();
         refreshMessageSearchResults(false);
         reloadChatList();
@@ -731,7 +939,7 @@ abstract class FormChatData extends FormChatRequests {
         targetDbIds.stream()
                 .map(loadedMessageRows::remove)
                 .filter(Objects::nonNull)
-                .forEach(messageContainer.getChildren()::remove);
+                .forEach(messageRows::remove);
 
         recalcLoadedBounds();
         updateMessageSelectionBar();
@@ -759,16 +967,37 @@ abstract class FormChatData extends FormChatRequests {
         ChatDbKey key = ChatDbKey.from(item);
         MessageDbService db = MessageDbService.getInstance();
         String ownerId = currentOwnerNodeId();
-        int count = db.getUnreadEligibleMessageCount(key.dbType(), key.dbKey(), ownerId);
-        if (lastReadCounts.getOrDefault(key.readKey(), -1) == count) {
+        if (!pendingLocalReadKeys.add(key.readKey())) {
             return;
         }
-        lastReadCounts.put(key.readKey(), count);
-        db.saveReadCount(key.dbType(), key.dbKey(), count, ownerId);
-        reloadChatList();
-        if (state != null) {
-            state.fireMessageListeners();
+        for (int i = 0; i < chatItems.size(); i++) {
+            if (chatItemMatches(chatItems.get(i), item)) {
+                replaceChatItem(i, chatItems.get(i).withUnreadCount(0));
+                break;
+            }
         }
+        DeviceState requestState = state;
+        supplyChatDb(() -> {
+            int count = db.getUnreadEligibleMessageCount(key.dbType(), key.dbKey(), ownerId);
+            db.saveReadCount(key.dbType(), key.dbKey(), count, ownerId);
+            return count;
+        }).whenComplete((count, error) -> Platform.runLater(() -> {
+            pendingLocalReadKeys.remove(key.readKey());
+            if (error != null || count == null || requestState != state
+                    || !Objects.equals(ownerId, currentOwnerNodeId())) {
+                return;
+            }
+            lastReadCounts.put(key.readKey(), count);
+            for (int i = 0; i < chatItems.size(); i++) {
+                if (chatItemMatches(chatItems.get(i), item)) {
+                    replaceChatItem(i, chatItems.get(i).withUnreadCount(0));
+                    break;
+                }
+            }
+            if (state != null) {
+                state.fireMessageListeners();
+            }
+        }));
     }
 
     private void markRemoteChatAsRead(ChatItem item) {
