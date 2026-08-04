@@ -14,7 +14,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.Separator;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
@@ -105,7 +104,6 @@ public class ChatInputBar extends VBox {
 
     private final HBox replyBar;
     private final Label replyQuoteLabel;
-    private final Separator inputSep;
 
     private MeshMessage replyToMessage;
     private MeshFilesImage attachedImage;
@@ -154,10 +152,6 @@ public class ChatInputBar extends VBox {
         setMaxHeight(Region.USE_PREF_SIZE);
         addEventFilter(DragEvent.DRAG_OVER, this::handleImageDragOver);
         addEventFilter(DragEvent.DRAG_DROPPED, this::handleImageDragDropped);
-
-        // Divider
-        inputSep = new Separator();
-        inputSep.getStyleClass().add("chat-input-separator");
 
         // Emoji button, using an image sized to match the send button.
         Button emojiBtn = new Button();
@@ -300,11 +294,6 @@ public class ChatInputBar extends VBox {
         imagePreviewBar.setManaged(false);
 
         getChildren().addAll(replyBar, imagePreviewBar, inputStack);
-    }
-
-    /** Returns the separator placed above the input panel. */
-    public Separator getInputSeparator() {
-        return inputSep;
     }
 
     /** Clears the input field and exits reply mode. */

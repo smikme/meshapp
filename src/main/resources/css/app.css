@@ -2986,15 +2986,6 @@
     -fx-opacity: 0.4;
 }
 
-/* Разделители чата */
-.chat-header-separator {
-    -fx-padding: 0;
-}
-
-.chat-input-separator {
-    -fx-padding: 0;
-}
-
 /* Панель ответа на сообщение */
 .chat-reply-bar {
     -fx-background-color: rgba(255, 255, 255, 0.05);

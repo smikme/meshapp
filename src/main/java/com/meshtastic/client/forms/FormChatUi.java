@@ -46,7 +46,6 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollBar;
-import javafx.scene.control.Separator;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
@@ -625,7 +624,6 @@ abstract class FormChatUi extends FormChatBase {
         if (chatInputBar != null) {
             chatInputBar.setMaxHeight(Region.USE_PREF_SIZE);
             VBox.setVgrow(chatInputBar, Priority.NEVER);
-            VBox.setVgrow(chatInputBar.getInputSeparator(), Priority.NEVER);
         }
     }
 
@@ -682,9 +680,6 @@ abstract class FormChatUi extends FormChatBase {
         chatHeader.getStyleClass().add("chat-header");
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
         HBox.setHgrow(messageSearchController.controls(), Priority.ALWAYS);
-
-        headerSep = new Separator();
-        headerSep.getStyleClass().add("chat-header-separator");
     }
 
     /**
@@ -1436,8 +1431,7 @@ abstract class FormChatUi extends FormChatBase {
             applyChatDetailGrowthConstraints();
             detailPane.getChildren().clear();
             detailPane.getChildren().addAll(
-                    chatHeader, headerSep, messageSelectionBar, messageArea,
-                    chatInputBar.getInputSeparator(), chatInputBar);
+                    chatHeader, messageSelectionBar, messageArea, chatInputBar);
 
             // Leaving a chat also leaves reply mode.
             chatInputBar.cancelPendingImageUpload();

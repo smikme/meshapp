@@ -30,7 +30,6 @@ import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.ScrollBar;
-import javafx.scene.control.Separator;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -100,7 +99,6 @@ abstract class FormChatBase extends Form {
     protected StackPane headerAvatarPane;
     protected Label headerAvatarLabel;
     protected Label headerNameLabel;
-    protected Separator headerSep;
 
     // Message area
     protected ListView<HBox> messageListView;
