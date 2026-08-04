@@ -26,6 +26,7 @@ public final class I18n {
     public static final String LANGUAGE_RU = "ru";
     public static final String LANGUAGE_EN = "en";
     public static final String LANGUAGE_DE = "de";
+    public static final String LANGUAGE_UK = "uk";
 
     private static final String BUNDLE_BASE_NAME = "i18n.messages";
     private static final String LANGUAGE_MANIFEST_RESOURCE =
@@ -109,7 +110,8 @@ public final class I18n {
 
     public static String pluralCategory(long value) {
         long n = Math.abs(value);
-        if (!LANGUAGE_RU.equals(locale().getLanguage())) {
+        String language = locale().getLanguage();
+        if (!LANGUAGE_RU.equals(language) && !LANGUAGE_UK.equals(language)) {
             return n == 1 ? "one" : "many";
         }
         n %= 100;

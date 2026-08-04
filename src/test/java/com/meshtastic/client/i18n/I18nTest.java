@@ -41,6 +41,9 @@ class I18nTest {
         assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
                 option.tag().equals(I18n.LANGUAGE_DE) &&
                 option.displayKey().equals("language.de")));
+        assertTrue(I18n.supportedLanguages().stream().anyMatch(option ->
+                option.tag().equals(I18n.LANGUAGE_UK) &&
+                option.displayKey().equals("language.uk")));
     }
 
     @Test
@@ -82,6 +85,20 @@ class I18nTest {
     }
 
     @Test
+    void regionalUkrainianLanguageTagsUseConfiguredBaseLanguage() {
+        String previous = I18n.getLanguageTag();
+        try {
+            I18n.setLanguageTagForTests("uk-UA");
+
+            assertEquals(I18n.LANGUAGE_UK, I18n.getLanguageTag());
+            assertEquals("Закрити", I18n.t("common.close"));
+            assertEquals("few", I18n.pluralCategory(2));
+        } finally {
+            I18n.setLanguageTagForTests(previous);
+        }
+    }
+
+    @Test
     void systemLanguageUsesGermanForSupportedGermanLocale() {
         String previousLanguage = I18n.getLanguageTag();
         Locale previousLocale = Locale.getDefault(Locale.Category.DISPLAY);
@@ -91,6 +108,22 @@ class I18nTest {
 
             assertEquals(I18n.LANGUAGE_DE, I18n.locale().getLanguage());
             assertEquals("Schließen", I18n.t("common.close"));
+        } finally {
+            Locale.setDefault(Locale.Category.DISPLAY, previousLocale);
+            I18n.setLanguageTagForTests(previousLanguage);
+        }
+    }
+
+    @Test
+    void systemLanguageUsesUkrainianForSupportedUkrainianLocale() {
+        String previousLanguage = I18n.getLanguageTag();
+        Locale previousLocale = Locale.getDefault(Locale.Category.DISPLAY);
+        try {
+            Locale.setDefault(Locale.Category.DISPLAY, Locale.forLanguageTag("uk-UA"));
+            I18n.setLanguageTagForTests(I18n.LANGUAGE_SYSTEM);
+
+            assertEquals(I18n.LANGUAGE_UK, I18n.locale().getLanguage());
+            assertEquals("Закрити", I18n.t("common.close"));
         } finally {
             Locale.setDefault(Locale.Category.DISPLAY, previousLocale);
             I18n.setLanguageTagForTests(previousLanguage);

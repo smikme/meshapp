@@ -1631,15 +1631,7 @@ public class FormNodes extends Form {
     }
 
     private static String pluralSuffix(long n) {
-        if (!I18n.LANGUAGE_RU.equals(I18n.locale().getLanguage())) {
-            return Math.abs(n) == 1 ? "one" : "many";
-        }
-        n = Math.abs(n) % 100;
-        long n1 = n % 10;
-        if (n > 10 && n < 20) { return "many"; }
-        if (n1 == 1) { return "one"; }
-        if (n1 >= 2 && n1 <= 4) { return "few"; }
-        return "many";
+        return I18n.pluralCategory(n);
     }
 
     private static boolean containsIgnoreCase(String text, String query) {
