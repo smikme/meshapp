@@ -150,7 +150,7 @@ public class RootPane extends BorderPane {
 
         // Traffic light buttons.
         Button closeBtn = createWindowButton("window-btn-close");
-        closeBtn.setOnAction(e -> AppTrayManager.getInstance().exitApplication());
+        closeBtn.setOnAction(e -> AppTrayManager.getInstance().requestClose());
 
         Button minimizeBtn = createWindowButton("window-btn-minimize");
         minimizeBtn.setOnAction(e -> AppTrayManager.getInstance().requestMinimize());

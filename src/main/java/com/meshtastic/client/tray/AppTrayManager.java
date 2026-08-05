@@ -95,6 +95,20 @@ public final class AppTrayManager {
         runOnFxThread(() -> stage.setIconified(true));
     }
 
+    /**
+     * Handles a user request to close the main window. When minimize-to-tray is
+     * active, closing has the same effect as minimizing and the application can
+     * still be terminated explicitly from the tray menu.
+     */
+    public void requestClose() {
+        if (shouldMinimizeToTray()) {
+            hideToTray();
+            return;
+        }
+
+        exitApplication();
+    }
+
     public void hideToTray() {
         if (!shouldMinimizeToTray()) {
             return;
@@ -276,7 +290,17 @@ public final class AppTrayManager {
     }
 
     private boolean shouldMinimizeToTray() {
-        return trayAvailable && AppPreferences.isMinimizeToTray();
+        return shouldMinimizeToTray(
+            trayAvailable,
+            AppPreferences.isMinimizeToTray()
+        );
+    }
+
+    static boolean shouldMinimizeToTray(
+        boolean trayAvailable,
+        boolean preferenceEnabled
+    ) {
+        return trayAvailable && preferenceEnabled;
     }
 
     private AppTrayService createService() {

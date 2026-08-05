@@ -216,7 +216,7 @@ public class MeshApp extends Application {
         stage.setOnCloseRequest(e -> {
             e.consume();
             savePrimaryWindowStateIfPossible();
-            AppTrayManager.getInstance().exitApplication();
+            AppTrayManager.getInstance().requestClose();
         });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 
