@@ -75,6 +75,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -91,11 +92,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * The class encapsulates all UI subsystem state: filters, selected packet,
  * HEX/ASCII preview, parsed tree, export, and window geometry persistence.
  *
- * Window contract:
- * - new packets appear at the top of the table;
- * - if the user is inspecting the currently selected packet, incoming data must
- *   not reset row selection, tree selection, or HEX/ASCII highlighting;
- * - the tree and preview are rebuilt only when the selected packet actually changes.
+ * <p>Window contract:
+ * <ul>
+ * <li>New packets appear at the top of the table.</li>
+ * <li>If the user is inspecting the currently selected packet, incoming data must
+ *   not reset row selection, tree selection, or HEX/ASCII highlighting.</li>
+ * <li>The tree and preview are rebuilt only when the selected packet actually changes.</li>
+ * </ul>
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -133,7 +136,7 @@ public final class PacketMonitorWindow {
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
     private static final Duration REMOTE_RPC_TIMEOUT = Duration.ofSeconds(15);
 
-    static record RouteFilterSelection(PacketLogEntry.Direction direction,
+    record RouteFilterSelection(PacketLogEntry.Direction direction,
                                        String transportMechanism,
                                        boolean loraOnly) {
 
@@ -175,7 +178,7 @@ public final class PacketMonitorWindow {
     private final AtomicBoolean livePacketQueueOverflowed = new AtomicBoolean();
     private final BooleanProperty suppressPacketTableTooltips = new SimpleBooleanProperty(false);
     private final ChangeListener<Number> packetTableScrollListener =
-            (obs, oldValue, newValue) -> handlePacketTableScroll(
+            (_, oldValue, newValue) -> handlePacketTableScroll(
                     oldValue != null ? oldValue.doubleValue() : 0.0,
                     newValue != null ? newValue.doubleValue() : 0.0
             );
@@ -251,7 +254,7 @@ public final class PacketMonitorWindow {
         this.packetMonitorSource = createPacketMonitorSource();
         createStage();
         packetMonitorSource.addListener(packetListener);
-        reloadCurrentFrame(true, true);
+        reloadCurrentFrame(true);
         updateToolbarState();
     }
 
@@ -410,9 +413,9 @@ public final class PacketMonitorWindow {
         stage.setScene(scene);
         restoreWindowState();
         trackWindowBounds();
-        stage.setOnCloseRequest(event -> closeRequested = true);
-        stage.setOnHiding(event -> saveWindowState());
-        stage.setOnHidden(event -> handleHidden());
+        stage.setOnCloseRequest(_ -> closeRequested = true);
+        stage.setOnHiding(_ -> saveWindowState());
+        stage.setOnHidden(_ -> handleHidden());
     }
 
     private HBox createHeader() {
@@ -480,11 +483,11 @@ public final class PacketMonitorWindow {
 
         routeFilter = new ComboBox<>(FXCollections.observableArrayList(buildRouteFilterOptions()));
         routeFilter.setValue(filterAllRoutes());
-        routeFilter.valueProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
+        routeFilter.valueProperty().addListener((_, _, _) -> onFilterChanged());
 
         typeFilter = new ComboBox<>(packetTypeFilters);
         typeFilter.setValue(filterAllTypes());
-        typeFilter.valueProperty().addListener((obs, oldValue, newValue) -> {
+        typeFilter.valueProperty().addListener((_, _, newValue) -> {
             if (!suppressFilterReload) {
                 rememberTypeFilterSelection(newValue);
             }
@@ -493,13 +496,13 @@ public final class PacketMonitorWindow {
 
         fromDateTimeFilter = createDateTimePicker(I18n.t("packetMonitor.filter.date.placeholder"));
         toDateTimeFilter = createDateTimePicker(I18n.t("packetMonitor.filter.date.placeholder"));
-        fromDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
-        toDateTimeFilter.popupShowingProperty().addListener((obs, oldValue, newValue) -> updatePacketTableTooltipSuppression());
+        fromDateTimeFilter.popupShowingProperty().addListener((_, _, _) -> updatePacketTableTooltipSuppression());
+        toDateTimeFilter.popupShowingProperty().addListener((_, _, _) -> updatePacketTableTooltipSuppression());
 
         searchField = new TextField();
         searchField.setPromptText(I18n.t("packetMonitor.search.placeholder"));
         searchField.getStyleClass().add("packet-monitor-search-field");
-        searchField.textProperty().addListener((obs, oldValue, newValue) -> onFilterChanged());
+        searchField.textProperty().addListener((_, _, _) -> onFilterChanged());
 
         SVGPath searchIcon = SvgIconLoader.load("/icons/search.svg", 16);
         HBox searchBox = new HBox(8);
@@ -544,7 +547,7 @@ public final class PacketMonitorWindow {
 
         packetTree = new TreeView<>();
         packetTree.setShowRoot(true);
-        packetTree.setCellFactory(tree -> new TreeCell<>() {
+        packetTree.setCellFactory(_ -> new TreeCell<>() {
             @Override
             protected void updateItem(PacketTreeNode item, boolean empty) {
                 super.updateItem(item, empty);
@@ -552,7 +555,7 @@ public final class PacketMonitorWindow {
             }
         });
         packetTree.getSelectionModel().selectedItemProperty()
-                .addListener((obs, oldValue, newValue) -> highlightHexForSelection(newValue));
+                .addListener((_, _, newValue) -> highlightHexForSelection(newValue));
 
         HBox treeContent = new HBox(8, packetTree, createPacketActionsToolbar());
         HBox.setHgrow(packetTree, Priority.ALWAYS);
@@ -571,7 +574,7 @@ public final class PacketMonitorWindow {
         contentSplit = new SplitPane(tableSection, bottomContent);
         contentSplit.setOrientation(Orientation.VERTICAL);
         contentSplit.setDividerPositions(AppPreferences.getPacketMonitorDividerPos());
-        contentSplit.getDividers().getFirst().positionProperty().addListener((obs, oldValue, newValue) ->
+        contentSplit.getDividers().getFirst().positionProperty().addListener((_, _, newValue) ->
                 AppPreferences.setPacketMonitorDividerPos(newValue.doubleValue()));
         VBox.setVgrow(contentSplit, Priority.ALWAYS);
         return contentSplit;
@@ -700,18 +703,18 @@ public final class PacketMonitorWindow {
         TableColumn<PacketLogEntry, String> colFrom = new TableColumn<>(I18n.t("packetMonitor.column.from"));
         colFrom.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 formatPacketFromNode(cellData.getValue())));
-        colFrom.setCellFactory(column -> new EndpointTableCell());
+        colFrom.setCellFactory(_ -> new EndpointTableCell());
         configureCompactColumn(colFrom, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colTo = new TableColumn<>(I18n.t("packetMonitor.column.to"));
         colTo.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 formatPacketToNode(cellData.getValue())));
-        colTo.setCellFactory(column -> new EndpointTableCell());
+        colTo.setCellFactory(_ -> new EndpointTableCell());
         configureCompactColumn(colTo, PACKET_TABLE_NODE_COLUMN_WIDTH);
 
         TableColumn<PacketLogEntry, String> colPayload = new TableColumn<>(I18n.t("packetMonitor.column.payload"));
         colPayload.setCellValueFactory(new PropertyValueFactory<>("payloadText"));
-        colPayload.setCellFactory(column -> new PayloadTableCell());
+        colPayload.setCellFactory(_ -> new PayloadTableCell());
         colPayload.setMinWidth(PACKET_TABLE_PAYLOAD_RUNTIME_MIN_WIDTH);
         colPayload.setPrefWidth(PACKET_TABLE_PAYLOAD_MIN_WIDTH);
         colPayload.setMaxWidth(Double.MAX_VALUE);
@@ -727,7 +730,7 @@ public final class PacketMonitorWindow {
         trackPacketTableColumnWidth(colPayload, AppPreferences.KEY_PACKET_MONITOR_COLUMN_PAYLOAD_WIDTH);
 
         table.getColumns().addAll(List.of(colTime, colType, colTransport, colFrom, colTo, colPayload));
-        table.setRowFactory(tv -> new TableRow<>() {
+        table.setRowFactory(_ -> new TableRow<>() {
             private final Tooltip rowTooltip = new Tooltip();
 
             @Override
@@ -756,7 +759,7 @@ public final class PacketMonitorWindow {
             }
         });
         table.getSelectionModel().selectedItemProperty()
-                .addListener((obs, oldValue, newValue) -> {
+                .addListener((_, _, newValue) -> {
                     if (restoringSelection || ignoreTableScrollEvents || pageLoadInProgress || newValue == null) {
                         return;
                     }
@@ -765,7 +768,7 @@ public final class PacketMonitorWindow {
                     }
                     updatePacketDetails(newValue);
                 });
-        table.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        table.skinProperty().addListener((_, _, newSkin) -> {
             if (newSkin != null) {
                 Platform.runLater(this::attachPacketTableScrollListener);
             }
@@ -784,8 +787,8 @@ public final class PacketMonitorWindow {
             flow.setMinHeight(Region.USE_PREF_SIZE);
             setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
 
-            fontProperty().addListener((obs, oldFont, newFont) -> applyTextStyle());
-            textFillProperty().addListener((obs, oldFill, newFill) -> applyTextStyle());
+            fontProperty().addListener((_, _, _) -> applyTextStyle());
+            textFillProperty().addListener((_, _, _) -> applyTextStyle());
         }
 
         @Override
@@ -875,7 +878,7 @@ public final class PacketMonitorWindow {
             button.setContentDisplay(ContentDisplay.TEXT_ONLY);
         }
 
-        button.setOnAction(event -> action.run());
+        button.setOnAction(_ -> action.run());
         return button;
     }
 
@@ -936,7 +939,7 @@ public final class PacketMonitorWindow {
      * not overwrite already saved user settings.
      */
     private void trackPacketTableColumnWidth(TableColumn<PacketLogEntry, String> column, String preferenceKey) {
-        column.widthProperty().addListener((obs, oldValue, newValue) -> {
+        column.widthProperty().addListener((_, _, newValue) -> {
             if (restoringPacketTableColumnWidths || newValue == null) {
                 return;
             }
@@ -986,7 +989,7 @@ public final class PacketMonitorWindow {
         button.setTooltip(new Tooltip(title + "\n" + tooltipText));
         button.setContentDisplay(ContentDisplay.LEFT);
         setToolbarButtonGraphic(button, iconPath, title);
-        button.setOnAction(event -> action.run());
+        button.setOnAction(_ -> action.run());
         return button;
     }
 
@@ -1013,25 +1016,24 @@ public final class PacketMonitorWindow {
             return;
         }
         latestFrameDirty = false;
-        reloadCurrentFrame(true, true);
+        reloadCurrentFrame(true);
     }
 
     /**
      * Loads the newest sliding-window slice from the database.
      * Used as the table baseline on window startup and filter changes.
      */
-    private void reloadCurrentFrame(boolean preserveViewedPacket, boolean clearDetailsIfSelectionLost) {
+    private void reloadCurrentFrame(boolean clearDetailsIfSelectionLost) {
         pageLoadInProgress = true;
         try {
-            long packetIdToKeep = preserveViewedPacket ? viewedPacketId : -1L;
+            long packetIdToKeep = viewedPacketId;
             refreshTypeFilters();
             PacketMonitorService.PacketPage page =
                     packetMonitorSource.loadLatestPage(buildCurrentQuery(), PAGE_SIZE);
             applyLoadedPage(page,
                     packetIdToKeep,
                     clearDetailsIfSelectionLost,
-                    viewedPacketId <= 0,
-                    0);
+                    viewedPacketId <= 0);
         } finally {
             pageLoadInProgress = false;
         }
@@ -1107,8 +1109,7 @@ public final class PacketMonitorWindow {
     private void applyLoadedPage(PacketMonitorService.PacketPage page,
                                  long packetIdToKeep,
                                  boolean clearDetailsIfSelectionLost,
-                                 boolean selectFirstWhenNoViewedPacket,
-                                 int scrollToIndex) {
+                                 boolean selectFirstWhenNoViewedPacket) {
         ignoreTableScrollEvents = true;
         try {
             packetItems.setAll(page.entries());
@@ -1122,21 +1123,21 @@ public final class PacketMonitorWindow {
             if (!restored) {
                 clearTableSelectionSilently();
                 if (selectFirstWhenNoViewedPacket && !packetItems.isEmpty()) {
-                    selectPacket(packetItems.getFirst(), false, true);
+                    selectPacket(packetItems.getFirst(), true);
                 } else if (clearDetailsIfSelectionLost) {
                     updatePacketDetails(null);
                 }
             }
             updateToolbarState();
         } finally {
-            releaseTableScrollIgnoreLater(scrollToIndex);
+            releaseTableScrollIgnoreLater(0);
         }
     }
 
     private void appendOlderChunk(PacketMonitorService.PacketPage page, int anchorIndex) {
         ignoreTableScrollEvents = true;
         restoringSelection = true;
-        int removedFromTop = 0;
+        int removedFromTop;
         try {
             packetItems.addAll(page.entries());
             removedFromTop = Math.max(0, packetItems.size() - PAGE_SIZE);
@@ -1159,10 +1160,9 @@ public final class PacketMonitorWindow {
     private void prependNewerChunk(PacketMonitorService.PacketPage page, int anchorIndex) {
         ignoreTableScrollEvents = true;
         restoringSelection = true;
-        int removedFromBottom = 0;
         try {
             packetItems.addAll(0, page.entries());
-            removedFromBottom = Math.max(0, packetItems.size() - PAGE_SIZE);
+            int removedFromBottom = Math.max(0, packetItems.size() - PAGE_SIZE);
             for (int i = 0; i < removedFromBottom; i++) {
                 packetItems.removeLast();
             }
@@ -1292,7 +1292,7 @@ public final class PacketMonitorWindow {
         matchingPacketCount = packetMonitorSource.countMatchingPackets(buildCurrentQuery());
 
         if (packetItems.isEmpty() || (isTableNearTop() && !currentPageHasNewer)) {
-            reloadCurrentFrame(true, false);
+            reloadCurrentFrame(false);
             return;
         }
 
@@ -1340,7 +1340,6 @@ public final class PacketMonitorWindow {
             return;
         }
         if (packetItems.size() >= PAGE_SIZE
-                && !packetItems.isEmpty()
                 && packetItems.getLast().getId() == viewedPacketId) {
             latestFrameDirty = true;
             currentPageHasNewer = true;
@@ -1361,7 +1360,7 @@ public final class PacketMonitorWindow {
         if (viewedPacketId > 0) {
             restoreViewedSelection(viewedPacketId);
         } else {
-            selectPacket(entry, false, true);
+            selectPacket(entry, true);
         }
 
         updateToolbarState();
@@ -1447,7 +1446,7 @@ public final class PacketMonitorWindow {
         PacketLogEntry entryToKeep = findVisiblePacketById(packetIdToKeep);
         if (entryToKeep != null) {
             Node focusOwner = stage != null && stage.getScene() != null ? stage.getScene().getFocusOwner() : null;
-            selectPacket(entryToKeep, false, false);
+            selectPacket(entryToKeep, false);
             if (focusOwner != null && focusOwner != packetTable) {
                 Platform.runLater(focusOwner::requestFocus);
             }
@@ -1944,7 +1943,7 @@ public final class PacketMonitorWindow {
 
         int visibleRows = estimateVisibleRowCount();
         int maxFirstVisible = Math.max(0, packetItems.size() - visibleRows);
-        double scrollValue = Math.max(0.0, Math.min(1.0, packetTableVerticalScrollBar.getValue()));
+        double scrollValue = Math.clamp(packetTableVerticalScrollBar.getValue(), 0.0, 1.0);
         return (int) Math.round(scrollValue * maxFirstVisible);
     }
 
@@ -1962,7 +1961,7 @@ public final class PacketMonitorWindow {
      * The {@link #restoringSelection} flag suppresses selection-listener side
      * effects during internal selection restore.
      */
-    private void selectPacket(PacketLogEntry entry, boolean scrollToEntry, boolean refreshDetails) {
+    private void selectPacket(PacketLogEntry entry, boolean refreshDetails) {
         if (entry == null || packetTable == null) {
             return;
         }
@@ -1970,9 +1969,6 @@ public final class PacketMonitorWindow {
         restoringSelection = true;
         try {
             packetTable.getSelectionModel().select(entry);
-            if (scrollToEntry) {
-                packetTable.scrollTo(entry);
-            }
         } finally {
             restoringSelection = false;
         }
@@ -2105,7 +2101,6 @@ public final class PacketMonitorWindow {
                         ? I18n.t("packetMonitor.fileType.json")
                         : I18n.t("packetMonitor.fileType.text"),
                 jsonFormat ? ".json" : ".txt",
-                I18n.t("packetMonitor.toast.packetSavedPrefix"),
                 I18n.t("packetMonitor.toast.packetSaveFailed")
         );
     }
@@ -2270,7 +2265,7 @@ public final class PacketMonitorWindow {
 
     private void updateExportProgress(long exportedCount, long totalToExport) {
         long safeTotal = Math.max(1, totalToExport);
-        long safeExported = Math.max(0, Math.min(exportedCount, safeTotal));
+        long safeExported = Math.clamp(exportedCount, 0, safeTotal);
         if (exportProgressLabel != null) {
             exportProgressLabel.setText(formatExportProgressText(safeExported, safeTotal));
         }
@@ -2299,7 +2294,6 @@ public final class PacketMonitorWindow {
                                    String initialFileName,
                                    String extensionFilterLabel,
                                    String extension,
-                                   String successMessagePrefix,
                                    String errorMessage) {
         FileChooser chooser = new FileChooser();
         chooser.setTitle(dialogTitle);
@@ -2317,7 +2311,7 @@ public final class PacketMonitorWindow {
         File target = ensureExtension(selected, extension);
         try {
             Files.writeString(target.toPath(), content, StandardCharsets.UTF_8);
-            Toast.show(Toast.Type.SUCCESS, successMessagePrefix + target.getName());
+            Toast.show(Toast.Type.SUCCESS, I18n.t("packetMonitor.toast.packetSaved", target.getName()));
         } catch (IOException e) {
             Toast.show(Toast.Type.ERROR, errorMessage);
         }
@@ -2408,7 +2402,7 @@ public final class PacketMonitorWindow {
 
         int countMatchingPackets(PacketMonitorService.PacketQuery query);
 
-        long forEachMatchingBatch(PacketMonitorService.PacketQuery query,
+        void forEachMatchingBatch(PacketMonitorService.PacketQuery query,
                                   int batchSize,
                                   PacketMonitorService.PacketBatchConsumer consumer) throws IOException;
     }
@@ -2485,10 +2479,10 @@ public final class PacketMonitorWindow {
         }
 
         @Override
-        public long forEachMatchingBatch(PacketMonitorService.PacketQuery query,
+        public void forEachMatchingBatch(PacketMonitorService.PacketQuery query,
                                          int batchSize,
                                          PacketMonitorService.PacketBatchConsumer consumer) throws IOException {
-            return service.forEachMatchingBatch(query, batchSize, consumer);
+            service.forEachMatchingBatch(query, batchSize, consumer);
         }
     }
 
@@ -2527,12 +2521,16 @@ public final class PacketMonitorWindow {
         }
 
         @Override
+        // The connection manager owns this shared RPC client.
+        @SuppressWarnings("resource")
         public void addListener(PacketMonitorService.Listener listener) {
             this.listener = listener;
             rpcState.client().addEventListener(rpcEventListener);
         }
 
         @Override
+        // The connection manager owns this shared RPC client.
+        @SuppressWarnings("resource")
         public void removeListener(PacketMonitorService.Listener listener) {
             rpcState.client().removeEventListener(rpcEventListener);
             if (this.listener == listener) {
@@ -2581,28 +2579,28 @@ public final class PacketMonitorWindow {
         }
 
         @Override
-        public long forEachMatchingBatch(PacketMonitorService.PacketQuery query,
+        public void forEachMatchingBatch(PacketMonitorService.PacketQuery query,
                                          int batchSize,
                                          PacketMonitorService.PacketBatchConsumer consumer) throws IOException {
-            long processed = 0;
             PacketMonitorService.PageCursor cursor = null;
             String request = "latest";
             while (true) {
                 PacketMonitorService.PacketPage page = RemotePacketMonitorJson.parsePage(call("packetMonitor.page",
                         RemotePacketMonitorJson.pageParams(request, query, cursor, batchSize)));
                 if (page.entries().isEmpty()) {
-                    return processed;
+                    return;
                 }
                 consumer.accept(page.entries());
-                processed += page.entries().size();
                 if (page.entries().size() < batchSize || !page.hasOlder()) {
-                    return processed;
+                    return;
                 }
                 cursor = PacketMonitorService.PageCursor.fromEntry(page.entries().getLast());
                 request = "older";
             }
         }
 
+        // The connection manager owns this shared RPC client.
+        @SuppressWarnings("resource")
         private com.google.gson.JsonElement call(String method, com.google.gson.JsonObject params) {
             try {
                 return rpcState.client().call(method, params, REMOTE_RPC_TIMEOUT).join();
@@ -2670,11 +2668,11 @@ public final class PacketMonitorWindow {
      * Only normal bounds are saved, not the current size of a maximized window.
      */
     private void trackWindowBounds() {
-        stage.xProperty().addListener((obs, oldValue, newValue) -> captureCurrentWindowBounds());
-        stage.yProperty().addListener((obs, oldValue, newValue) -> captureCurrentWindowBounds());
-        stage.widthProperty().addListener((obs, oldValue, newValue) -> captureCurrentWindowBounds());
-        stage.heightProperty().addListener((obs, oldValue, newValue) -> captureCurrentWindowBounds());
-        stage.maximizedProperty().addListener((obs, oldValue, newValue) -> {
+        stage.xProperty().addListener((_, _, _) -> captureCurrentWindowBounds());
+        stage.yProperty().addListener((_, _, _) -> captureCurrentWindowBounds());
+        stage.widthProperty().addListener((_, _, _) -> captureCurrentWindowBounds());
+        stage.heightProperty().addListener((_, _, _) -> captureCurrentWindowBounds());
+        stage.maximizedProperty().addListener((_, _, newValue) -> {
             if (!Boolean.TRUE.equals(newValue)) {
                 captureCurrentWindowBounds();
             }
@@ -2805,7 +2803,7 @@ public final class PacketMonitorWindow {
         if (candidate != null) {
             Rectangle2D overlappingArea = visibleAreas.stream()
                     .filter(area -> intersects(area, candidate))
-                    .max((left, right) -> Double.compare(intersectionArea(left, candidate), intersectionArea(right, candidate)))
+                    .max(Comparator.comparingDouble(area -> intersectionArea(area, candidate)))
                     .orElse(null);
             if (overlappingArea != null) {
                 return overlappingArea;
@@ -2814,9 +2812,7 @@ public final class PacketMonitorWindow {
             double centerX = candidate.getMinX() + candidate.getWidth() / 2.0;
             double centerY = candidate.getMinY() + candidate.getHeight() / 2.0;
             return visibleAreas.stream()
-                    .min((left, right) -> Double.compare(
-                            distanceSquaredToRectangle(centerX, centerY, left),
-                            distanceSquaredToRectangle(centerX, centerY, right)))
+                    .min(Comparator.comparingDouble(area -> distanceSquaredToRectangle(centerX, centerY, area)))
                     .orElse(visibleAreas.getFirst());
         }
 
@@ -2866,7 +2862,11 @@ public final class PacketMonitorWindow {
 
     private static double sanitizeWindowDimension(double requested, double defaultValue, double maxVisible) {
         double preferred = requested > 0 && Double.isFinite(requested) ? requested : defaultValue;
-        return Math.min(maxVisible, Math.max(200.0, preferred));
+        // Very small screens must win over the preferred minimum; preserve undefined dimensions.
+        if (Double.isNaN(maxVisible) || maxVisible < 200.0) {
+            return maxVisible;
+        }
+        return Math.clamp(preferred, 200.0, maxVisible);
     }
 
     private static double centerCoordinate(double min, double available, double size) {
@@ -2877,7 +2877,11 @@ public final class PacketMonitorWindow {
         if (max < min) {
             return min;
         }
-        return Math.max(min, Math.min(value, max));
+        if (Double.isNaN(min) || Double.isNaN(max)) {
+            return Double.NaN;
+        }
+        // Normalize equal signed-zero bounds, which Math.clamp otherwise considers inverted.
+        return Math.clamp(value, min, Math.max(min, max));
     }
 
     private static Rectangle2D defaultVisibleArea() {
@@ -2924,7 +2928,7 @@ public final class PacketMonitorWindow {
 
     static String formatExportProgressText(long exportedCount, long totalToExport) {
         long safeTotal = Math.max(1, totalToExport);
-        long safeExported = Math.max(0, Math.min(exportedCount, safeTotal));
+        long safeExported = Math.clamp(exportedCount, 0, safeTotal);
         int percent = (int) Math.round((double) safeExported * 100.0 / safeTotal);
         return I18n.t("packetMonitor.export.progress",
                 Long.toString(safeExported),

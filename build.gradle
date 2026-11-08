@@ -2449,7 +2449,7 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 			appImageFile.absolutePath
 		).redirectErrorStream(true)
 		def env = appImageProc.environment()
-		env.put('ARCH', resolveLinuxAppImageArch())
+		env.put('ARCH', resolveLinuxAppImageArch().toString())
 		env.put('VERSION', applicationVersion.toString())
 		if (appImageTool.name.endsWith('.AppImage') && !env.containsKey('APPIMAGE_EXTRACT_AND_RUN')) {
 			env.put('APPIMAGE_EXTRACT_AND_RUN', '1')

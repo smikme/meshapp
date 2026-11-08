@@ -29,8 +29,6 @@ import org.meshtastic.proto.TelemetryProtos;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -1119,7 +1117,6 @@ class MessageListenerServiceTest {
     private static final class RecordingConnection implements MeshtasticConnection {
 
         private final CountDownLatch firstSentFrame = new CountDownLatch(1);
-        private final List<byte[]> sentFrames = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public void connect() {
@@ -1138,7 +1135,6 @@ class MessageListenerServiceTest {
 
         @Override
         public void sendBytes(byte[] data) {
-            sentFrames.add(Arrays.copyOf(data, data.length));
             firstSentFrame.countDown();
         }
 
@@ -1161,11 +1157,6 @@ class MessageListenerServiceTest {
             return firstSentFrame.await(200, TimeUnit.MILLISECONDS);
         }
 
-        List<byte[]> snapshotSentFrames() {
-            synchronized (sentFrames) {
-                return new ArrayList<>(sentFrames);
-            }
-        }
     }
     @Test
     void releasedSensorChannelsSurviveStorageRpcAndLuaWithoutLosingZeroOrSparseIndexes() {

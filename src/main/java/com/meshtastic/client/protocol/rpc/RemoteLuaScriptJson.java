@@ -150,9 +150,7 @@ public final class RemoteLuaScriptJson {
     }
 
     public static JsonObject importJsonParams(String json) {
-        JsonObject object = new JsonObject();
-        object.addProperty("json", json != null ? json : "");
-        return object;
+        return exportJsonResult(json);
     }
 
     public static JsonObject importExportParams(LuaScriptService.LuaScriptExportFile exportFile) {
@@ -207,8 +205,7 @@ public final class RemoteLuaScriptJson {
     }
 
     public static JsonObject kvSetParams(long scriptId, String key, String value) {
-        JsonObject object = scriptIdParams(scriptId);
-        object.addProperty("key", key != null ? key : "");
+        JsonObject object = kvDeleteParams(scriptId, key);
         object.addProperty("value", value != null ? value : "");
         return object;
     }
@@ -555,10 +552,6 @@ public final class RemoteLuaScriptJson {
 
     public static boolean booleanField(JsonObject object, String field) {
         return RpcJsonFields.booleanField(object, field);
-    }
-
-    public static int intField(JsonObject object, String field) {
-        return RpcJsonFields.intField(object, field);
     }
 
     public static long longField(JsonObject object, String field) {

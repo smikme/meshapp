@@ -116,6 +116,8 @@ class PacketMonitorWindowTest {
                 "Экспорт: 250 / 1000 (25%)",
                 PacketMonitorWindow.formatExportProgressText(250, 1000)
         );
+        assertEquals("Экспорт: 0 / 1 (0%)", PacketMonitorWindow.formatExportProgressText(-1, 0));
+        assertEquals("Экспорт: 10 / 10 (100%)", PacketMonitorWindow.formatExportProgressText(Long.MAX_VALUE, 10));
     }
 
     @Test
@@ -165,6 +167,19 @@ class PacketMonitorWindowTest {
         assertEquals(0.0, bounds.y());
         assertEquals(1280.0, bounds.width());
         assertEquals(720.0, bounds.height());
+    }
+
+    @Test
+    void shouldFitScreenSmallerThanPreferredMinimumWithUndefinedSavedSize() {
+        Rectangle2D screen = new Rectangle2D(25, 30, 150, 90);
+
+        PacketMonitorWindow.WindowBounds bounds = PacketMonitorWindow.normalizeWindowBounds(
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, List.of(screen), screen);
+
+        assertEquals(25.0, bounds.x());
+        assertEquals(30.0, bounds.y());
+        assertEquals(150.0, bounds.width());
+        assertEquals(90.0, bounds.height());
     }
 
     private static PacketLogEntry packet(PacketLogEntry.Direction direction, String transportMechanism) {
