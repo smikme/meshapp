@@ -81,7 +81,7 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
             stream.setFrameFormat(FrameFormat.KISS);
         transport.setDataListener(this::receive);
         hardware(0x16, new byte[0])
-                .whenComplete((v, e) -> {
+                .whenComplete((_, e) -> {
                     if (e != null) {
                         ready.completeExceptionally(e);
                         return;
@@ -97,9 +97,9 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
         CompletableFuture<byte[]> chain = CompletableFuture.completedFuture(new byte[0]);
         for (int cmd : new int[] {0x11, 0x01, 0x0b, 0x0c, 0x13, 0x12, 0x17}) {
             final int c = cmd;
-            chain = chain.thenCompose(v -> hardware(c, new byte[0]));
+            chain = chain.thenCompose(_ -> hardware(c, new byte[0]));
         }
-        return chain.thenAccept(v -> {});
+        return chain.thenAccept(_ -> {});
     }
 
     /** All official SetHardware requests, including crypto and sensors, are available to API clients. */
@@ -149,21 +149,21 @@ public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCo
                         .put((byte) sf)
                         .put((byte) cr)
                         .array();
-        return hardware(9, p).thenCompose(v -> hardware(0x0b, new byte[0])).thenAccept(v -> {});
+        return hardware(9, p).thenCompose(_ -> hardware(0x0b, new byte[0])).thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> setPower(int dbm) {
         if (dbm < -9 || dbm > 30) throw new IllegalArgumentException("TX power out of range");
         return hardware(10, new byte[] {(byte) dbm})
-                .thenCompose(v -> hardware(0x0c, new byte[0]))
-                .thenAccept(v -> {});
+                .thenCompose(_ -> hardware(0x0c, new byte[0]))
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> setCsma(int command, int value) {
         if (command < 1 || command > 5 || value < 0 || value > 255)
             throw new IllegalArgumentException("Invalid CSMA setting");
-        return commands.submit(new byte[] {(byte) command, (byte) value}, -2, 5000, p -> {})
-                .thenAccept(v -> {});
+        return commands.submit(new byte[] {(byte) command, (byte) value}, -2, 5000, _ -> {})
+                .thenAccept(_ -> {});
     }
 
     public void addDataListener(Consumer<byte[]> listener) {

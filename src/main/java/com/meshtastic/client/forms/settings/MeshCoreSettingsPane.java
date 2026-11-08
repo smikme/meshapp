@@ -12,6 +12,7 @@ import javafx.scene.layout.*;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
 /** Editable Companion settings and contact management, independent of Meshtastic Admin. */
@@ -68,12 +69,12 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
 
     private Button action(String key, Supplier<? extends CompletableFuture<?>> work) {
         Button button = new Button(I18n.t(key));
-        button.setOnAction(e -> {
+        button.setOnAction(_ -> {
             try {
                 button.setDisable(true);
                 status.setText(I18n.t("meshcore.working"));
                 work.get()
-                        .whenComplete((v, error) ->
+                        .whenComplete((_, error) ->
                                 Platform.runLater(() -> {
                                     if (closed) return;
                                     button.setDisable(false);
@@ -154,7 +155,14 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                 s.getAdvertisementLocationPolicy() == null
                         ? 0
                         : s.getAdvertisementLocationPolicy());
-        policy.setConverter(labels("meshcore.location."));
+        policy.setConverter(
+                labels(value ->
+                        switch (value) {
+                            case 0 -> I18n.t("meshcore.location.0");
+                            case 1 -> I18n.t("meshcore.location.1");
+                            case 2 -> I18n.t("meshcore.location.2");
+                            default -> Integer.toString(value);
+                        }));
         Spinner<Integer> multiAcks = new Spinner<>(0, 255, s.getMultiAckCount());
         box.getChildren()
                 .addAll(
@@ -178,7 +186,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                 action(
                         "meshcore.reboot",
                         () -> {
-                            if (!confirm("meshcore.rebootConfirm"))
+                            if (confirmationDeclined("meshcore.rebootConfirm"))
                                 return CompletableFuture.failedFuture(
                                         new java.util.concurrent.CancellationException());
                             return runtime.reboot();
@@ -187,10 +195,10 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
         return box;
     }
 
-    private javafx.util.StringConverter<Integer> labels(String prefix) {
+    private javafx.util.StringConverter<Integer> labels(IntFunction<String> label) {
         return new javafx.util.StringConverter<>() {
             public String toString(Integer value) {
-                return value == null ? "" : I18n.t(prefix + value);
+                return value == null ? "" : label.apply(value);
             }
 
             public Integer fromString(String value) {
@@ -199,18 +207,36 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
         };
     }
 
+    private static String contactTypeLabel(int type) {
+        return switch (type) {
+            case 1 -> I18n.t("meshcore.type.1");
+            case 2 -> I18n.t("meshcore.type.2");
+            case 3 -> I18n.t("meshcore.type.3");
+            case 4 -> I18n.t("meshcore.type.4");
+            default -> Integer.toString(type);
+        };
+    }
+
     private ComboBox<Integer> mode(Integer selected) {
         ComboBox<Integer> box = new ComboBox<>();
         box.getItems().addAll(0, 1, 2, 3);
         box.setValue(selected == null ? 0 : selected);
-        box.setConverter(labels("meshcore.permission."));
+        box.setConverter(
+                labels(value ->
+                        switch (value) {
+                            case 0 -> I18n.t("meshcore.permission.0");
+                            case 1 -> I18n.t("meshcore.permission.1");
+                            case 2 -> I18n.t("meshcore.permission.2");
+                            case 3 -> I18n.t("meshcore.permission.3");
+                            default -> Integer.toString(value);
+                        }));
         return box;
     }
 
     private VBox channels() {
         channels.setPrefHeight(240);
         Button add = new Button(I18n.t("meshcore.editChannel"));
-        add.setOnAction(e ->
+        add.setOnAction(_ ->
                 MeshCoreChannelDialog.show(
                         runtime,
                         channels.getSelectionModel().getSelectedItem() == null
@@ -241,12 +267,12 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
         ComboBox<Integer> type = new ComboBox<>();
         type.getItems().addAll(1, 2, 3, 4);
         type.setValue(previous == null ? 1 : previous.type());
-        type.setConverter(labels("meshcore.type."));
+        type.setConverter(labels(MeshCoreSettingsPane::contactTypeLabel));
         CheckBox favorite = new CheckBox(I18n.t("meshcore.favorite"));
         favorite.setSelected(previous != null && (previous.flags() & 1) != 0);
         Label result = new Label();
         Button save = new Button(I18n.t("common.save"));
-        save.setOnAction(e -> {
+        save.setOnAction(_ -> {
             try {
                 MeshCoreContact edited =
                         MeshCoreContact.create(
@@ -265,7 +291,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                 }
                 save.setDisable(true);
                 runtime.updateContact(edited)
-                        .whenComplete((v, error) ->
+                        .whenComplete((_, error) ->
                                 Platform.runLater(() -> {
                                     save.setDisable(false);
                                     if (error == null) {
@@ -295,7 +321,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
 
     private VBox contacts() {
         contacts.setPrefHeight(260);
-        contacts.setCellFactory(v ->
+        contacts.setCellFactory(_ ->
                 new ListCell<>() {
                     @Override
                     protected void updateItem(MeshCoreContact c, boolean empty) {
@@ -307,7 +333,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                                                 + " · "
                                                 + c.id()
                                                 + " · "
-                                                + I18n.t("meshcore.type." + c.type()));
+                                                + contactTypeLabel(c.type()));
                     }
                 });
         TextArea data = new TextArea();
@@ -335,15 +361,15 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
         Button add = new Button(I18n.t("meshcore.addContact")),
                 edit = new Button(I18n.t("meshcore.editContact")),
                 qr = new Button(I18n.t("meshcore.shareLink"));
-        add.setOnAction(e -> editContact(true));
-        edit.setOnAction(e -> {
+        add.setOnAction(_ -> editContact(true));
+        edit.setOnAction(_ -> {
             try {
                 editContact(false);
             } catch (RuntimeException ex) {
                 status.setText(ex.getMessage());
             }
         });
-        qr.setOnAction(e -> {
+        qr.setOnAction(_ -> {
             try {
                 com.meshtastic.client.components.chat.MeshCoreShareDialog.show(
                         MeshCoreSharing.contactLink(selected()));
@@ -368,7 +394,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                         "meshcore.removeContact",
                         () -> {
                             String id = selected().id();
-                            if (!confirm("meshcore.removeContactConfirm"))
+                            if (confirmationDeclined("meshcore.removeContactConfirm"))
                                 return CompletableFuture.failedFuture(
                                         new java.util.concurrent.CancellationException());
                             return runtime.removeContact(id);
@@ -498,7 +524,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                                             .getAsJsonObject();
                             String op = params.get("operation").getAsString();
                             if (op.startsWith("identity.") || op.equals("device.factoryReset")) {
-                                if (!confirm("meshcore.identityConfirm"))
+                                if (confirmationDeclined("meshcore.identityConfirm"))
                                     return CompletableFuture.failedFuture(
                                             new java.util.concurrent.CancellationException());
                                 params.addProperty("confirm", true);
@@ -532,7 +558,7 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                                 })));
     }
 
-    private boolean confirm(String key) {
+    private boolean confirmationDeclined(String key) {
         return new Alert(
                                 Alert.AlertType.CONFIRMATION,
                                 I18n.t(key),
@@ -540,14 +566,20 @@ public final class MeshCoreSettingsPane extends VBox implements AutoCloseable {
                                 ButtonType.CANCEL)
                         .showAndWait()
                         .orElse(ButtonType.CANCEL)
-                == ButtonType.OK;
+                != ButtonType.OK;
     }
 
     private void updatePhase() {
         if (!closed)
             phase.setText(
                     "MeshCore · "
-                            + I18n.t("meshcore.phase." + runtime.getState().getPhase())
+                            + switch (runtime.getState().getPhase()) {
+                                case READY -> I18n.t("meshcore.phase.READY");
+                                case HANDSHAKE -> I18n.t("meshcore.phase.HANDSHAKE");
+                                case SYNCING -> I18n.t("meshcore.phase.SYNCING");
+                                case DISCONNECTED -> I18n.t("meshcore.phase.DISCONNECTED");
+                                case ERROR -> I18n.t("meshcore.phase.ERROR");
+                            }
                             + " · "
                             + Objects.toString(runtime.getState().getDeviceName(), "")
                             + " · "

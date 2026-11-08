@@ -1,5 +1,7 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import org.jetbrains.annotations.NotNull;
+
 public record MeshCoreChannel(int index, String name, byte[] secret) {
     public MeshCoreChannel {
         if (secret.length != 16) throw new IllegalArgumentException("Channel key must be 16 bytes");
@@ -17,7 +19,7 @@ public record MeshCoreChannel(int index, String name, byte[] secret) {
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return index + ": " + (name == null ? "" : name);
     }
 }

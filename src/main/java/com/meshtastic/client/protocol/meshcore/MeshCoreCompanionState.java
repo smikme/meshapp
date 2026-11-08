@@ -22,7 +22,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MeshCoreCompanionState {
 
     private final DeviceState deviceState = new DeviceState();
-    private final Map<String, String> nodeIdsByPublicKeyPrefix = new ConcurrentHashMap<>();
     private final Map<String, byte[]> publicKeysByNodeId = new ConcurrentHashMap<>();
 
     private final Map<String, MeshCoreContact> contacts = new ConcurrentHashMap<>();
@@ -109,7 +108,6 @@ public class MeshCoreCompanionState {
     private volatile Integer advertisementType;
     private volatile Double advertisementLatitude;
     private volatile Double advertisementLongitude;
-    private volatile Boolean multiAcks;
     private volatile int multiAckCount;
     private volatile boolean repeatEnabled;
     private volatile int pathHashMode;
@@ -120,7 +118,6 @@ public class MeshCoreCompanionState {
 
     void setMultiAckCount(int count) {
         multiAckCount = count;
-        setMultiAcks(count != 0);
     }
 
     public boolean isRepeatEnabled() {
@@ -219,7 +216,6 @@ public class MeshCoreCompanionState {
         byte[] publicKey = MeshCoreCompanionFrames.hexToBytes(publicKeyHex);
         if (ownerId != null) {
             publicKeysByNodeId.put(ownerId, publicKey);
-            nodeIdsByPublicKeyPrefix.put(publicKeyPrefixHex(publicKey), ownerId);
         }
         updateOwnerNode();
     }
@@ -269,14 +265,6 @@ public class MeshCoreCompanionState {
         this.advertisementLatitude = latitude;
         this.advertisementLongitude = longitude;
         updateOwnerNode();
-    }
-
-    public Boolean getMultiAcks() {
-        return multiAcks;
-    }
-
-    void setMultiAcks(Boolean multiAcks) {
-        this.multiAcks = multiAcks;
     }
 
     public Integer getAdvertisementLocationPolicy() {
@@ -568,16 +556,6 @@ public class MeshCoreCompanionState {
     }
 
     /**
-     * Creates a basic public channel so Chat can open before the
-     * {@code PACKET_CHANNEL_INFO}.
-     */
-    void ensureDefaultChannel() {
-        if (!deviceState.hasEnabledChannel(0)) {
-            updateChannel(0, "Public", true);
-        }
-    }
-
-    /**
      * Adds or updates a MeshCore contact in the node database.
      *
      * @param publicKey  full or partial contact public key
@@ -606,7 +584,6 @@ public class MeshCoreCompanionState {
         }
         byte[] publicKeyCopy = Arrays.copyOf(publicKey, publicKey.length);
         publicKeysByNodeId.put(nodeId, publicKeyCopy);
-        nodeIdsByPublicKeyPrefix.put(publicKeyPrefixHex(publicKeyCopy), nodeId);
 
         NodeData node = deviceState.getOrCreateNode(nodeNumber(nodeId));
         node.setNodeId(nodeId);
@@ -638,7 +615,7 @@ public class MeshCoreCompanionState {
             int packetId) {
 
         String fromNodeId = "mc:channel";
-        ensureSyntheticNode(fromNodeId, "MeshCore Channel", "CHAN");
+        ensureSyntheticChannelNode(fromNodeId);
         MeshMessage message =
                 new MeshMessage(
                         fromNodeId,
@@ -790,11 +767,11 @@ public class MeshCoreCompanionState {
         deviceState.addTelemetryEntry(entry);
     }
 
-    private void ensureSyntheticNode(String nodeId, String longName, String shortName) {
+    private void ensureSyntheticChannelNode(String nodeId) {
         NodeData node = deviceState.getOrCreateNode(nodeNumber(nodeId));
         node.setNodeId(nodeId);
-        node.setLongName(longName);
-        node.setShortName(shortName);
+        node.setLongName("MeshCore Channel");
+        node.setShortName("CHAN");
         node.setRole("CLIENT");
         node.setHwModel("MeshCore");
     }

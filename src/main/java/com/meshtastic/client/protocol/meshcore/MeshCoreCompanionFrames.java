@@ -336,41 +336,6 @@ public final class MeshCoreCompanionFrames {
         }
     }
 
-    /**
-     * Checks whether a packet looks like a recognized MeshCore Companion Protocol response.
-     *
-     * @param packet raw Companion packet
-     * @return {@code true} when the first byte matches a known packet type
-     */
-    public static boolean isRecognizedResponsePacket(byte[] packet) {
-        if (packet == null || packet.length == 0) {
-            return false;
-        }
-        return switch (packet[0] & 0xFF) {
-            case PACKET_OK,
-                    PACKET_ERROR,
-                    PACKET_CONTACTS_START,
-                    PACKET_CONTACT,
-                    PACKET_CONTACTS_END,
-                    PACKET_SELF_INFO,
-                    PACKET_MSG_SENT,
-                    PACKET_CONTACT_MSG_RECV,
-                    PACKET_CHANNEL_MSG_RECV,
-                    PACKET_NO_MORE_MSGS,
-                    PACKET_BATTERY,
-                    PACKET_DEVICE_INFO,
-                    PACKET_CONTACT_MSG_RECV_V3,
-                    PACKET_CHANNEL_MSG_RECV_V3,
-                    PACKET_CHANNEL_INFO,
-                    PACKET_ADVERTISEMENT,
-                    PACKET_ACK,
-                    PACKET_MESSAGES_WAITING,
-                    PACKET_LOG_DATA ->
-                    true;
-            default -> false;
-        };
-    }
-
     private static byte[] safeTextBytes(String text) {
         byte[] bytes = text == null ? new byte[0] : text.getBytes(StandardCharsets.UTF_8);
         if (bytes.length == 0 || bytes.length > 160 || text.indexOf(0) >= 0)

@@ -8,6 +8,8 @@ import java.sql.*;
 import java.util.*;
 
 /** Durable local identifiers and protocol-specific snapshots, separated from radio ACK hashes. */
+// H2 schema is created at runtime and covered by database integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 final class MeshCoreStorage {
     private final Connection db;
 

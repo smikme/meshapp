@@ -12,6 +12,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 
+// H2 schema is created at runtime and covered by database integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 class MeshCoreStorageTest {
     @TempDir Path home;
 
@@ -37,7 +39,7 @@ class MeshCoreStorageTest {
             }
             DatabaseMigrator.widenMeshCoreIdentifiers(db);
             try (var s =
-                    db.prepareStatement("UPDATE chat_threads SET owner_node_id=?,chat_key=?")) {
+                    db.prepareStatement("UPDATE chat_threads SET owner_node_id=?,chat_key=? WHERE owner_node_id='mc:111111111111' AND chat_type='dm' AND chat_key='mc:222222222222'")) {
                 s.setString(1, "mc:" + "11".repeat(32));
                 s.setString(2, "mc:" + "22".repeat(32));
                 assertEquals(1, s.executeUpdate());

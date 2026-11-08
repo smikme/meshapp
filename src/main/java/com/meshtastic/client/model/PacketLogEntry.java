@@ -18,7 +18,6 @@ public class PacketLogEntry {
 
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss.SSS");
-    private static final int PAYLOAD_PREVIEW_LIMIT = 180;
 
     /**
      * Packet direction relative to the local mesh node and client transport.
@@ -146,22 +145,6 @@ public class PacketLogEntry {
 
     public String getPayloadText() {
         return payloadText;
-    }
-
-    /**
-     * Returns a shortened payload for compact UI locations.
-     * The original {@link #payloadText} value is not modified.
-     *
-     * @return full payload or truncated preview with an ellipsis
-     */
-    public String getPayloadPreview() {
-        if (payloadText == null || payloadText.isBlank()) {
-            return "";
-        }
-        if (payloadText.length() <= PAYLOAD_PREVIEW_LIMIT) {
-            return payloadText;
-        }
-        return payloadText.substring(0, PAYLOAD_PREVIEW_LIMIT - 3) + "...";
     }
 
     /**

@@ -96,7 +96,6 @@ public class BleConnection implements MeshtasticConnection {
         AtomicBoolean connectedEventDelivered = new AtomicBoolean(false);
         // If connect() synchronously surfaces Disconnected/Error, do not backfill success afterwards.
         AtomicBoolean terminalStateObserved = new AtomicBoolean(false);
-        AtomicBoolean suppressTerminalStateEvents = new AtomicBoolean(false);
 
         // Set listeners before connecting; after reconnect they may otherwise be stale.
         platform.setFromRadioListener(data -> {
@@ -110,9 +109,6 @@ public class BleConnection implements MeshtasticConnection {
             switch (state) {
                 case BleState.Connected _ -> {
                     connected = true;
-                    if (suppressTerminalStateEvents.get()) {
-                        return;
-                    }
                     if (connectedEventDelivered.compareAndSet(false, true)) {
                         ConnectionListener listener = connectionListener;
                         if (listener != null) { listener.onConnected(); }
@@ -123,9 +119,6 @@ public class BleConnection implements MeshtasticConnection {
                     dismissPendingPasskey();
                     shutdownSendInfrastructure("BLE disconnected");
                     disposeOwnedPlatformAsync();
-                    if (suppressTerminalStateEvents.get()) {
-                        return;
-                    }
                     terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onDisconnected(); }
@@ -136,9 +129,6 @@ public class BleConnection implements MeshtasticConnection {
                     shutdownSendInfrastructure("BLE error");
                     disposeOwnedPlatformAsync();
                     log.error("BLE error: {}", e.message(), e.cause());
-                    if (suppressTerminalStateEvents.get()) {
-                        return;
-                    }
                     terminalStateObserved.set(true);
                     ConnectionListener listener = connectionListener;
                     if (listener != null) { listener.onConnectionError(e.message(), e.cause()); }
@@ -190,7 +180,7 @@ public class BleConnection implements MeshtasticConnection {
         });
 
         try {
-            BleProtocolProfile connectedProfile = connectWithProfileSelection(suppressTerminalStateEvents);
+            BleProtocolProfile connectedProfile = connectUsingRequestedProfile();
             resolvedProfile = connectedProfile;
             // Fallback for platforms that complete connect() successfully but do not emit Connected state.
             if (!terminalStateObserved.get() && connectedEventDelivered.compareAndSet(false, true)) {
@@ -356,23 +346,10 @@ public class BleConnection implements MeshtasticConnection {
         return resolvedProfile;
     }
 
-    private BleProtocolProfile connectWithProfileSelection(AtomicBoolean suppressTerminalStateEvents)
-            throws ConnectionException {
-        return connectUsingProfile(requestedProfile, false, suppressTerminalStateEvents);
-    }
-
-    private BleProtocolProfile connectUsingProfile(BleProtocolProfile profile,
-                                                   boolean suppressTerminalEvents,
-                                                   AtomicBoolean suppressTerminalStateEvents)
-            throws ConnectionException {
-        platform.setProfile(profile);
-        suppressTerminalStateEvents.set(suppressTerminalEvents);
-        try {
-            platform.connect(address);
-            return profile;
-        } finally {
-            suppressTerminalStateEvents.set(false);
-        }
+    private BleProtocolProfile connectUsingRequestedProfile() throws ConnectionException {
+        platform.setProfile(requestedProfile);
+        platform.connect(address);
+        return requestedProfile;
     }
 
     private BleProtocolProfile activePayloadProfile() {

@@ -1,5 +1,7 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import org.jetbrains.annotations.NotNull;
+
 /** Received protocol event; binary data remains available without inventing Meshtastic fields. */
 public record MeshCoreEvent(long receivedAt, int type, byte[] payload) {
     public MeshCoreEvent {
@@ -29,7 +31,7 @@ public record MeshCoreEvent(long receivedAt, int type, byte[] payload) {
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return java.time.Instant.ofEpochMilli(receivedAt)
                 + " · "
                 + name()

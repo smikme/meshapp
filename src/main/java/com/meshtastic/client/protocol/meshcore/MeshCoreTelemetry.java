@@ -1,5 +1,7 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.util.*;
 
 /** CayenneLPP 1.6.1 (the pinned firmware dependency). Multi-byte values are big endian. */
@@ -18,7 +20,7 @@ public final class MeshCoreTelemetry {
         }
 
         @Override
-        public String toString() {
+        public @NotNull String toString() {
             return "channel="
                     + channel
                     + " type="

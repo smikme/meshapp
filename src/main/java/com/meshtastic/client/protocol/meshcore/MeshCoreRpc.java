@@ -20,6 +20,8 @@ public final class MeshCoreRpc {
         result.addProperty("protocolVersion", s.getFirmwareProtocolVersion());
         result.addProperty("maxChannels", runtime.maxChannels());
         result.addProperty("maxContacts", s.getMaxContacts());
+        result.addProperty("advertisementType", s.getAdvertisementType());
+        result.addProperty("contactsLastModified", s.getContactsLastModified());
         result.addProperty("lastError", s.getLastError());
         result.addProperty("frequencyMHz", s.getRadioFrequencyMhz());
         result.addProperty("bandwidthKHz", s.getRadioBandwidthKhz());

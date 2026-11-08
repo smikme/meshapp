@@ -5,6 +5,7 @@ import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.forms.settings.ConfigSavePolicy;
+import com.meshtastic.client.forms.settings.DatabaseResetConfirmationPanelFactory;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -385,12 +386,8 @@ class FormSettingTest {
     void databaseResetConfirmRequiresAcknowledgementBeforeConfirmIsEnabled() {
         AtomicBoolean confirmed = new AtomicBoolean(false);
 
-        FormSetting form = onFxThread(FormSetting::new);
-        VBox panel = onFxThread(() -> (VBox) invokeReturning(
-                form,
-                "buildDatabaseResetConfirmationPanel",
-                new Class<?>[] { Runnable.class },
-                (Runnable) () -> confirmed.set(true)));
+        VBox panel = onFxThread(() -> DatabaseResetConfirmationPanelFactory.create(
+                () -> confirmed.set(true)));
 
         CheckBox acknowledgeCheckBox = onFxThread(() -> findFirst(panel, CheckBox.class));
         Button confirmButton = onFxThread(() -> findButtonByText(
@@ -424,12 +421,7 @@ class FormSettingTest {
     void databaseResetConfirmationUsesEnglishLocalization() {
         I18n.setLanguageTagForTests(I18n.LANGUAGE_EN);
 
-        FormSetting form = onFxThread(FormSetting::new);
-        VBox panel = onFxThread(() -> (VBox) invokeReturning(
-                form,
-                "buildDatabaseResetConfirmationPanel",
-                new Class<?>[] { Runnable.class },
-                (Runnable) () -> {}));
+        VBox panel = onFxThread(() -> DatabaseResetConfirmationPanelFactory.create(() -> {}));
 
         Button confirmButton = onFxThread(() -> findButtonByText(panel, "Delete Data"));
 
@@ -626,16 +618,6 @@ class FormSettingTest {
             Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
             method.setAccessible(true);
             method.invoke(target, args);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Failed to invoke method " + methodName, e);
-        }
-    }
-
-    private static Object invokeReturning(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
-        try {
-            Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
-            method.setAccessible(true);
-            return method.invoke(target, args);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Failed to invoke method " + methodName, e);
         }

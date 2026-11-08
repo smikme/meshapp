@@ -32,11 +32,13 @@ import java.util.regex.Pattern;
  * The service owns the handoff from protocol runtimes, durable storage in the
  * local database, and live event delivery to UI listeners.
  *
- * Public methods may be called from arbitrary threads. Operations that touch
+ * <p>Public methods may be called from arbitrary threads. Operations that touch
  * the database or shared service state are synchronized on the service instance.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schema is created at runtime and covered by database integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class PacketMonitorService {
 
     private static final long BROADCAST_NODE_NUM = 0xFFFF_FFFFL;
@@ -274,6 +276,8 @@ public final class PacketMonitorService {
      * @param payloadText  short payload description
      * @param packetBytes  original packet bytes
      */
+    // Raw-protocol integrations can record TX frames through the same API as RX frames.
+    @SuppressWarnings("unused")
     public void recordRawOutgoing(String connectionId, String packetType, String payloadText, byte[] packetBytes) {
         recordRawPacket(Direction.OUTGOING, connectionId, packetType, payloadText, packetBytes);
     }
@@ -747,6 +751,8 @@ public final class PacketMonitorService {
      * Clears the packet journal completely and notifies listeners.
      * After a successful clear, local UI state should be treated as stale.
      */
+    // Explicit journal reset intentionally deletes all packet rows.
+    @SuppressWarnings("SqlWithoutWhere")
     public synchronized void clear() {
         if (dbConnection == null) {
             return;
@@ -980,7 +986,7 @@ public final class PacketMonitorService {
                     }
                     Direction storedDirection = Direction.valueOf(rs.getString("direction"));
                     String transportMechanism = resolveStoredTransportMechanism(packet, storedDirection);
-                    if (transportMechanism == null || transportMechanism.isBlank()) {
+                    if (transportMechanism.isBlank()) {
                         continue;
                     }
                     update.setString(1, transportMechanism);
@@ -1051,8 +1057,7 @@ public final class PacketMonitorService {
     private static boolean shouldRecordPacket(Direction direction, MeshProtos.MeshPacket packet) {
         if (direction == Direction.OUTGOING) {
             MeshProtos.MeshPacket.TransportMechanism mechanism = packet.getTransportMechanism();
-            return mechanism == null
-                    || mechanism == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_INTERNAL
+            return mechanism == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_INTERNAL
                     || mechanism == MeshProtos.MeshPacket.TransportMechanism.UNRECOGNIZED
                     || arrivedOverRadio(packet);
         }
@@ -1064,8 +1069,7 @@ public final class PacketMonitorService {
             return "";
         }
         MeshProtos.MeshPacket.TransportMechanism mechanism = packet.getTransportMechanism();
-        if (mechanism == null
-                || mechanism == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_INTERNAL
+        if (mechanism == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_INTERNAL
                 || mechanism == MeshProtos.MeshPacket.TransportMechanism.UNRECOGNIZED) {
             if (direction == Direction.OUTGOING) {
                 return MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_LORA.name();
@@ -1356,14 +1360,11 @@ public final class PacketMonitorService {
     private static void bindParams(PreparedStatement ps, List<Object> params) throws SQLException {
         for (int i = 0; i < params.size(); i++) {
             Object value = params.get(i);
-            if (value instanceof String stringValue) {
-                ps.setString(i + 1, stringValue);
-            } else if (value instanceof Integer intValue) {
-                ps.setInt(i + 1, intValue);
-            } else if (value instanceof Long longValue) {
-                ps.setLong(i + 1, longValue);
-            } else {
-                ps.setObject(i + 1, value);
+            switch (value) {
+                case String stringValue -> ps.setString(i + 1, stringValue);
+                case Integer intValue -> ps.setInt(i + 1, intValue);
+                case Long longValue -> ps.setLong(i + 1, longValue);
+                case null, default -> ps.setObject(i + 1, value);
             }
         }
     }

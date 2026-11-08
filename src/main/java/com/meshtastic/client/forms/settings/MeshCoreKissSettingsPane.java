@@ -86,7 +86,7 @@ public final class MeshCoreKissSettingsPane extends VBox implements AutoCloseabl
 
     private Button action(String key, Supplier<? extends CompletableFuture<?>> work) {
         Button b = new Button(I18n.t(key));
-        b.setOnAction(e -> {
+        b.setOnAction(_ -> {
             try {
                 b.setDisable(true);
                 work.get()

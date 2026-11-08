@@ -81,7 +81,7 @@ public final class MeshCoreCompanionFrameParser implements StreamFrameParser {
         byte[] framed = new byte[payload.length + 3];
         framed[0] = 0x3c;
         framed[1] = (byte) payload.length;
-        framed[2] = (byte) (payload.length >>> 8);
+        framed[2] = 0; // uint16 LE length; the 176-byte firmware limit keeps the high byte zero.
         System.arraycopy(payload, 0, framed, 3, payload.length);
         return framed;
     }

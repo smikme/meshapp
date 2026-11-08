@@ -23,7 +23,7 @@ class MeshCoreCommandQueueTest {
 
     @Test
     void progressResetsInactivityAndPushDoesNotConsumeRequest() {
-        var list = queue.submit(new byte[] {4}, 4, 100, p -> {}, 2, 3);
+        var list = queue.submit(new byte[] {4}, 4, 100, _ -> {}, 2, 3);
         queue.accept(new byte[] {2, 2, 0, 0, 0});
         clock.advance(90);
         queue.accept(new byte[] {3});
@@ -38,8 +38,8 @@ class MeshCoreCommandQueueTest {
 
     @Test
     void timeoutAbortsAmbiguousSessionAndAllQueuedWork() {
-        var first = queue.submit(new byte[] {3}, 0, 100, p -> {});
-        var second = queue.submit(new byte[] {32}, 0, 100, p -> {});
+        var first = queue.submit(new byte[] {3}, 0, 100, _ -> {});
+        var second = queue.submit(new byte[] {32}, 0, 100, _ -> {});
         clock.advance(100);
         assertTrue(first.isCompletedExceptionally());
         assertTrue(second.isCompletedExceptionally());
@@ -50,8 +50,8 @@ class MeshCoreCommandQueueTest {
 
     @Test
     void explicitErrorOnlyFailsCurrentOperation() {
-        var a = queue.submit(new byte[] {66}, 29, 100, p -> {});
-        var b = queue.submit(new byte[] {5}, 9, 100, p -> {});
+        var a = queue.submit(new byte[] {66}, 29, 100, _ -> {});
+        var b = queue.submit(new byte[] {5}, 9, 100, _ -> {});
         queue.accept(new byte[] {1, 1});
         assertTrue(a.isCompletedExceptionally());
         assertFalse(b.isDone());
@@ -62,12 +62,12 @@ class MeshCoreCommandQueueTest {
 
     @Test
     void queuedCancellationAndCapacityNeverDropAcceptedCommands() {
-        queue.submit(new byte[] {3}, 0, 100, p -> {});
-        var cancelled = queue.submit(new byte[] {32}, 0, 100, p -> {});
+        queue.submit(new byte[] {3}, 0, 100, _ -> {});
+        var cancelled = queue.submit(new byte[] {32}, 0, 100, _ -> {});
         cancelled.cancel(false);
         for (int i = 0; i < MeshCoreCommandQueue.CAPACITY; i++)
-            assertFalse(queue.submit(new byte[] {5}, 9, 100, p -> {}).isCompletedExceptionally());
-        assertTrue(queue.submit(new byte[] {7}, 0, 100, p -> {}).isCompletedExceptionally());
+            assertFalse(queue.submit(new byte[] {5}, 9, 100, _ -> {}).isCompletedExceptionally());
+        assertTrue(queue.submit(new byte[] {7}, 0, 100, _ -> {}).isCompletedExceptionally());
         queue.accept(new byte[] {0});
         assertEquals(List.of(3, 5), writes);
         for (int i = 0; i < MeshCoreCommandQueue.CAPACITY; i++) queue.accept(new byte[] {9});
@@ -80,14 +80,14 @@ class MeshCoreCommandQueueTest {
         var failed =
                 new MeshCoreCommandQueue(
                         clock,
-                        b ->
+                        _ ->
                                 CompletableFuture.failedFuture(
                                         new IllegalStateException("write failed")),
                         fatal::add,
                         new Object());
-        assertTrue(failed.submit(new byte[] {1}, 5, 100, p -> {}).isCompletedExceptionally());
+        assertTrue(failed.submit(new byte[] {1}, 5, 100, _ -> {}).isCompletedExceptionally());
         assertEquals(1, fatal.size());
-        queue.submit(new byte[] {3}, 0, 100, p -> {}).cancel(false);
+        queue.submit(new byte[] {3}, 0, 100, _ -> {}).cancel(false);
         assertEquals(2, fatal.size());
         assertEquals(0, clock.pending());
     }
@@ -110,7 +110,7 @@ class MeshCoreCommandQueueTest {
 
     @Test
     void rebootCompletesOnWriteWithoutWaitingForAnImpossibleAck() {
-        assertTrue(queue.submit(new byte[] {19}, -2, 100, p -> {}).isDone());
+        assertTrue(queue.submit(new byte[] {19}, -2, 100, _ -> {}).isDone());
         assertEquals(0, clock.pending());
     }
 }

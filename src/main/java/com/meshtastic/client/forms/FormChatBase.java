@@ -61,7 +61,6 @@ import java.util.function.Consumer;
  */
 abstract class FormChatBase extends Form {
 
-    protected static final int REQUEST_TIMEOUT_SECONDS = 360;
     protected static final int UNREAD_FOCUS_THRESHOLD = 2;
     protected static final double BOTTOM_READ_SLOP_PX = 24.0;
     protected static final double PAGE_LOAD_EDGE_THRESHOLD = 0.1;

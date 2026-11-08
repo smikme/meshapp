@@ -34,7 +34,7 @@ class MeshCoreSettingsUiTest {
                 new MeshCoreCompanionProtocolRuntime(
                         new ProtocolRuntimeContext(
                                 "ui", new ConnectionEntry("test", "x", 1), radio, "test"));
-        try {
+        try (runtime) {
             runtime.start().get(2, TimeUnit.SECONDS);
             CompletableFuture<Void> rendered = new CompletableFuture<>();
             Platform.runLater(() -> {
@@ -77,7 +77,6 @@ class MeshCoreSettingsUiTest {
             });
             rendered.get(15, TimeUnit.SECONDS);
         } finally {
-            runtime.close();
             TestEnvironmentSupport.resetSingletons();
         }
     }

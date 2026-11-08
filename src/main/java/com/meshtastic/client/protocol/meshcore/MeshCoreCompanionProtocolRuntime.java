@@ -92,19 +92,19 @@ public final class MeshCoreCompanionProtocolRuntime
         state.setPhase(MeshCoreCompanionState.Phase.HANDSHAKE);
         transport.setDataListener(this::handlePacket);
         request(MeshCoreCompanionFrames.appStart("MeshApp"), 5)
-                .thenCompose(v -> {
+                .thenCompose(_ -> {
                     storage.bindAlias(state.getOwnerId(), state.getOwnerId(), true);
                     for (byte[] contact : storage.contacts(state.getOwnerId()))
                         parseContact(contact);
                     return request(MeshCoreCompanionFrames.deviceQuery(), 13);
                 })
-                .thenCompose(v -> {
+                .thenCompose(_ -> {
                     state.setPhase(MeshCoreCompanionState.Phase.SYNCING);
                     return refreshContacts();
                 })
-                .thenCompose(v -> refreshChannels())
-                .thenCompose(v -> request(MeshCoreCompanionFrames.getBattery(), 12))
-                .whenComplete((v, error) -> {
+                .thenCompose(_ -> refreshChannels())
+                .thenCompose(_ -> request(MeshCoreCompanionFrames.getBattery(), 12))
+                .whenComplete((_, error) -> {
                     if (error != null) {
                         sessionFailed(error);
                         return;
@@ -186,7 +186,7 @@ public final class MeshCoreCompanionProtocolRuntime
         if (reason != null)
             return CompletableFuture.failedFuture(new UnsupportedOperationException(reason));
         return commands.submit(payload, terminal, timeout, receive, progress)
-                .whenComplete((v, e) -> {
+                .whenComplete((_, e) -> {
                     Throwable cause = e;
                     while (cause != null && cause.getCause() != null) cause = cause.getCause();
                     if (cause instanceof MeshCoreCommandQueue.MeshCoreException failure
@@ -206,7 +206,7 @@ public final class MeshCoreCompanionProtocolRuntime
         contactsSyncing = true;
         syncContacts = new HashSet<>();
         return request(MeshCoreCompanionFrames.getContacts(), 4, 2, 3)
-                .thenAccept(v -> {
+                .thenAccept(_ -> {
                     for (String id : state.getContacts().keySet())
                         if (!syncContacts.contains(id)) {
                             state.removeContact(id);
@@ -214,7 +214,7 @@ public final class MeshCoreCompanionProtocolRuntime
                         }
                     migrateContactAliases();
                 })
-                .whenComplete((v, e) -> {
+                .whenComplete((_, _) -> {
                     syncContacts = null;
                     contactsSyncing = false;
                     state.fireChanged();
@@ -257,8 +257,8 @@ public final class MeshCoreCompanionProtocolRuntime
         command[0] = 4;
         MeshCoreCompanionFrames.writeIntLe(command, 1, since);
         return request(command, 4, 2, 3)
-                .thenAccept(v -> migrateContactAliases())
-                .whenComplete((v, e) -> {
+                .thenAccept(_ -> migrateContactAliases())
+                .whenComplete((_, _) -> {
                     synchronized (this) {
                         contactsSyncing = false;
                     }
@@ -270,7 +270,7 @@ public final class MeshCoreCompanionProtocolRuntime
         CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
         for (int i = 0; i < maxChannels(); i++) {
             final int index = i;
-            chain = chain.thenCompose(v -> getChannel(index).thenAccept(p -> {}));
+            chain = chain.thenCompose(_ -> getChannel(index).thenAccept(_ -> {}));
         }
         return chain.thenRun(() -> {
             state.getDeviceState().setChannelCatalogReady(true);
@@ -298,14 +298,18 @@ public final class MeshCoreCompanionProtocolRuntime
     }
 
     public synchronized MeshMessage sendChannelMessage(int channel, String text, int replyId) {
+        if (replyId != 0)
+            throw new IllegalArgumentException("MeshCore does not support message replies");
         if (changingChannels.contains(channel)
-                || !canSend(text, false)
+                || cannotSend(text, false)
                 || !state.getDeviceState().hasEnabledChannel(channel)) return null;
         return sendNew(state.getOwnerId(), "!ffffffff", channel, text, false);
     }
 
     public synchronized MeshMessage sendDirectMessage(String peer, String text, int replyId) {
-        if (!canSend(text, true)) return null;
+        if (replyId != 0)
+            throw new IllegalArgumentException("MeshCore does not support message replies");
+        if (cannotSend(text, true)) return null;
         byte[] prefix = state.publicKeyPrefixForNode(peer);
         if (prefix.length != 6) return null;
         String canonical =
@@ -317,13 +321,13 @@ public final class MeshCoreCompanionProtocolRuntime
         return sendNew(state.getOwnerId(), canonical, 0, text, true);
     }
 
-    private boolean canSend(String text, boolean direct) {
-        return !closed
-                && state.isReady()
-                && text != null
-                && !text.isBlank()
-                && text.indexOf(0) < 0
-                && text.getBytes(StandardCharsets.UTF_8).length <= maxTextBytes(direct);
+    private boolean cannotSend(String text, boolean direct) {
+        return closed
+                || !state.isReady()
+                || text == null
+                || text.isBlank()
+                || text.indexOf(0) >= 0
+                || text.getBytes(StandardCharsets.UTF_8).length > maxTextBytes(direct);
     }
 
     private MeshMessage sendNew(String from, String to, int channel, String text, boolean direct) {
@@ -343,7 +347,7 @@ public final class MeshCoreCompanionProtocolRuntime
         if (message == null
                 || !message.isOutgoing()
                 || !Objects.equals(message.getFromNodeId(), state.getOwnerId())
-                || !canSend(message.getText(), message.isDirectMessage())
+                || cannotSend(message.getText(), message.isDirectMessage())
                 || sending.contains(message)) return false;
         if (!message.isDirectMessage()) {
             var channel = state.getMeshCoreChannels().get(message.getChannelIndex());
@@ -418,12 +422,10 @@ public final class MeshCoreCompanionProtocolRuntime
                         }
                         long hash = MeshCoreCompanionFrames.unsignedIntLe(response, 2);
                         long timeout =
-                                Math.max(
+                                Math.clamp(
+                                        MeshCoreCompanionFrames.unsignedIntLe(response, 6),
                                         500,
-                                        Math.min(
-                                                300_000,
-                                                MeshCoreCompanionFrames.unsignedIntLe(
-                                                        response, 6)));
+                                        300_000);
                         storage.attemptAck(state.getOwnerId(), message.getDbId(), hash, timeout);
                         if (hash == 0) {
                             sending.remove(message);
@@ -513,7 +515,7 @@ public final class MeshCoreCompanionProtocolRuntime
             } else if (type == 0x90) {
                 state.setLastError("Contact storage full");
             } else {
-                if (type >= 0x84 && type <= 0x8e && type != 0x8a && state.getOwnerId() != null)
+                if (type >= 0x84 && type <= 0x8e && state.getOwnerId() != null)
                     storage.saveEvent(state.getOwnerId(), packet);
                 commands.accept(packet);
             }
@@ -606,15 +608,15 @@ public final class MeshCoreCompanionProtocolRuntime
             return CompletableFuture.failedFuture(
                     new IllegalStateException("Channel update already in progress"));
         return request(command, 0)
-                .thenCompose(v -> getChannel(index))
-                .thenAccept(v -> {
+                .thenCompose(_ -> getChannel(index))
+                .thenAccept(_ -> {
                     var actual = state.getMeshCoreChannels().get(index);
                     if (!Objects.equals(actual.name(), name == null ? "" : name)
                             || !Arrays.equals(actual.secret(), secret))
                         throw new IllegalStateException(
                                 "Channel readback differs from requested settings");
                 })
-                .whenComplete((v, e) -> changingChannels.remove(index));
+                .whenComplete((_, _) -> changingChannels.remove(index));
     }
 
     public CompletableFuture<Void> setName(String name) {
@@ -627,8 +629,8 @@ public final class MeshCoreCompanionProtocolRuntime
 
     public CompletableFuture<Void> setRadio(double mhz, double bw, int sf, int cr, boolean repeat) {
         return setting(MeshCoreCommands.radio(mhz, bw, sf, cr, repeat))
-                .thenCompose(v -> request(MeshCoreCompanionFrames.deviceQuery(), 13))
-                .thenAccept(v -> {});
+                .thenCompose(_ -> request(MeshCoreCompanionFrames.deviceQuery(), 13))
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> setTxPower(int dbm) {
@@ -654,32 +656,30 @@ public final class MeshCoreCompanionProtocolRuntime
 
     public CompletableFuture<Void> setPin(int pin) {
         return request(MeshCoreCommands.pin(pin), 0)
-                .thenCompose(v -> request(MeshCoreCompanionFrames.deviceQuery(), 13))
-                .thenAccept(v -> {});
+                .thenCompose(_ -> request(MeshCoreCompanionFrames.deviceQuery(), 13))
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> synchronizeTime() {
         return request(MeshCoreCommands.time(System.currentTimeMillis() / 1000), 0)
-                .thenCompose(v -> request(new byte[] {5}, 9))
-                .thenAccept(v -> {
-                    requireLength(v, 5);
-                });
+                .thenCompose(_ -> request(new byte[] {5}, 9))
+                .thenAccept(v -> requireLength(v, 5));
     }
 
     public CompletableFuture<Void> sendAdvertisement(boolean flood) {
-        return request(MeshCoreCommands.bytes(7, flood ? 1 : 0), 0).thenAccept(v -> {});
+        return request(MeshCoreCommands.bytes(7, flood ? 1 : 0), 0).thenAccept(_ -> {});
     }
 
     private CompletableFuture<Void> setting(byte[] command) {
         return request(command, 0)
-                .thenCompose(v -> request(MeshCoreCompanionFrames.appStart("MeshApp"), 5))
-                .thenAccept(v -> {});
+                .thenCompose(_ -> request(MeshCoreCompanionFrames.appStart("MeshApp"), 5))
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> updateContact(MeshCoreContact contact) {
         return request(MeshCoreCommands.contact(contact), 0)
-                .thenCompose(v -> request(MeshCoreCommands.keyCommand(30, contact.publicKey()), 3))
-                .thenAccept(v -> {});
+                .thenCompose(_ -> request(MeshCoreCommands.keyCommand(30, contact.publicKey()), 3))
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> removeContact(String id) {
@@ -693,13 +693,13 @@ public final class MeshCoreCompanionProtocolRuntime
     public CompletableFuture<Void> resetPath(String id) {
         return request(MeshCoreCommands.keyCommand(13, MeshCoreCommands.key(id)), 0)
                 .thenCompose(
-                        v -> request(MeshCoreCommands.keyCommand(30, MeshCoreCommands.key(id)), 3))
-                .thenAccept(v -> {});
+                        _ -> request(MeshCoreCommands.keyCommand(30, MeshCoreCommands.key(id)), 3))
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> shareContact(String id) {
         return request(MeshCoreCommands.keyCommand(16, MeshCoreCommands.key(id)), 0)
-                .thenAccept(v -> {});
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<byte[]> exportContact(String id) {
@@ -715,7 +715,7 @@ public final class MeshCoreCompanionProtocolRuntime
         if (advert.length < 98)
             throw new IllegalArgumentException("Contact advertisement too short");
         return request(MeshCoreCommands.withBody(18, advert), 0)
-                .thenCompose(v -> refreshContacts());
+                .thenCompose(_ -> refreshContacts());
     }
 
     public CompletableFuture<String> runCli(String command) {
@@ -737,11 +737,11 @@ public final class MeshCoreCompanionProtocolRuntime
 
     public CompletableFuture<Void> setCustomVariable(String name, String value) {
         if (name.contains(":")) throw new IllegalArgumentException("Invalid setting name");
-        return request(MeshCoreCommands.text(41, name + ":" + value, 174), 0).thenAccept(v -> {});
+        return request(MeshCoreCommands.text(41, name + ":" + value, 174), 0).thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> reboot() {
-        return submit(MeshCoreCommands.text(19, "reboot", 6), -2, 5_000, p -> {})
+        return submit(MeshCoreCommands.text(19, "reboot", 6), -2, 5_000, _ -> {})
                 .thenRun(this::disconnectAfterReset);
     }
 
@@ -766,12 +766,12 @@ public final class MeshCoreCompanionProtocolRuntime
 
     public CompletableFuture<Void> logout(String id) {
         return request(MeshCoreCommands.keyCommand(29, MeshCoreCommands.key(id)), 0)
-                .thenAccept(v -> {});
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Boolean> hasConnection(String id) {
         return request(MeshCoreCommands.keyCommand(28, MeshCoreCommands.key(id)), 0)
-                .handle((v, e) -> {
+                .handle((_, e) -> {
                     if (e == null) return true;
                     Throwable t = e;
                     while (t.getCause() != null) t = t.getCause();
@@ -869,8 +869,8 @@ public final class MeshCoreCompanionProtocolRuntime
         if (flags < 0 || flags > 31 || hops < 0 || hops > 64)
             throw new IllegalArgumentException("Invalid contact discovery settings");
         return request(MeshCoreCommands.bytes(58, flags, hops), 0)
-                .thenCompose(v -> getAutoAdd())
-                .thenAccept(v -> {});
+                .thenCompose(_ -> getAutoAdd())
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<byte[]> getTuning() {
@@ -888,12 +888,12 @@ public final class MeshCoreCompanionProtocolRuntime
         p[0] = 21;
         MeshCoreCompanionFrames.writeIntLe(p, 1, Math.round(rxDelay * 1000));
         MeshCoreCompanionFrames.writeIntLe(p, 5, Math.round(airtime * 1000));
-        return request(p, 0).thenCompose(v -> getTuning()).thenAccept(v -> {});
+        return request(p, 0).thenCompose(_ -> getTuning()).thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> setPathHashMode(int mode) {
         if (mode < 0 || mode > 2) throw new IllegalArgumentException("Path hash mode must be 0..2");
-        return request(MeshCoreCommands.bytes(61, 0, mode), 0).thenAccept(v -> {});
+        return request(MeshCoreCommands.bytes(61, 0, mode), 0).thenAccept(_ -> {});
     }
 
     public CompletableFuture<byte[]> allowedRepeatFrequencies() {
@@ -905,7 +905,7 @@ public final class MeshCoreCompanionProtocolRuntime
     }
 
     public CompletableFuture<Void> setDefaultScope(String name, byte[] key) {
-        if (name == null || name.isEmpty()) return request(new byte[] {63}, 0).thenAccept(v -> {});
+        if (name == null || name.isEmpty()) return request(new byte[] {63}, 0).thenAccept(_ -> {});
         byte[] n = name.getBytes(StandardCharsets.UTF_8);
         if (n.length > 30 || name.indexOf(0) >= 0 || key.length != 16)
             throw new IllegalArgumentException(
@@ -914,8 +914,8 @@ public final class MeshCoreCompanionProtocolRuntime
         System.arraycopy(n, 0, body, 0, n.length);
         System.arraycopy(key, 0, body, 31, 16);
         return request(MeshCoreCommands.withBody(63, body), 0)
-                .thenCompose(v -> defaultScope())
-                .thenAccept(v -> {});
+                .thenCompose(_ -> defaultScope())
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> setFloodScope(byte[] key, boolean unscoped) {
@@ -928,7 +928,7 @@ public final class MeshCoreCompanionProtocolRuntime
                                         new byte[] {(byte) (unscoped ? 1 : 0)},
                                         key == null ? new byte[0] : key)),
                         0)
-                .thenAccept(v -> {});
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<byte[]> trace(byte[] path, int hashSize) {
@@ -974,7 +974,7 @@ public final class MeshCoreCompanionProtocolRuntime
                                 concat(
                                         new byte[] {(byte) dataType, (byte) (dataType >>> 8)},
                                         payload)));
-        return request(MeshCoreCommands.withBody(62, body), 0).thenAccept(v -> {});
+        return request(MeshCoreCommands.withBody(62, body), 0).thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> sendRawData(byte[] path, int encodedPathLength, byte[] payload) {
@@ -988,13 +988,13 @@ public final class MeshCoreCompanionProtocolRuntime
                                         new byte[] {(byte) encodedPathLength},
                                         concat(path, payload))),
                         0)
-                .thenAccept(v -> {});
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> sendControlData(byte[] payload) {
         if (payload.length == 0 || (payload[0] & 128) == 0)
             throw new IllegalArgumentException("Invalid control payload");
-        return request(MeshCoreCommands.withBody(55, payload), 0).thenAccept(v -> {});
+        return request(MeshCoreCommands.withBody(55, payload), 0).thenAccept(_ -> {});
     }
 
     public CompletableFuture<Void> sendRawPacket(int priority, byte[] packet) {
@@ -1003,7 +1003,7 @@ public final class MeshCoreCompanionProtocolRuntime
         return request(
                         MeshCoreCommands.withBody(65, concat(new byte[] {(byte) priority}, packet)),
                         0)
-                .thenAccept(v -> {});
+                .thenAccept(_ -> {});
     }
 
     public CompletableFuture<byte[]> exportIdentity() {
@@ -1020,7 +1020,7 @@ public final class MeshCoreCompanionProtocolRuntime
     }
 
     public CompletableFuture<Void> factoryReset() {
-        return submit(MeshCoreCommands.text(51, "reset", 5), -2, 5_000, p -> {})
+        return submit(MeshCoreCommands.text(51, "reset", 5), -2, 5_000, _ -> {})
                 .thenRun(this::disconnectAfterReset);
     }
 
@@ -1047,14 +1047,14 @@ public final class MeshCoreCompanionProtocolRuntime
                         });
         for (int i = 0; i < data.length; i += 175) {
             byte[] part = Arrays.copyOfRange(data, i, Math.min(data.length, i + 175));
-            chain = chain.thenCompose(v -> request(MeshCoreCommands.withBody(34, part), 0));
+            chain = chain.thenCompose(_ -> request(MeshCoreCommands.withBody(34, part), 0));
         }
-        return chain.thenCompose(v -> request(new byte[] {35}, 20))
+        return chain.thenCompose(_ -> request(new byte[] {35}, 20))
                 .thenApply(v -> {
                     requireLength(v, 65);
                     return Arrays.copyOfRange(v, 1, 65);
                 })
-                .whenComplete((v, e) -> {
+                .whenComplete((_, _) -> {
                     synchronized (this) {
                         signing = false;
                     }
@@ -1140,6 +1140,8 @@ public final class MeshCoreCompanionProtocolRuntime
         eventListeners.add(listener);
     }
 
+    // Counterpart of addEventListener for integrations that subscribe temporarily.
+    @SuppressWarnings("unused")
     public void removeEventListener(Consumer<byte[]> listener) {
         eventListeners.remove(listener);
     }
@@ -1177,7 +1179,6 @@ public final class MeshCoreCompanionProtocolRuntime
                     "MeshCore Radio RX",
                     "RSSI=%d dBm, SNR=%.2f dB".formatted((int) packet[2], packet[1] / 4.0),
                     Arrays.copyOfRange(packet, 3, packet.length));
-            return;
         }
         // Host control is not LoRa traffic. Operation failures are exposed through futures/state,
         // and received radio events are available in the separate MeshCore diagnostic journal.

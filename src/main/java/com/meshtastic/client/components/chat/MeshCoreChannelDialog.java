@@ -29,7 +29,7 @@ public final class MeshCoreChannelDialog {
         Label status = new Label();
         status.setWrapText(true);
         Button generate = new Button(I18n.t("common.generate"));
-        generate.setOnAction(e ->
+        generate.setOnAction(_ ->
                 secret.setText(
                         Base64.getEncoder().encodeToString(MeshCoreCommands.channelKey("", null))));
         Runnable load =
@@ -39,11 +39,11 @@ public final class MeshCoreChannelDialog {
                     secret.setText(c == null ? "" : Base64.getEncoder().encodeToString(c.secret()));
                 };
         load.run();
-        slot.valueProperty().addListener((o, a, b) -> load.run());
+        slot.valueProperty().addListener((_, _, _) -> load.run());
         TextField link = new TextField();
         link.setPromptText("meshcore://channel/add?…");
         Button importLink = new Button(I18n.t("meshcore.importLink"));
-        importLink.setOnAction(e -> {
+        importLink.setOnAction(_ -> {
             try {
                 var c = MeshCoreSharing.channelFromLink(slot.getValue(), link.getText());
                 name.setText(c.name());
@@ -53,7 +53,7 @@ public final class MeshCoreChannelDialog {
             }
         });
         Button shareLink = new Button(I18n.t("meshcore.shareLink"));
-        shareLink.setOnAction(e -> {
+        shareLink.setOnAction(_ -> {
             try {
                 byte[] key = MeshCoreCommands.channelKey(name.getText(), secret.getText());
                 secret.setText(Base64.getEncoder().encodeToString(key));
@@ -66,12 +66,12 @@ public final class MeshCoreChannelDialog {
         });
         Button save = new Button(I18n.t("common.save")),
                 clear = new Button(I18n.t("meshcore.clearChannel"));
-        save.setOnAction(e -> {
+        save.setOnAction(_ -> {
             try {
                 byte[] key = MeshCoreCommands.channelKey(name.getText(), secret.getText());
                 save.setDisable(true);
                 runtime.setChannel(slot.getValue(), name.getText(), key)
-                        .whenComplete((v, error) ->
+                        .whenComplete((_, error) ->
                                 Platform.runLater(() -> {
                                     save.setDisable(false);
                                     if (error == null) {
@@ -83,7 +83,7 @@ public final class MeshCoreChannelDialog {
                 status.setText(message(ex));
             }
         });
-        clear.setOnAction(e -> {
+        clear.setOnAction(_ -> {
             Alert confirm =
                     new Alert(
                             Alert.AlertType.CONFIRMATION,
@@ -93,7 +93,7 @@ public final class MeshCoreChannelDialog {
             if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) return;
             clear.setDisable(true);
             runtime.setChannel(slot.getValue(), "", new byte[16])
-                    .whenComplete((v, error) ->
+                    .whenComplete((_, error) ->
                             Platform.runLater(() -> {
                                 clear.setDisable(false);
                                 if (error == null) {

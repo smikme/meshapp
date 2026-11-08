@@ -217,6 +217,6 @@ public final class MeshCoreSettingsTreeBuilder {
         return Optional.ofNullable(value)
                 .map(String::valueOf)
                 .filter(text -> !text.isBlank())
-                .orElse("\u2014");
+                .orElse("—");
     }
 }

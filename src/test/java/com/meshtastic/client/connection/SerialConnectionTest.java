@@ -241,28 +241,23 @@ class SerialConnectionTest {
     void shouldNotAssertDtrForUsbSerialBridges() {
         assertFalse(SerialConnection.shouldAssertDtr(
                 "COM3",
-                "Silicon Labs CP210x USB to UART Bridge (COM3)",
-                true
+                "Silicon Labs CP210x USB to UART Bridge (COM3)"
         ));
         assertFalse(SerialConnection.shouldAssertDtr(
                 "COM4",
-                "USB-Enhanced-SERIAL CH9102 (COM4)",
-                true
+                "USB-Enhanced-SERIAL CH9102 (COM4)"
         ));
         assertFalse(SerialConnection.shouldAssertDtr(
                 "COM4",
-                "USB-SERIAL CH340 (COM4)",
-                true
+                "USB-SERIAL CH340 (COM4)"
         ));
         assertFalse(SerialConnection.shouldAssertDtr(
                 "ttyUSB0",
-                "CP2102 USB to UART Bridge Controller",
-                false
+                "CP2102 USB to UART Bridge Controller"
         ));
         assertFalse(SerialConnection.shouldAssertDtr(
                 "/dev/cu.SLAB_USBtoUART",
-                "/dev/cu.SLAB_USBtoUART",
-                false
+                "/dev/cu.SLAB_USBtoUART"
         ));
     }
 
@@ -270,18 +265,15 @@ class SerialConnectionTest {
     void shouldAssertRtsForUsbSerialBridges() {
         assertTrue(SerialConnection.shouldAssertRts(
                 "COM3",
-                "Silicon Labs CP210x USB to UART Bridge (COM3)",
-                true
+                "Silicon Labs CP210x USB to UART Bridge (COM3)"
         ));
         assertTrue(SerialConnection.shouldAssertRts(
                 "/dev/cu.SLAB_USBtoUART",
-                "CP2102 USB to UART Bridge Controller",
-                false
+                "CP2102 USB to UART Bridge Controller"
         ));
         assertTrue(SerialConnection.shouldAssertRts(
                 "cu.usbserial-1234",
-                "USB Serial",
-                false
+                "USB Serial"
         ));
     }
 
@@ -289,13 +281,11 @@ class SerialConnectionTest {
     void nativeUsbCdcAssertsDtrButNotRts() {
         assertTrue(SerialConnection.shouldAssertDtr(
                 "cu.usbmodem1234",
-                "ESP32-S3 USB CDC",
-                false
+                "ESP32-S3 USB CDC"
         ));
         assertFalse(SerialConnection.shouldAssertRts(
                 "cu.usbmodem1234",
-                "ESP32-S3 USB CDC",
-                false
+                "ESP32-S3 USB CDC"
         ));
     }
 
@@ -304,7 +294,6 @@ class SerialConnectionTest {
         SerialModemLinePolicy policy = SerialConnection.modemLinePolicy(
                 "ttyUSB0",
                 "CP2102 USB to UART Bridge Controller",
-                false,
                 SerialModemLineMode.DTR_OFF_RTS_OFF
         );
 
@@ -318,7 +307,6 @@ class SerialConnectionTest {
         SerialModemLinePolicy policy = SerialConnection.modemLinePolicy(
                 "ttyUSB0",
                 "CP2102 USB to UART Bridge Controller",
-                false,
                 SerialModemLineMode.DTR_ON_RTS_ON
         );
 
@@ -402,7 +390,7 @@ class SerialConnectionTest {
             int copyLen = Math.min(len, chunk.length);
             System.arraycopy(chunk, 0, buf, 0, copyLen);
             if (copyLen < chunk.length) {
-                incoming.offer(Arrays.copyOfRange(chunk, copyLen, chunk.length));
+                incoming.add(Arrays.copyOfRange(chunk, copyLen, chunk.length));
             }
             return copyLen;
         }
@@ -428,7 +416,7 @@ class SerialConnectionTest {
         }
 
         void enqueueIncoming(byte... chunk) {
-            incoming.offer(Arrays.copyOf(chunk, chunk.length));
+            incoming.add(Arrays.copyOf(chunk, chunk.length));
         }
 
         boolean awaitClose() throws InterruptedException {

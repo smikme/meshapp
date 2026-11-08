@@ -312,6 +312,8 @@ configurations.configureEach {
 }
 
 dependencies {
+	compileOnly 'org.jetbrains:annotations:26.1.0'
+	testCompileOnly 'org.jetbrains:annotations:26.1.0'
 	implementation 'io.nayuki:qrcodegen:1.8.0' // Local MeshCore sharing QR codes; no network service.
 
 	// Runtime/application dependencies.

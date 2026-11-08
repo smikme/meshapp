@@ -1,5 +1,7 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import org.jetbrains.annotations.NotNull;
+
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -24,17 +26,19 @@ final class MeshCoreTestClock extends AbstractExecutorService implements Schedul
     }
 
     @Override
-    public void execute(Runnable command) {
+    public void execute(@NotNull Runnable command) {
         schedule(command, 0, TimeUnit.MILLISECONDS);
     }
 
     @Override
-    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+    public @NotNull ScheduledFuture<?> schedule(
+            @NotNull Runnable command, long delay, @NotNull TimeUnit unit) {
         return schedule(Executors.callable(command, null), delay, unit);
     }
 
     @Override
-    public <V> ScheduledFuture<V> schedule(Callable<V> command, long delay, TimeUnit unit) {
+    public <V> @NotNull ScheduledFuture<V> schedule(
+            @NotNull Callable<V> command, long delay, @NotNull TimeUnit unit) {
         if (shutdown) throw new RejectedExecutionException();
         Task<V> task = new Task<>(command, now + unit.toMillis(delay), sequence++);
         tasks.add(task);
@@ -42,14 +46,14 @@ final class MeshCoreTestClock extends AbstractExecutorService implements Schedul
     }
 
     @Override
-    public ScheduledFuture<?> scheduleAtFixedRate(
-            Runnable r, long initial, long period, TimeUnit unit) {
+    public @NotNull ScheduledFuture<?> scheduleAtFixedRate(
+            @NotNull Runnable r, long initial, long period, @NotNull TimeUnit unit) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public ScheduledFuture<?> scheduleWithFixedDelay(
-            Runnable r, long initial, long delay, TimeUnit unit) {
+    public @NotNull ScheduledFuture<?> scheduleWithFixedDelay(
+            @NotNull Runnable r, long initial, long delay, @NotNull TimeUnit unit) {
         throw new UnsupportedOperationException();
     }
 
@@ -59,7 +63,7 @@ final class MeshCoreTestClock extends AbstractExecutorService implements Schedul
     }
 
     @Override
-    public List<Runnable> shutdownNow() {
+    public @NotNull List<Runnable> shutdownNow() {
         shutdown = true;
         tasks.forEach(t -> t.cancel(false));
         tasks.clear();
@@ -77,7 +81,7 @@ final class MeshCoreTestClock extends AbstractExecutorService implements Schedul
     }
 
     @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
+    public boolean awaitTermination(long timeout, @NotNull TimeUnit unit) {
         return shutdown;
     }
 
@@ -90,11 +94,11 @@ final class MeshCoreTestClock extends AbstractExecutorService implements Schedul
             this.order = order;
         }
 
-        public long getDelay(TimeUnit unit) {
+        public long getDelay(@NotNull TimeUnit unit) {
             return unit.convert(due - now, TimeUnit.MILLISECONDS);
         }
 
-        public int compareTo(Delayed other) {
+        public int compareTo(@NotNull Delayed other) {
             Task<?> t = (Task<?>) other;
             int compared = Long.compare(due, t.due);
             return compared != 0 ? compared : Long.compare(order, t.order);

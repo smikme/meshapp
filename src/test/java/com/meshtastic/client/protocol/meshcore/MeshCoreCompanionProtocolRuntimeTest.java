@@ -17,6 +17,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 
+// runtime() registers every session for cleanup in @AfterEach, including failed assertions.
+@SuppressWarnings({"resource", "SqlNoDataSourceInspection", "SqlResolve"})
 class MeshCoreCompanionProtocolRuntimeTest {
     @TempDir Path home;
     final List<MeshCoreCompanionProtocolRuntime> runtimes = new ArrayList<>();
@@ -102,6 +104,8 @@ class MeshCoreCompanionProtocolRuntimeTest {
         Radio radio = new Radio();
         var rt = runtime(radio);
         MeshMessage a = rt.sendChannelMessage(0, "one", 0), b = rt.sendChannelMessage(0, "two", 0);
+        assertNotNull(a);
+        assertNotNull(b);
         long row = a.getDbId();
         radio.feed(new byte[] {1, 2});
         assertEquals(MeshMessage.DeliveryStatus.FAILED, a.getStatus());
@@ -119,7 +123,7 @@ class MeshCoreCompanionProtocolRuntimeTest {
     void receivePersistsRegardlessOfOldSignedHashAndDeduplicatesAcrossReconnect() throws Exception {
         Radio radio = new Radio();
         var rt = runtime(radio);
-        byte[] packet = channelText("Alice: audit message 10");
+        byte[] packet = channelText();
         assertTrue(Arrays.hashCode(packet) < 0);
         radio.incoming.add(packet);
         radio.feed(new byte[] {(byte) 0x83});
@@ -149,6 +153,8 @@ class MeshCoreCompanionProtocolRuntimeTest {
         var r2 = runtime(second);
         MeshMessage b = r2.sendChannelMessage(0, "new", 0);
         second.feed(new byte[] {0});
+        assertNotNull(a);
+        assertNotNull(b);
         assertNotEquals(a.getPacketId(), b.getPacketId());
         assertNotEquals(a.getDbId(), b.getDbId());
         try (var s =
@@ -201,10 +207,23 @@ class MeshCoreCompanionProtocolRuntimeTest {
     }
 
     @Test
+    void repliesAreRejectedBeforeSendingOrSaving() throws Exception {
+        Radio radio = new Radio();
+        var rt = runtime(radio);
+        String peer = rt.getState().getContacts().keySet().iterator().next();
+        int commandsBefore = radio.sent.size();
+        assertThrows(IllegalArgumentException.class, () -> rt.sendChannelMessage(0, "reply", 42));
+        assertThrows(IllegalArgumentException.class, () -> rt.sendDirectMessage(peer, "reply", 42));
+        assertEquals(commandsBefore, radio.sent.size());
+        assertEquals(0, messageCount());
+    }
+
+    @Test
     void disconnectFailsPendingAndStopsStateTimers() throws Exception {
         Radio radio = new Radio();
         var rt = runtime(radio);
         MeshMessage message = rt.sendChannelMessage(0, "pending", 0);
+        assertNotNull(message);
         rt.close();
         assertEquals(MeshMessage.DeliveryStatus.FAILED, message.getStatus());
         var f = DeviceState.class.getDeclaredField("ackTimeoutExecutor");
@@ -225,6 +244,7 @@ class MeshCoreCompanionProtocolRuntimeTest {
         rt.start().join();
         String peer = rt.getState().getContacts().keySet().iterator().next();
         MeshMessage message = rt.sendDirectMessage(peer, "retry", 0);
+        assertNotNull(message);
         byte[] sent = sent(42);
         put(sent, 6, 500);
         radio.feed(sent);
@@ -371,6 +391,7 @@ class MeshCoreCompanionProtocolRuntimeTest {
         Radio radio = new Radio();
         var rt = runtime(radio);
         var message = rt.sendChannelMessage(0, "private text", 0);
+        assertNotNull(message);
         radio.feed(new byte[] {1, 2});
         rt.setChannel(0, "Replacement", MeshCoreCommands.channelKey("#replacement", null)).join();
         assertFalse(rt.retryMessage(message));
@@ -386,7 +407,7 @@ class MeshCoreCompanionProtocolRuntimeTest {
         }
     }
 
-    static void await(java.util.function.BooleanSupplier condition) throws Exception {
+    static void await(java.util.function.BooleanSupplier condition) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(condition.getAsBoolean());
@@ -423,8 +444,8 @@ class MeshCoreCompanionProtocolRuntimeTest {
         return b;
     }
 
-    static byte[] channelText(String text) {
-        byte[] t = text.getBytes(StandardCharsets.UTF_8);
+    static byte[] channelText() {
+        byte[] t = "Alice: audit message 10".getBytes(StandardCharsets.UTF_8);
         byte[] b = new byte[8 + t.length];
         b[0] = 8;
         b[4] = 1;

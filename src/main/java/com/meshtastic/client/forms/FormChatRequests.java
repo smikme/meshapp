@@ -19,14 +19,11 @@ import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.service.NodeCacheService;
 import com.meshtastic.client.utils.NodeUtils;
 
-import javafx.animation.KeyFrame;
-import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.scene.Cursor;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
-import javafx.util.Duration;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,16 +43,6 @@ import java.util.Optional;
  */
 abstract class FormChatRequests extends FormChatMessages {
 
-    /**
-     * Creates a {@link PendingCountdown}, registers it, and attaches its UI bubble.
-     */
-    protected PendingCountdown createCountdown(String chatType, String chatKey, String prefix) {
-        PendingCountdown pc = new PendingCountdown(chatType, chatKey, prefix, REQUEST_TIMEOUT_SECONDS);
-        pendingCountdowns.add(pc);
-        attachCountdownBubble(pc);
-        return pc;
-    }
-
     /** Attaches or recreates the UI bubble for a pending countdown. */
     protected void attachCountdownBubble(PendingCountdown pc) {
         MeshMessage tmp = new MeshMessage("!00000000", "!00000000", 0,
@@ -72,7 +59,7 @@ abstract class FormChatRequests extends FormChatMessages {
         Label cancelBtn = new Label(I18n.t("chat.cancel"));
         cancelBtn.getStyleClass().add("chat-countdown-cancel");
         cancelBtn.setCursor(Cursor.HAND);
-        cancelBtn.setOnMouseClicked(e -> {
+        cancelBtn.setOnMouseClicked(_ -> {
             if (!pc.done[0] && pc.cancelAction != null) {
                 pc.cancelAction.run();
             }
@@ -81,28 +68,6 @@ abstract class FormChatRequests extends FormChatMessages {
         content.getChildren().add(content.getChildren().size() - 1, cancelBtn);
 
         pc.tempBubble = bubble;
-    }
-
-    /** Finishes a countdown by removing it from both the list and the message container. */
-    protected void finishCountdown(PendingCountdown pc) {
-        pc.done[0] = true;
-        pendingCountdowns.remove(pc);
-        messageContainer.getChildren().remove(pc.tempBubble);
-    }
-
-    /**
-     * Creates the countdown timer for a pending request.
-     * The visible countdown label is updated once per second.
-     */
-    protected Timeline createCountdownTimer(PendingCountdown pc, String prefix) {
-        Timeline timer = new Timeline(new KeyFrame(Duration.seconds(1), tick -> {
-            pc.remaining[0]--;
-            if (pc.remaining[0] > 0 && !pc.done[0]) {
-                pc.countdownLabel.setText(prefix + " ⏱ " + pc.remaining[0]);
-            }
-        }));
-        timer.setCycleCount(REQUEST_TIMEOUT_SECONDS);
-        return timer;
     }
 
     /** Restores active request bubbles when switching back to a chat. */
@@ -151,6 +116,8 @@ abstract class FormChatRequests extends FormChatMessages {
         refreshCurrentChatAfterLocalReaction();
     }
 
+    // RPC and Lua data sources are owned by the form/connection and reused across actions.
+    @SuppressWarnings("resource")
     private void sendRemoteReaction(MeshMessage msg, String emoji) {
         if (selectedChat == null || remoteRpcState == null) {
             return;
@@ -228,6 +195,8 @@ abstract class FormChatRequests extends FormChatMessages {
         return true;
     }
 
+    // Shared services remain open until the form or connection closes.
+    @SuppressWarnings("resource")
     private boolean retryRemoteMessage(MeshMessage msg) {
         if (selectedChat == null || remoteRpcState == null) {
             return false;
@@ -321,6 +290,8 @@ abstract class FormChatRequests extends FormChatMessages {
         return false;
     }
 
+    // Shared services remain open until the form or connection closes.
+    @SuppressWarnings("resource")
     private boolean runLuaAutomationCommand(ChatBotCommandHelper.ParsedBotCommand command) {
         Optional<LuaScript> script;
         try {
@@ -404,6 +375,8 @@ abstract class FormChatRequests extends FormChatMessages {
         return Optional.of(resolution.node());
     }
 
+    // RPC and Lua data sources are owned by the form/connection and reused across actions.
+    @SuppressWarnings("resource")
     private void deliverLuaNodeSelection(LuaUiNodePickRequest request, NodeData node) {
         luaScripts().deliverNodeSelection(
                 request.scriptId(),

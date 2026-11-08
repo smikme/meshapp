@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.FrameFormat;
 import com.meshtastic.client.connection.FrameFormatAwareConnection;
@@ -40,7 +39,7 @@ class MeshCoreKissProtocolRuntimeTest {
                                 new ProtocolRuntimeContext(
                                         entry.getId(), entry, transport, "type=SERIAL"));
 
-        try {
+        try (runtime) {
             assertEquals(ProtocolType.MESHCORE_KISS, runtime.getProtocolType());
             var ready = runtime.start();
 
@@ -65,8 +64,6 @@ class MeshCoreKissProtocolRuntimeTest {
             MeshCoreKissState state = ready.get(1, TimeUnit.SECONDS);
             assertTrue(state.isReady());
             assertEquals("meshcore-test", state.getDeviceName());
-        } finally {
-            runtime.close();
         }
 
         assertFalse(transport.hasDataListener());
@@ -79,7 +76,7 @@ class MeshCoreKissProtocolRuntimeTest {
         var runtime =
                 new MeshCoreKissProtocolRuntime(
                         new ProtocolRuntimeContext("kiss", entry, transport, "test"));
-        try {
+        try (runtime) {
             runtime.start();
             transport.takeWrite();
             transport.emit(new byte[] {6, 0x40});
@@ -87,8 +84,6 @@ class MeshCoreKissProtocolRuntimeTest {
             transport.emit(new byte[] {6, (byte) 0xf1, 5});
             assertTrue(runtime.getReadyFuture().isCompletedExceptionally());
             assertFalse(runtime.getState().isReady());
-        } finally {
-            runtime.close();
         }
     }
 
@@ -99,7 +94,7 @@ class MeshCoreKissProtocolRuntimeTest {
         var runtime =
                 new MeshCoreKissProtocolRuntime(
                         new ProtocolRuntimeContext("kiss", entry, transport, "test"));
-        try {
+        try (runtime) {
             runtime.start();
             transport.takeWrite();
             transport.emit(new byte[] {6, (byte) 0x96, 'M'});
@@ -114,7 +109,7 @@ class MeshCoreKissProtocolRuntimeTest {
                         new byte[14],
                         {6, (byte) 0x97}
                     }) {
-                byte[] request = transport.takeWrite();
+                transport.takeWrite();
                 if (response.length == 34) {
                     response[0] = 6;
                     response[1] = (byte) 0x81;
@@ -125,6 +120,10 @@ class MeshCoreKissProtocolRuntimeTest {
                 }
                 transport.emit(response);
             }
+            assertEquals("00".repeat(32), runtime.getState().getIdentityHex());
+            assertEquals(4096, runtime.getState().getBatteryMillivolts());
+            runtime.setCsma(2, 32).get(1, TimeUnit.SECONDS);
+            assertArrayEquals(new byte[] {(byte) 0xc0, 2, 32, (byte) 0xc0}, transport.takeWrite());
             var sent = runtime.sendData(new byte[] {(byte) 0xc0, (byte) 0xdb});
             assertArrayEquals(
                     new byte[] {
@@ -142,12 +141,12 @@ class MeshCoreKissProtocolRuntimeTest {
             transport.emit(new byte[] {6, (byte) 0xf9, 8, (byte) -90});
             assertArrayEquals(new byte[] {1, 2, 3}, runtime.receivedData().getFirst());
             assertEquals(2f, runtime.getState().getLastRxSnrDb());
+            assertEquals(-90, runtime.getState().getLastRxRssiDbm());
             transport.emit(new byte[] {6, (byte) 0xf8, 1});
             assertTrue(sent.isDone());
+            assertEquals(Boolean.TRUE, runtime.getState().getLastTxSuccess());
             org.junit.jupiter.api.Assertions.assertThrows(
                     IllegalArgumentException.class, () -> runtime.sendData(new byte[256]));
-        } finally {
-            runtime.close();
         }
     }
 
@@ -158,7 +157,7 @@ class MeshCoreKissProtocolRuntimeTest {
         private volatile FrameFormat frameFormat;
 
         @Override
-        public void connect() throws ConnectionException {}
+        public void connect() {}
 
         @Override
         public void disconnect() {}
@@ -170,12 +169,12 @@ class MeshCoreKissProtocolRuntimeTest {
 
         @Override
         public void sendBytes(byte[] data) {
-            writes.offer(data);
+            writes.add(data);
         }
 
         @Override
         public void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
-            writes.offer(data);
+            writes.add(data);
         }
 
         @Override

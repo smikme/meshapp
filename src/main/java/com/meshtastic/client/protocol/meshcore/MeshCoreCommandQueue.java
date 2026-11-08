@@ -46,7 +46,7 @@ final class MeshCoreCommandQueue implements AutoCloseable {
                         new IllegalStateException("MeshCore command queue full"));
             Request request = new Request(command.clone(), terminal, timeoutMs, receive, progress);
             waiting.add(request);
-            request.result.whenComplete((v, e) -> {
+            request.result.whenComplete((_, _) -> {
                 synchronized (lock) {
                     if (request.result.isCancelled()) {
                         if (active == request)
@@ -68,7 +68,7 @@ final class MeshCoreCommandQueue implements AutoCloseable {
         arm(r);
         try {
             writer.apply(r.command)
-                    .whenComplete((v, error) -> {
+                    .whenComplete((_, error) -> {
                         synchronized (lock) {
                             if (error != null) abort(error);
                             else if (r.terminal == -2 && active == r) finish(r, new byte[0], null);
@@ -114,11 +114,10 @@ final class MeshCoreCommandQueue implements AutoCloseable {
             }
             if (type == 6 && r.terminal != 6 && packet.length >= 10)
                 r.timeoutMs =
-                        Math.max(
+                        Math.clamp(
+                                MeshCoreCompanionFrames.unsignedIntLe(packet, 6) + 1000,
                                 500,
-                                Math.min(
-                                        300_000,
-                                        MeshCoreCompanionFrames.unsignedIntLe(packet, 6) + 1000));
+                                300_000);
             if (r.terminal < 0 || type == r.terminal) finish(r, packet.clone(), null);
             else arm(r); // contact sync timeout measures inactivity, not total list size
             return true;
