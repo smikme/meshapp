@@ -37,7 +37,7 @@ public final class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 24;
+    static final int CURRENT_VERSION = 25;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -212,6 +212,8 @@ public final class DatabaseMigrator {
             if (version < 22) { migrateToV22(connection); version = 22; }
             if (version < 23) { migrateToV23(connection); version = 23; }
             if (version < 24) { migrateToV24(connection); version = 24; }
+
+            if (version < 25) { migrateToV25(connection); }
 
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
@@ -926,6 +928,60 @@ public final class DatabaseMigrator {
                     """);
         }
         log.info("Migration v24: added telemetry replay packet identity");
+    }
+
+    /** v25: released Meshtastic 2.8 sensor channels and soil/water metrics. */
+    private static void migrateToV25(Connection connection) throws SQLException {
+        if (tableExists(connection, "NODES")) {
+            try (Statement stmt = connection.createStatement()) {
+                addColumnIfMissing(stmt, connection, "NODES", "XEDDSA_SIGNED", "xeddsa_signed BOOLEAN");
+                addColumnIfMissing(stmt, connection, "NODES", "HEARD_ON_CURRENT_LORA", "heard_on_current_lora BOOLEAN");
+            }
+        }
+        if (!tableExists(connection, "TELEMETRY_HISTORY")) {
+            return;
+        }
+        String[][] columns = {
+                {"ADC_VOLTAGE_CH0", "adc_voltage_ch0 REAL"},
+                {"ADC_VOLTAGE_CH1", "adc_voltage_ch1 REAL"},
+                {"ADC_VOLTAGE_CH2", "adc_voltage_ch2 REAL"},
+                {"ADC_VOLTAGE_CH3", "adc_voltage_ch3 REAL"},
+                {"ADC_VOLTAGE_CH4", "adc_voltage_ch4 REAL"},
+                {"ADC_VOLTAGE_CH5", "adc_voltage_ch5 REAL"},
+                {"ADC_VOLTAGE_CH6", "adc_voltage_ch6 REAL"},
+                {"ADC_VOLTAGE_CH7", "adc_voltage_ch7 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH0", "one_wire_temperature_ch0 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH1", "one_wire_temperature_ch1 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH2", "one_wire_temperature_ch2 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH3", "one_wire_temperature_ch3 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH4", "one_wire_temperature_ch4 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH5", "one_wire_temperature_ch5 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH6", "one_wire_temperature_ch6 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH7", "one_wire_temperature_ch7 REAL"},
+                {"LIGHTNING_STRIKE_COUNT_1H", "lightning_strike_count_1h BIGINT"},
+                {"LIGHTNING_DISTANCE_KM", "lightning_distance_km REAL"},
+                {"PM_STATUS_FLAGS", "pm_status_flags BIGINT"},
+                {"SOIL_PH", "soil_ph REAL"},
+                {"PH", "ph REAL"},
+                {"ELECTRICAL_CONDUCTIVITY", "electrical_conductivity REAL"},
+                {"SALINITY", "salinity REAL"},
+                {"NITROGEN", "nitrogen REAL"},
+                {"PHOSPHORUS", "phosphorus REAL"},
+                {"POTASSIUM", "potassium REAL"},
+                {"DISSOLVED_OXYGEN", "dissolved_oxygen REAL"},
+                {"ORP", "orp REAL"},
+                {"CHEMICAL_OXYGEN_DEMAND", "chemical_oxygen_demand REAL"},
+                {"TURBIDITY", "turbidity REAL"},
+                {"NITRATE", "nitrate REAL"},
+                {"AMMONIUM", "ammonium REAL"},
+                {"BIOCHEMICAL_OXYGEN_DEMAND", "biochemical_oxygen_demand REAL"},
+                {"SOLAR_IRRADIANCE", "solar_irradiance REAL"}
+        };
+        try (Statement stmt = connection.createStatement()) {
+            for (String[] column : columns) {
+                addColumnIfMissing(stmt, connection, "TELEMETRY_HISTORY", column[0], column[1]);
+            }
+        }
     }
 
     private static void createChatThreadsTable(Connection connection) throws SQLException {

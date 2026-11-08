@@ -3,12 +3,14 @@ package com.meshtastic.client.utils;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.meshtastic.client.model.FirmwareCapabilities;
+import com.meshtastic.client.model.FirmwareVersion;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
+import org.meshtastic.proto.FieldMetadataProtos;
 
 /**
  * Central firmware-version policy for the reflection-based config editor.
@@ -53,6 +55,9 @@ public final class MeshtasticConfigCompatibility {
         if (field == null) {
             return false;
         }
+        if (!availableOnFirmware(field.getOptions().getExtension(FieldMetadataProtos.fieldMetadata), context)) {
+            return false;
+        }
         String fullName = field.getFullName();
         if ("meshtastic.Config.SecurityConfig.packet_signature_policy".equals(fullName)) {
             return context.capabilities().firmware28OrNewer()
@@ -82,6 +87,8 @@ public final class MeshtasticConfigCompatibility {
         int currentNumber = currentValue instanceof EnumValueDescriptor descriptor
                 ? descriptor.getNumber()
                 : Integer.MIN_VALUE;
+        values.removeIf(value -> value.getNumber() != currentNumber
+                && !availableOnFirmware(value.getOptions().getExtension(FieldMetadataProtos.enumValueMetadata), context));
 
         if ("meshtastic.Config.LoRaConfig.RegionCode".equals(enumName)) {
             values.removeIf(value -> !allowedRegion(
@@ -106,6 +113,14 @@ public final class MeshtasticConfigCompatibility {
             }
         }
         return values;
+    }
+
+    private static boolean availableOnFirmware(FieldMetadataProtos.FieldMetadata metadata, Context context) {
+        // Unknown versions retain the legacy editor behavior until metadata arrives.
+        return context.capabilities().version().map(version ->
+                FirmwareVersion.parse(metadata.getSinceFirmware()).map(version::isAtLeast).orElse(true)
+                        && !FirmwareVersion.parse(metadata.getDeprecatedSince()).map(version::isAtLeast).orElse(false)
+        ).orElse(true);
     }
 
     private static boolean allowedRegion(

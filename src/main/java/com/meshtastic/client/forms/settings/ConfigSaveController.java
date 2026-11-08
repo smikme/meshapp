@@ -292,8 +292,11 @@ public final class ConfigSaveController {
             case DETECTION_SENSOR ->
                 MeshProtos.ExcludedModules.DETECTIONSENSOR_CONFIG_VALUE;
             case PAXCOUNTER -> MeshProtos.ExcludedModules.PAXCOUNTER_CONFIG_VALUE;
-            case STATUSMESSAGE, TRAFFIC_MANAGEMENT, TAK, MESH_BEACON,
-                 PAYLOADVARIANT_NOT_SET -> 0;
+            case STATUSMESSAGE -> MeshProtos.ExcludedModules.STATUSMESSAGE_CONFIG_VALUE;
+            case TRAFFIC_MANAGEMENT -> MeshProtos.ExcludedModules.TRAFFICMANAGEMENT_CONFIG_VALUE;
+            case TAK -> MeshProtos.ExcludedModules.TAK_CONFIG_VALUE;
+            case MESH_BEACON -> MeshProtos.ExcludedModules.MESHBEACON_CONFIG_VALUE;
+            case PAYLOADVARIANT_NOT_SET -> 0;
         };
     }
 

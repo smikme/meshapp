@@ -891,4 +891,33 @@ class DatabaseMigratorTest {
         assertNotNull(guid);
         assertEquals(guid, UUID.fromString(guid).toString());
     }
+    @Test
+    void version25PreservesRowsAndLeavesNewSensorValuesAbsent() throws Exception {
+        try (Connection connection = openConnection("upgrade-v24-sensors")) {
+            createSchemaVersion(connection, 24);
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("CREATE TABLE telemetry_history (id BIGINT PRIMARY KEY, temperature REAL)");
+                stmt.execute("INSERT INTO telemetry_history VALUES (1, 21.5)");
+                stmt.execute("CREATE TABLE nodes (node_id VARCHAR(20) PRIMARY KEY)");
+                stmt.execute("INSERT INTO nodes VALUES ('!12345678')");
+            }
+            DatabaseMigrator.migrate(connection);
+            DatabaseMigrator.migrate(connection);
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            try (var rs = connection.createStatement().executeQuery("SELECT * FROM telemetry_history")) {
+                assertTrue(rs.next());
+                assertEquals(21.5f, rs.getFloat("temperature"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("one_wire_temperature_ch7"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("soil_ph"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("pm_status_flags"));
+                assertFalse(rs.next());
+            }
+            try (var rs = connection.createStatement().executeQuery("SELECT * FROM nodes")) {
+                assertTrue(rs.next());
+                assertEquals("!12345678", rs.getString("node_id"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("xeddsa_signed"));
+            }
+        }
+    }
+
 }

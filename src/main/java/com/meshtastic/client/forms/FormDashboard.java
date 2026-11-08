@@ -336,7 +336,27 @@ public class FormDashboard extends Form {
         });
         colNode.setPrefWidth(120);
 
-        table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode);
+        TableColumn<TelemetryLogRow, String> colSensors = new TableColumn<>(I18n.t("telemetry.column.sensors"));
+        colSensors.setCellValueFactory(new PropertyValueFactory<>("sensors"));
+        colSensors.setPrefWidth(260);
+        colSensors.setCellFactory(column -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                boolean absent = empty || item == null || item.isBlank();
+                setText(absent ? null : item);
+                if (absent) {
+                    setTooltip(null);
+                } else {
+                    var tooltip = new javafx.scene.control.Tooltip(item.replace("; ", "\n"));
+                    tooltip.setMaxWidth(480);
+                    tooltip.setWrapText(true);
+                    setTooltip(tooltip);
+                }
+            }
+        });
+
+        table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode, colSensors);
 
         // Lazy loading: load the next page when scrolling near the bottom.
         table.skinProperty().addListener((obs, oldSkin, newSkin) -> {
@@ -440,8 +460,10 @@ public class FormDashboard extends Form {
         private final String rssi;
         private final String hops;
         private final String node;
+        private final String sensors;
 
         public TelemetryLogRow(TelemetryEntry e, DeviceState state) {
+            this.sensors = com.meshtastic.client.utils.TelemetrySensorSummary.format(e);
             this.time = e.getTimestamp() > 0
                     ? Instant.ofEpochSecond(e.getTimestamp())
                         .atZone(ZoneId.systemDefault())
@@ -554,6 +576,7 @@ public class FormDashboard extends Form {
         public String getSnr()      { return snr; }
         public String getRssi()     { return rssi; }
         public String getHops()     { return hops; }
+        public String getSensors() { return sensors; }
         public String getNode()     { return node; }
     }
 }

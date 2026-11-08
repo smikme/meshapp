@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/>
-  <img src="https://img.shields.io/badge/JavaFX-25.0.3-blue?logo=java" alt="JavaFX"/>
+  <img src="https://img.shields.io/badge/JavaFX-27.0.1-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
@@ -194,6 +194,16 @@ MeshApp может работать с несколькими подключен
 Для Meshtastic 2.8.0 и новее MeshApp поддерживает компактную начальную базу
 нод с последующей фоновой передачей координат и телеметрии. Для старых прошивок
 сохраняется прежний сценарий подключения.
+
+Схемы закреплены на выпущенной [Meshtastic 2.8.2 Alpha](https://github.com/meshtastic/firmware/releases/tag/v2.8.2.d5f1619), коммит protobuf `8d0ed0c135f91ad1d6f9c60bc341277d64946bce`:
+
+- Настройка AES-CCM для каналов и расшифровка MQTT-пакетов с проверкой подлинности (прошивка 2.8.1+).
+- Отдельный статус доставки с проверенным ACK proof. Поддельные подтверждения не завершают ожидание сообщений и запросов; прежние подтверждения обрабатываются как раньше.
+- Восемь каналов АЦП и восемь отдельных каналов 1-Wire, грозовые показатели, состояние датчика частиц и телеметрия почвы/воды. Данные сохраняются в базе, передаются через RPC и доступны в Lua; показания видны в журнале телеметрии.
+- Сообщения Mesh Beacon в чате, настройка частотного слота, ограничение текста 60 байтами UTF-8 и просмотр предложенных настроек в мониторе пакетов.
+- Сведения о подписанных пакетах узла и приёме с текущими настройками LoRa, новые модели оборудования и проверка совместимости настроек по метаданным прошивки.
+
+`scripts/update-protos.sh` загружает этот релиз и применяет `scripts/meshtastic-legacy-compat.patch` для старых прошивок. Скрипт не следует за веткой `master`. Миграция базы сохраняет прежнюю историю. Схемы LoRaWAN, путевых точек и TAK доступны для просмотра пакетов; функции шлюза LoRaWAN и клиента TAK в приложение не добавлены.
 
 ### MeshCore
 
@@ -453,8 +463,9 @@ MESHAPP_JMX_PORT=9011
 
 | Компонент | Технология | Назначение |
 |-----------|------------|------------|
-| Интерфейс | JavaFX 25.0.3 + AtlantaFX | Основной интерфейс |
-| Meshtastic | Protobuf 4.33.4 + схемы Meshtastic | `ToRadio` / `FromRadio` и mesh-пакеты |
+| Интерфейс | JavaFX 27.0.1 + AtlantaFX | Основной интерфейс |
+| Meshtastic | Protobuf 4.36.2 + схемы Meshtastic | `ToRadio` / `FromRadio` и mesh-пакеты |
+| Шифрование каналов | Bouncy Castle 1.86 | Проверка AES-CCM для MQTT-пакетов |
 | MeshCore KISS | Формат KISS + MeshCore `SetHardware` | Начальный обмен и сведения о модеме MeshCore KISS |
 | MeshCore Companion | Companion Protocol + BLE RX/TX или TCP/Serial без KISS-обёртки | Начальный обмен, сведения об устройстве, контакты, каналы, чаты и просмотр пакетов |
 | Транспорт | `TransportConnection` | Общий контракт для TCP, Serial, BLE и будущих способов подключения |

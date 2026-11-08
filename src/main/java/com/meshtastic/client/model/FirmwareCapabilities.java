@@ -22,6 +22,14 @@ public record FirmwareCapabilities(
         return new FirmwareCapabilities(Optional.empty(), false, false);
     }
 
+    public boolean reportsNodeAuthentication() {
+        return version.map(value -> value.isAtLeast(new FirmwareVersion(2, 8, 1))).orElse(false);
+    }
+
+    public boolean authenticatedChannels() {
+        return version.map(value -> value.isAtLeast(new FirmwareVersion(2, 8, 1))).orElse(false);
+    }
+
     public static FirmwareCapabilities fromMetadata(MeshProtos.DeviceMetadata metadata) {
         if (metadata == null) {
             return legacy();

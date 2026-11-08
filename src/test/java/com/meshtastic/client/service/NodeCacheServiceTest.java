@@ -493,4 +493,22 @@ class NodeCacheServiceTest {
         assertNotNull(actual);
         assertEquals(expected, actual, 0.001f);
     }
+    @Test
+    void authenticationFlagsSurviveCacheRestartAndRpcPreservesUnknownVersusFalse() {
+        NodeData node = new NodeData(0xcafebabe);
+        node.setXeddsaSigned(true);
+        node.setHeardOnCurrentLora(false);
+        service.update(node);
+        TestEnvironmentSupport.resetSingletons();
+        service = NodeCacheService.getInstance();
+        var restored = service.get("!cafebabe");
+        var json = com.meshtastic.client.protocol.rpc.RemoteNodeJson.nodeToJson(restored, false, false);
+        var remote = com.meshtastic.client.protocol.rpc.RemoteNodeJson.parseNode(json);
+        assertEquals(Boolean.TRUE, remote.getXeddsaSigned());
+        assertEquals(Boolean.FALSE, remote.getHeardOnCurrentLora());
+        var legacy = com.meshtastic.client.protocol.rpc.RemoteNodeJson.parseNode(new com.google.gson.JsonObject());
+        assertNull(legacy.getXeddsaSigned());
+        assertNull(legacy.getHeardOnCurrentLora());
+    }
+
 }

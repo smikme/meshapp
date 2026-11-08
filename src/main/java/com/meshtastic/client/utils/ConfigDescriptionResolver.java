@@ -43,10 +43,10 @@ public final class ConfigDescriptionResolver {
         "^\\s*enum\\s+([A-Za-z_][\\w]*)\\b.*\\{\\s*$"
     );
     private static final Pattern FIELD_PATTERN = Pattern.compile(
-        "^\\s*(?:repeated\\s+)?[A-Za-z_][\\w.]*\\s+([A-Za-z_][\\w]*)\\s*=\\s*\\d+\\b.*;"
+        "^\\s*(?:(?:repeated|optional)\\s+)?[A-Za-z_][\\w.]*\\s+([A-Za-z_][\\w]*)\\s*=\\s*\\d+\\b.*"
     );
     private static final Pattern ENUM_VALUE_PATTERN = Pattern.compile(
-        "^\\s*([A-Z][A-Z0-9_]*)\\s*=\\s*\\d+\\b.*;"
+        "^\\s*([A-Z][A-Z0-9_]*)\\s*=\\s*\\d+\\b.*"
     );
 
     private static volatile Map<String, String> protoDescriptions;

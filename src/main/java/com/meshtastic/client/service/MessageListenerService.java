@@ -155,6 +155,8 @@ public class MessageListenerService implements FromRadioListener {
                                        long receivedAtSeconds) {
         if (data.getPortnum() == Portnums.PortNum.TEXT_MESSAGE_APP) {
             handleTextMessage(packet, data, receivedAtSeconds);
+        } else if (data.getPortnum() == Portnums.PortNum.MESH_BEACON_APP) {
+            handleMeshBeacon(packet, data, receivedAtSeconds);
         } else if (data.getPortnum() == Portnums.PortNum.ROUTING_APP) {
             handleRoutingAck(packet, data);
         } else if (data.getPortnum() == Portnums.PortNum.NODEINFO_APP) {
@@ -194,6 +196,19 @@ public class MessageListenerService implements FromRadioListener {
         }
 
         processIncomingTextMessage(packet, data, isDirect, receivedAtSeconds);
+    }
+
+    private void handleMeshBeacon(MeshProtos.MeshPacket packet, MeshProtos.Data data, long receivedAtSeconds) {
+        try {
+            var beacon = org.meshtastic.proto.MeshBeaconProtos.MeshBeacon.parseFrom(data.getPayload());
+            String text = com.meshtastic.client.i18n.I18n.t("chat.beacon.message", beacon.getMessage());
+            MeshProtos.Data rendered = data.toBuilder()
+                    .setPayload(com.google.protobuf.ByteString.copyFromUtf8(text))
+                    .clearEmoji().clearReplyId().build();
+            handleTextMessage(packet, rendered, receivedAtSeconds);
+        } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+            log.warn("Failed to parse mesh beacon from !{}", Integer.toHexString(packet.getFrom()), e);
+        }
     }
 
     private void processIncomingTextMessage(MeshProtos.MeshPacket packet,
@@ -448,6 +463,11 @@ public class MessageListenerService implements FromRadioListener {
 
         try {
             MeshProtos.Routing routing = MeshProtos.Routing.parseFrom(data.getPayload());
+            if (packet.getAckProofStatus() == MeshProtos.MeshPacket.AckProofStatus.ACK_PROOF_INVALID) {
+                log.warn("Ignoring routing receipt with invalid proof for packet {} from !{}",
+                        requestId, Integer.toHexString(packet.getFrom()));
+                return;
+            }
             var pendingEntry = deviceState.getMessageStore().getPendingAcks().get(requestId);
             MeshMessage pending = pendingEntry != null ? pendingEntry.message() : null;
             if (pending != null) {
@@ -457,7 +477,8 @@ public class MessageListenerService implements FromRadioListener {
             boolean completedPacketAck = deviceState.completePendingPacketAck(requestId, routing.getErrorReason());
             MeshMessage.DeliveryStatus reactionStatus =
                     routing.getErrorReason() == MeshProtos.Routing.Error.NONE
-                            ? MeshMessage.DeliveryStatus.DELIVERED
+                            ? (packet.getAckProofStatus() == MeshProtos.MeshPacket.AckProofStatus.ACK_PROOF_VALID
+                                    ? MeshMessage.DeliveryStatus.VERIFIED : MeshMessage.DeliveryStatus.DELIVERED)
                             : MeshMessage.DeliveryStatus.FAILED;
             String reactionError = routing.getErrorReason() == MeshProtos.Routing.Error.NONE
                     ? null
@@ -503,7 +524,8 @@ public class MessageListenerService implements FromRadioListener {
 
         if (pending.isDirectMessage() && nodeIdMatchesNodeNum(pending.getToNodeId(), packet.getFrom())) {
             deviceState.resolvePendingAck(requestId);
-            pending.setStatus(MeshMessage.DeliveryStatus.CONFIRMED);
+            pending.setStatus(packet.getAckProofStatus() == MeshProtos.MeshPacket.AckProofStatus.ACK_PROOF_VALID
+                    ? MeshMessage.DeliveryStatus.VERIFIED : MeshMessage.DeliveryStatus.CONFIRMED);
             pending.setErrorReason(null);
             MessageDbService.getInstance().updateStatus(requestId, pending.getStatus(), null);
             fireMessageStatusChanged(pending);
@@ -653,6 +675,12 @@ public class MessageListenerService implements FromRadioListener {
         } else {
             node.setLastHeard((int) (System.currentTimeMillis() / 1000));
         }
+        if (deviceState.getFirmwareCapabilities().reportsNodeAuthentication() || nodeInfo.getHasXeddsaSigned()) {
+            node.setXeddsaSigned(nodeInfo.getHasXeddsaSigned());
+        }
+        if (deviceState.getFirmwareCapabilities().reportsNodeAuthentication() || nodeInfo.getHeardOnCurrentLora()) {
+            node.setHeardOnCurrentLora(nodeInfo.getHeardOnCurrentLora());
+        }
         if (nodeInfo.hasHopsAway()) {
             node.setHopsAway((int) nodeInfo.getHopsAway());
         }
@@ -787,6 +815,7 @@ public class MessageListenerService implements FromRadioListener {
                     applyAirQualityMetrics(telemetry.getAirQualityMetrics(), entry);
                     log.info("Received TELEMETRY_APP (airQuality) from !{}", Integer.toHexString(fromNum));
                 }
+                case SOIL_WATER_METRICS -> applySoilWaterMetrics(telemetry.getSoilWaterMetrics(), entry);
                 case POWER_METRICS -> {
                     applyPowerMetrics(telemetry.getPowerMetrics(), entry);
                     log.info("Received TELEMETRY_APP (power) from !{}", Integer.toHexString(fromNum));
@@ -896,12 +925,31 @@ public class MessageListenerService implements FromRadioListener {
         if (em.hasRainfall24H()) { entry.setRainfall24h(em.getRainfall24H()); }
         if (em.hasSoilMoisture()) { entry.setSoilMoisture(unsignedInt(em.getSoilMoisture())); }
         if (em.hasSoilTemperature()) { entry.setSoilTemperature(em.getSoilTemperature()); }
+        if (em.hasAdcVoltageCh0()) { entry.setAdcVoltageCh0(em.getAdcVoltageCh0()); }
+        if (em.hasAdcVoltageCh1()) { entry.setAdcVoltageCh1(em.getAdcVoltageCh1()); }
+        if (em.hasAdcVoltageCh2()) { entry.setAdcVoltageCh2(em.getAdcVoltageCh2()); }
+        if (em.hasAdcVoltageCh3()) { entry.setAdcVoltageCh3(em.getAdcVoltageCh3()); }
+        if (em.hasAdcVoltageCh4()) { entry.setAdcVoltageCh4(em.getAdcVoltageCh4()); }
+        if (em.hasAdcVoltageCh5()) { entry.setAdcVoltageCh5(em.getAdcVoltageCh5()); }
+        if (em.hasAdcVoltageCh6()) { entry.setAdcVoltageCh6(em.getAdcVoltageCh6()); }
+        if (em.hasAdcVoltageCh7()) { entry.setAdcVoltageCh7(em.getAdcVoltageCh7()); }
+        if (em.hasOneWireTemperatureCh0()) { entry.setOneWireTemperatureCh0(em.getOneWireTemperatureCh0()); }
+        if (em.hasOneWireTemperatureCh1()) { entry.setOneWireTemperatureCh1(em.getOneWireTemperatureCh1()); }
+        if (em.hasOneWireTemperatureCh2()) { entry.setOneWireTemperatureCh2(em.getOneWireTemperatureCh2()); }
+        if (em.hasOneWireTemperatureCh3()) { entry.setOneWireTemperatureCh3(em.getOneWireTemperatureCh3()); }
+        if (em.hasOneWireTemperatureCh4()) { entry.setOneWireTemperatureCh4(em.getOneWireTemperatureCh4()); }
+        if (em.hasOneWireTemperatureCh5()) { entry.setOneWireTemperatureCh5(em.getOneWireTemperatureCh5()); }
+        if (em.hasOneWireTemperatureCh6()) { entry.setOneWireTemperatureCh6(em.getOneWireTemperatureCh6()); }
+        if (em.hasOneWireTemperatureCh7()) { entry.setOneWireTemperatureCh7(em.getOneWireTemperatureCh7()); }
+        if (em.hasLightningStrikeCount1H()) { entry.setLightningStrikeCount1h(unsignedInt(em.getLightningStrikeCount1H())); }
+        if (em.hasLightningDistanceKm()) { entry.setLightningDistanceKm(em.getLightningDistanceKm()); }
         for (Float oneWireTemperature : em.getOneWireTemperatureList()) {
             entry.addOneWireTemperature(oneWireTemperature);
         }
     }
 
     private static void applyAirQualityMetrics(TelemetryProtos.AirQualityMetrics aq, TelemetryEntry entry) {
+        if (aq.hasPmStatusFlags()) { entry.setPmStatusFlags(unsignedInt(aq.getPmStatusFlags())); }
         if (aq.hasPm10Standard()) { entry.setPm10Standard(unsignedInt(aq.getPm10Standard())); }
         if (aq.hasPm25Standard()) { entry.setPm25Standard(unsignedInt(aq.getPm25Standard())); }
         if (aq.hasPm100Standard()) { entry.setPm100Standard(unsignedInt(aq.getPm100Standard())); }
@@ -927,6 +975,24 @@ public class MessageListenerService implements FromRadioListener {
         if (aq.hasPmVocIdx()) { entry.setPmVocIdx(aq.getPmVocIdx()); }
         if (aq.hasPmNoxIdx()) { entry.setPmNoxIdx(aq.getPmNoxIdx()); }
         if (aq.hasParticlesTps()) { entry.setParticlesTps(aq.getParticlesTps()); }
+    }
+
+    private static void applySoilWaterMetrics(TelemetryProtos.SoilWaterMetrics sw, TelemetryEntry entry) {
+        if (sw.hasSoilPh()) { entry.setSoilPh(sw.getSoilPh()); }
+        if (sw.hasPh()) { entry.setPh(sw.getPh()); }
+        if (sw.hasElectricalConductivity()) { entry.setElectricalConductivity(sw.getElectricalConductivity()); }
+        if (sw.hasSalinity()) { entry.setSalinity(sw.getSalinity()); }
+        if (sw.hasNitrogen()) { entry.setNitrogen(sw.getNitrogen()); }
+        if (sw.hasPhosphorus()) { entry.setPhosphorus(sw.getPhosphorus()); }
+        if (sw.hasPotassium()) { entry.setPotassium(sw.getPotassium()); }
+        if (sw.hasDissolvedOxygen()) { entry.setDissolvedOxygen(sw.getDissolvedOxygen()); }
+        if (sw.hasOrp()) { entry.setOrp(sw.getOrp()); }
+        if (sw.hasChemicalOxygenDemand()) { entry.setChemicalOxygenDemand(sw.getChemicalOxygenDemand()); }
+        if (sw.hasTurbidity()) { entry.setTurbidity(sw.getTurbidity()); }
+        if (sw.hasNitrate()) { entry.setNitrate(sw.getNitrate()); }
+        if (sw.hasAmmonium()) { entry.setAmmonium(sw.getAmmonium()); }
+        if (sw.hasBiochemicalOxygenDemand()) { entry.setBiochemicalOxygenDemand(sw.getBiochemicalOxygenDemand()); }
+        if (sw.hasSolarIrradiance()) { entry.setSolarIrradiance(sw.getSolarIrradiance()); }
     }
 
     private static void applyPowerMetrics(TelemetryProtos.PowerMetrics pm, TelemetryEntry entry) {

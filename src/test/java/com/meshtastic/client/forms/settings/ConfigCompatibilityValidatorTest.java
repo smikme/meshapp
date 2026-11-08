@@ -126,4 +126,21 @@ class ConfigCompatibilityValidatorTest {
                         .build())
                 .build();
     }
+    @Test
+    void beaconUsesReleasedUtf8LimitAndOneBasedFrequencySlots() {
+        DeviceState state = state("2.8.2.d5f1619", true);
+        try {
+            var beacon = ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.newBuilder()
+                    .setBroadcastMessage("я".repeat(30)).setBroadcastOfferFrequencySlot(1);
+            assertTrue(ConfigCompatibilityValidator.validate(state, changes(false, List.of(), List.of(
+                    ModuleConfigProtos.ModuleConfig.newBuilder().setMeshBeacon(beacon).build())), List.of()).isEmpty());
+            beacon.setBroadcastMessage("я".repeat(31));
+            assertTrue(ConfigCompatibilityValidator.validate(state, changes(false, List.of(), List.of(
+                    ModuleConfigProtos.ModuleConfig.newBuilder().setMeshBeacon(beacon).build())), List.of()).isPresent());
+            beacon.setBroadcastMessage("").setBroadcastOfferFrequencySlot(0);
+            assertTrue(ConfigCompatibilityValidator.validate(state, changes(false, List.of(), List.of(
+                    ModuleConfigProtos.ModuleConfig.newBuilder().setMeshBeacon(beacon).build())), List.of()).isPresent());
+        } finally { state.shutdown(); }
+    }
+
 }

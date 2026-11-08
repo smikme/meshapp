@@ -133,6 +133,12 @@ public final class RemoteNodeJson {
         if (object.has("licensed") && !object.get("licensed").isJsonNull()) {
             node.setLicensed(booleanField(object, "licensed"));
         }
+        if (object.has("xeddsaSigned") && !object.get("xeddsaSigned").isJsonNull()) {
+            node.setXeddsaSigned(booleanField(object, "xeddsaSigned"));
+        }
+        if (object.has("heardOnCurrentLora") && !object.get("heardOnCurrentLora").isJsonNull()) {
+            node.setHeardOnCurrentLora(booleanField(object, "heardOnCurrentLora"));
+        }
         return node;
     }
 
@@ -164,6 +170,9 @@ public final class RemoteNodeJson {
         object.addProperty("publicKey", node.getPublicKey() != null ? ENCODER.encodeToString(node.getPublicKey()) : "");
         object.addProperty("unmessagable", node.getUnmessagable());
         object.addProperty("licensed", node.getLicensed());
+        object.addProperty("xeddsaSigned", node.getXeddsaSigned());
+        object.addProperty("heardOnCurrentLora", node.getHeardOnCurrentLora());
+
         object.addProperty("favorite", favorite);
         object.addProperty("ignored", ignored);
         return object;

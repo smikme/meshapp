@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/>
-  <img src="https://img.shields.io/badge/JavaFX-25.0.3-blue?logo=java" alt="JavaFX"/>
+  <img src="https://img.shields.io/badge/JavaFX-27.0.1-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
@@ -194,6 +194,16 @@ After connecting, MeshApp performs the initial exchange with the device:
 For Meshtastic firmware 2.8.0 and newer, MeshApp supports the compact initial
 node database followed by background position and telemetry replay. Older
 firmware keeps the legacy connection flow.
+
+The bundled schemas are pinned to the released [Meshtastic 2.8.2 Alpha](https://github.com/meshtastic/firmware/releases/tag/v2.8.2.d5f1619), protobuf commit `8d0ed0c135f91ad1d6f9c60bc341277d64946bce`:
+
+- AES-CCM channel settings and authenticated MQTT packet decoding (firmware 2.8.1+).
+- A distinct verified delivery status for valid ACK proofs; invalid proofs cannot settle messages or requests. Legacy receipts retain their previous behavior.
+- Eight ADC and eight independent 1-Wire channels, lightning metrics, PM sensor status, and soil/water telemetry. Values survive database, RPC and Lua round trips; the dashboard shows sensor readings.
+- Mesh Beacon messages in chat, frequency-slot settings, a 60-byte UTF-8 message limit, and decoded offers in the packet monitor.
+- Node signature history, current-LoRa reception flags, new hardware identifiers and firmware metadata for settings compatibility.
+
+`scripts/update-protos.sh` downloads this release and applies `scripts/meshtastic-legacy-compat.patch` for older radios. It does not track upstream `master`. The database migration preserves existing history. LoRaWAN, waypoint and TAK payload schemas are available for inspection; this does not turn MeshApp into a LoRaWAN gateway or TAK client.
 
 ### MeshCore
 
@@ -452,8 +462,9 @@ If VisualVM shows `Provided Memory settings are invalid`, open memory profiler s
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Interface | JavaFX 25.0.3 + AtlantaFX | Main interface |
-| Meshtastic | Protobuf 4.33.4 + Meshtastic schemas | `ToRadio` / `FromRadio` and mesh packets |
+| Interface | JavaFX 27.0.1 + AtlantaFX | Main interface |
+| Meshtastic | Protobuf 4.36.2 + Meshtastic schemas | `ToRadio` / `FromRadio` and mesh packets |
+| Channel encryption | Bouncy Castle 1.86 | AES-CCM verification for MQTT packets |
 | MeshCore KISS | KISS format + MeshCore `SetHardware` | Initial exchange and MeshCore KISS modem information |
 | MeshCore Companion | Companion Protocol + BLE RX/TX or TCP/Serial without KISS wrapper | Initial exchange, device information, contacts, channels, chats, and packet viewing |
 | Transport | `TransportConnection` | Shared contract for TCP, Serial, BLE, and future connection methods |

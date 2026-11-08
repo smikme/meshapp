@@ -118,6 +118,7 @@ public class ChatInputBar extends VBox {
     private boolean inputEnabled = true;
     private long imageUploadGeneration;
     private boolean restoringProtectedImageText;
+    private java.util.function.IntSupplier authenticationOverhead = () -> 0;
 
     /**
      * @param onSend message-send callback carrying text and replyId
@@ -811,13 +812,18 @@ public class ChatInputBar extends VBox {
         return files.stream().filter(ChatInputBar::isSupportedImageFile).findFirst();
     }
 
+    public void setAuthenticationOverheadSupplier(java.util.function.IntSupplier supplier) {
+        authenticationOverhead = supplier != null ? supplier : () -> 0;
+        updateCharCount();
+    }
+
     /** Maximum text byte length after protobuf overhead and reply mode are accounted for. */
     private int getMaxTextBytes() {
         int overhead = PROTO_OVERHEAD;
         if (replyToMessage != null) {
             overhead += REPLY_ID_OVERHEAD;
         }
-        return DATA_PAYLOAD_LEN - overhead;
+        return Math.max(0, DATA_PAYLOAD_LEN - overhead - Math.max(0, authenticationOverhead.getAsInt()));
     }
 
     private void doSend() {
@@ -843,6 +849,10 @@ public class ChatInputBar extends VBox {
             return;
         }
 
+        if (textByteLength(text) > getMaxTextBytes()) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.messageTooLong", getMaxTextBytes()));
+            return;
+        }
         hideCommandSuggestions();
         int replyId = replyToMessage != null
                 ? replyToMessage.getPacketId() : 0;

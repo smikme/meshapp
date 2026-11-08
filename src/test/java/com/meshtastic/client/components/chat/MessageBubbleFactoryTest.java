@@ -276,4 +276,18 @@ class MessageBubbleFactoryTest {
         @Override public boolean isMessageSelectionModeActive() { return false; }
         @Override public boolean retryMessage(MeshMessage msg) { return false; }
     }
+    @Test
+    void verifiedReceiptHasDistinctLabelAndExplanation() throws Exception {
+        onFxThread(() -> {
+            Label label = new Label();
+            MessageBubbleFactory.updateStatusLabel(label, MeshMessage.DeliveryStatus.VERIFIED);
+            assertEquals("✓✓", label.getText());
+            assertNotNull(label.getTooltip());
+            MessageBubbleFactory.updateStatusLabel(label, MeshMessage.DeliveryStatus.DELIVERED);
+            assertEquals("✓", label.getText());
+            assertNull(label.getTooltip());
+            return null;
+        });
+    }
+
 }

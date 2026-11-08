@@ -1137,13 +1137,19 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private ChatInputBar createChatInputBar() {
-        return new ChatInputBar(
+        ChatInputBar input = new ChatInputBar(
                 this::sendChatMessage,
                 this::handleBotCommand,
                 this::suggestBotCommands,
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8),
                 this::showMeshFilesImage
         );
+        input.setAuthenticationOverheadSupplier(() ->
+                meshCoreCompanionRuntime == null && selectedChat != null
+                        && selectedChat.getType() == ChatItem.ChatType.CHANNEL
+                        ? com.meshtastic.client.utils.MeshtasticPayloadLimits.channelAuthenticationOverhead(
+                                state, selectedChat.getChannelIndex()) : 0);
+        return input;
     }
 
     /**

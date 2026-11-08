@@ -114,6 +114,10 @@ public final class CreateChannelDialog {
         pskRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(pskField, Priority.ALWAYS);
 
+        CheckBox aeadCheck = new CheckBox(I18n.t("chat.channel.aead"));
+        aeadCheck.setTooltip(new javafx.scene.control.Tooltip(I18n.t("chat.channel.aeadHelp")));
+        aeadCheck.setDisable(!state.getFirmwareCapabilities().authenticatedChannels());
+
         // Uplink / Downlink / Position
         CheckBox uplinkCheck = new CheckBox("Uplink");
         CheckBox downlinkCheck = new CheckBox("Downlink");
@@ -157,7 +161,7 @@ public final class CreateChannelDialog {
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
         panel.getChildren().addAll(title, sep, nameLabel, nameField, encLabel, pskRow,
-                uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
+                aeadCheck, uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
         // Create handling.
         createBtn.setOnAction(e -> {
@@ -175,13 +179,23 @@ public final class CreateChannelDialog {
             if (pskText.isEmpty()) {
                 psk = com.google.protobuf.ByteString.EMPTY;
             } else {
-                byte[] decoded = Base64.getDecoder().decode(pskText);
-                psk = com.google.protobuf.ByteString.copyFrom(decoded);
+                try {
+                    psk = com.google.protobuf.ByteString.copyFrom(Base64.getDecoder().decode(pskText));
+                } catch (IllegalArgumentException ex) {
+                    statusLabel.setText(I18n.t("chat.channel.invalidPsk"));
+                    return;
+                }
             }
 
             int slot = state.findFirstAvailableChannelSlot();
             if (slot < 0) {
                 statusLabel.setText(I18n.t("chat.channel.noFreeSlots"));
+                return;
+            }
+
+            if (aeadCheck.isSelected()
+                    && com.meshtastic.client.utils.MeshtasticChannelCrypto.resolvePsk(psk, ChannelProtos.Channel.Role.SECONDARY, state) == null) {
+                statusLabel.setText(I18n.t("chat.channel.aeadKeyRequired"));
                 return;
             }
 
@@ -192,7 +206,8 @@ public final class CreateChannelDialog {
                             .setPsk(psk)
                             .setId(ThreadLocalRandom.current().nextInt())
                             .setUplinkEnabled(uplinkCheck.isSelected())
-                            .setDownlinkEnabled(downlinkCheck.isSelected());
+                            .setDownlinkEnabled(downlinkCheck.isSelected())
+                            .setUseAead(aeadCheck.isSelected());
 
             if (positionCheck.isSelected()) {
                 int bits = PRECISION_BITS[(int) precisionSlider.getValue()];

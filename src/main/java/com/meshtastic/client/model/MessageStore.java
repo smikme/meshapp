@@ -450,6 +450,9 @@ public class MessageStore {
         if (current == MeshMessage.DeliveryStatus.SENDING) {
             return incoming != MeshMessage.DeliveryStatus.SENDING;
         }
+        if (incoming == MeshMessage.DeliveryStatus.VERIFIED) {
+            return true;
+        }
         if (current == MeshMessage.DeliveryStatus.DELIVERED) {
             return incoming == MeshMessage.DeliveryStatus.CONFIRMED;
         }

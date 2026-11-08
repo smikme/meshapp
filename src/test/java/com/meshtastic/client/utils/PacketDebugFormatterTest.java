@@ -391,4 +391,17 @@ class PacketDebugFormatterTest {
             appendLabels(sb, child, depth + 1);
         }
     }
+    @Test
+    void beaconAndAeadOffersAreDecodedInPacketTree() {
+        var beacon = org.meshtastic.proto.MeshBeaconProtos.MeshBeacon.newBuilder().setMessage("Beacon")
+                .setOfferFrequencySlot(5)
+                .setOfferChannel(org.meshtastic.proto.ChannelProtos.ChannelSettings.newBuilder().setUseAead(true)).build();
+        var packet = MeshProtos.MeshPacket.newBuilder()
+                .setDecoded(MeshProtos.Data.newBuilder().setPortnum(Portnums.PortNum.MESH_BEACON_APP)
+                        .setPayload(beacon.toByteString())).build();
+        var tree = PacketDebugFormatter.buildPacketTree(packet.toByteArray());
+        assertNotNull(findByPrefix(tree, "offer_frequency_slot:"));
+        assertNotNull(findByPrefix(tree, "use_aead:"));
+    }
+
 }

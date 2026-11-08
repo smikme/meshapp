@@ -21,6 +21,10 @@ import com.meshtastic.client.model.PacketTreeNode;
 import com.meshtastic.client.model.PacketLogEntry.Direction;
 import javafx.scene.control.TreeItem;
 import org.meshtastic.proto.AdminProtos;
+import org.meshtastic.proto.MeshBeaconProtos;
+import org.meshtastic.proto.LoRaWANBridgeProtos;
+import org.meshtastic.proto.StoreAndForwardProtos;
+import org.meshtastic.proto.ATAKProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.TelemetryProtos;
 
@@ -991,6 +995,10 @@ public final class PacketDebugFormatter {
             case TELEMETRY_APP -> describeTelemetryPayload(data);
             case TRACEROUTE_APP -> describeTraceroutePayload(data);
             case ADMIN_APP -> describeAdminPayload(data);
+            case MESH_BEACON_APP, LORAWAN_BRIDGE, STORE_FORWARD_APP, WAYPOINT_APP, ATAK_PLUGIN -> {
+                Message payload = tryParsePayload(data);
+                yield payload != null ? payload.toString().strip() : describeGenericPayload(packet, data);
+            }
             default -> describeGenericPayload(packet, data);
         };
     }
@@ -1065,7 +1073,7 @@ public final class PacketDebugFormatter {
                         + ", airUtil=" + stats.getAirUtilTx());
             }
             if (sb.isEmpty()) {
-                appendSegment(sb, "telemetry");
+                appendSegment(sb, telemetry.getVariantCase().name());
             }
             return sb.toString();
         } catch (InvalidProtocolBufferException e) {
@@ -1294,6 +1302,12 @@ public final class PacketDebugFormatter {
             case TELEMETRY_APP -> parseDecodedPayloadJson(() -> TelemetryProtos.Telemetry.parseFrom(data.getPayload()));
             case TRACEROUTE_APP -> parseDecodedPayloadJson(() -> MeshProtos.RouteDiscovery.parseFrom(data.getPayload()));
             case ADMIN_APP -> parseDecodedPayloadJson(() -> AdminProtos.AdminMessage.parseFrom(data.getPayload()));
+            case MESH_BEACON_APP -> parseDecodedPayloadJson(() -> MeshBeaconProtos.MeshBeacon.parseFrom(data.getPayload()));
+            case LORAWAN_BRIDGE -> parseDecodedPayloadJson(() -> LoRaWANBridgeProtos.LoRaWANBridge.parseFrom(data.getPayload()));
+            case STORE_FORWARD_APP -> parseDecodedPayloadJson(() -> StoreAndForwardProtos.StoreAndForward.parseFrom(data.getPayload()));
+            case WAYPOINT_APP -> parseDecodedPayloadJson(() -> MeshProtos.Waypoint.parseFrom(data.getPayload()));
+            case ATAK_PLUGIN -> parseDecodedPayloadJson(() -> ATAKProtos.TAKPacket.parseFrom(data.getPayload()));
+
             default -> {
                 if (data.getPayload().isEmpty()) {
                     yield new JsonPrimitive("");
@@ -1426,6 +1440,12 @@ public final class PacketDebugFormatter {
                 case TELEMETRY_APP -> TelemetryProtos.Telemetry.parseFrom(data.getPayload());
                 case TRACEROUTE_APP -> MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
                 case ADMIN_APP -> AdminProtos.AdminMessage.parseFrom(data.getPayload());
+                case MESH_BEACON_APP -> MeshBeaconProtos.MeshBeacon.parseFrom(data.getPayload());
+                case LORAWAN_BRIDGE -> LoRaWANBridgeProtos.LoRaWANBridge.parseFrom(data.getPayload());
+                case STORE_FORWARD_APP -> StoreAndForwardProtos.StoreAndForward.parseFrom(data.getPayload());
+                case WAYPOINT_APP -> MeshProtos.Waypoint.parseFrom(data.getPayload());
+                case ATAK_PLUGIN -> ATAKProtos.TAKPacket.parseFrom(data.getPayload());
+
                 default -> null;
             };
         } catch (InvalidProtocolBufferException e) {

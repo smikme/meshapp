@@ -147,7 +147,7 @@ message LocalModuleConfig {
   ModuleConfig.TAKConfig tak = 17;
 
   /*
-   * The part of the config specific to the MeshBeacon module.
+   * MeshBeacon Config
    */
   ModuleConfig.MeshBeaconConfig mesh_beacon = 18;
 

@@ -552,7 +552,7 @@ class MqttProxyServiceTest {
                 .setFrom(REMOTE_NODE_NUM)
                 .setTo(BROADCAST_NODE_NUM)
                 .setId(0x10203040)
-                .setChannel(0)
+                .setChannel(8)
                 .build();
         return packet.toBuilder()
                 .setEncrypted(ByteString.copyFrom(aesCtr(packet, DEFAULT_CHANNEL_KEY, decoded.toByteArray())))

@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/>
-  <img src="https://img.shields.io/badge/JavaFX-25.0.3-blue?logo=java" alt="JavaFX"/>
+  <img src="https://img.shields.io/badge/JavaFX-27.0.1-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Plattform"/>
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="Lizenz"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
@@ -195,6 +195,16 @@ Für Meshtastic-Firmware 2.8.0 und neuer unterstützt MeshApp die kompakte
 anfängliche Knotendatenbank mit anschließender Übertragung von Positionen und
 Telemetrie im Hintergrund. Ältere Firmware verwendet weiterhin den bisherigen
 Verbindungsablauf.
+
+Die Schemas sind auf die veröffentlichte [Meshtastic 2.8.2 Alpha](https://github.com/meshtastic/firmware/releases/tag/v2.8.2.d5f1619) festgelegt, Protobuf-Commit `8d0ed0c135f91ad1d6f9c60bc341277d64946bce`:
+
+- AES-CCM-Kanaleinstellungen und authentifizierte MQTT-Entschlüsselung (Firmware 2.8.1+).
+- Eigener Status für verifizierte Zustellnachweise. Ungültige ACK-Nachweise schließen Nachrichten und Anfragen nicht ab; bisherige Bestätigungen behalten ihr Verhalten.
+- Acht ADC- und acht getrennte 1-Wire-Kanäle, Blitzmesswerte, PM-Sensorstatus sowie Boden-/Wassertelemetrie in Datenbank, RPC, Lua und Telemetrieprotokoll.
+- Mesh-Beacon-Nachrichten im Chat, Frequenzslots, eine Grenze von 60 UTF-8-Bytes und dekodierte Angebote im Paketmonitor.
+- Signaturhistorie und Empfang mit aktuellen LoRa-Einstellungen, neue Hardwaremodelle und Firmware-Metadaten zur Einstellungskompatibilität.
+
+`scripts/update-protos.sh` lädt diesen Release und wendet `scripts/meshtastic-legacy-compat.patch` für ältere Geräte an. Das Skript folgt nicht `master`. Die Datenbankmigration erhält den Verlauf. LoRaWAN-, Wegpunkt- und TAK-Schemas dienen der Paketinspektion; Gateway- und TAK-Client-Funktionen werden dadurch nicht bereitgestellt.
 
 ### MeshCore
 
@@ -454,8 +464,9 @@ Wenn VisualVM `Provided Memory settings are invalid` anzeigt, öffnen Sie die Ei
 
 | Komponente | Technologie | Zweck |
 |-----------|------------|---------|
-| Oberfläche | JavaFX 25.0.3 + AtlantaFX | Hauptoberfläche |
-| Meshtastic | Protobuf 4.33.4 + Meshtastic-Schemas | `ToRadio` / `FromRadio` und Mesh-Pakete |
+| Oberfläche | JavaFX 27.0.1 + AtlantaFX | Hauptoberfläche |
+| Meshtastic | Protobuf 4.36.2 + Meshtastic-Schemas | `ToRadio` / `FromRadio` und Mesh-Pakete |
+| Kanalverschlüsselung | Bouncy Castle 1.86 | AES-CCM-Prüfung für MQTT-Pakete |
 | MeshCore KISS | KISS-Format + MeshCore `SetHardware` | Initialer Austausch und MeshCore-KISS-Modeminformationen |
 | MeshCore Companion | Companion Protocol + BLE RX/TX oder TCP/Serial ohne KISS-Wrapper | Initialer Austausch, Geräteinformationen, Kontakte, Kanäle, Chats und Paketansicht |
 | Transport | `TransportConnection` | Gemeinsamer Vertrag für TCP, Serial, BLE und künftige Verbindungsmethoden |

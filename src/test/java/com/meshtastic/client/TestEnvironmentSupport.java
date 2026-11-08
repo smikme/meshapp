@@ -64,8 +64,15 @@ public final class TestEnvironmentSupport {
         }
 
         setIfMissing("java.awt.headless", "true");
-        setIfMissing("glass.platform", "Monocle");
-        setIfMissing("monocle.platform", "Headless");
+        // Prefer JavaFX 26+ Headless; retain the Monocle setup for JVMs with older bundled JavaFX.
+        try {
+            Class.forName("com.sun.glass.ui.headless.HeadlessPlatformFactory", false,
+                    Platform.class.getClassLoader());
+            setIfMissing("glass.platform", "headless");
+        } catch (ClassNotFoundException e) {
+            setIfMissing("glass.platform", "Monocle");
+            setIfMissing("monocle.platform", "Headless");
+        }
         setIfMissing("prism.order", "sw");
         setIfMissing("testfx.robot", "glass");
         setIfMissing("testfx.headless", "true");

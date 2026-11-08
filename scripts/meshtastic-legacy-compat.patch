@@ -1,0 +1,73 @@
+--- a/meshtastic/mesh.proto
++++ b/meshtastic/mesh.proto
+@@ -219,6 +219,8 @@
+  * To match the old style filenames, _ is converted to -, p is converted to .
+  */
+ enum HardwareModel {
++  // MeshApp: retain pre-2.8 enum aliases for cached nodes and older radios.
++  option allow_alias = true;
+   /*
+    * TODO: REPLACE
+    */
+@@ -360,11 +362,13 @@
+    * Makerfabs Tracker Reserved
+    */
+   MAKERFABS_TRACKER = 27;
++  SENSELORA_RP2040 = 27 [deprecated = true];
+ 
+   /*
+    * Makerfabs Reserved
+    */
+   MAKERFABS_RESERVED = 28;
++  SENSELORA_S3 = 28 [deprecated = true];
+ 
+   /*
+    * Canary Radio Company - CanaryOne: https://canaryradio.io/products/canaryone
+@@ -881,6 +885,7 @@
+    * GPS, button, buzzer, and sensors.
+    */
+   MESH_TRACKER_X1 = 128 [(meshtastic.enum_value_metadata) = {oem_fixed_gps: true}];
++  TRACKER_T1000_E_PRO = 128 [deprecated = true];
+ 
+   /*
+    * Elecrow ThinkNode M7, M8 and M9
+--- a/meshtastic/config.proto
++++ b/meshtastic/config.proto
+@@ -999,6 +999,8 @@
+    */
+   message LoRaConfig {
+     enum RegionCode {
++      // MeshApp: preserve the pre-2.8 name for region 28.
++      option allow_alias = true;
+       /*
+        * Region is not set
+        */
+@@ -1146,6 +1148,7 @@
+        * ITU Region 2 Amateur Radio 2m band (144-148 MHz)
+        */
+       ITU2_2M = 28 [(meshtastic.enum_value_metadata) = {label: "ITU Region 2 / Amateur 2m"}];
++      ITU23_2M = 28 [deprecated = true];
+ 
+       /*
+        * EU 866MHz band (Band no. 47b of 2006/771/EC and subsequent amendments) for Non-specific short-range devices (SRD)
+--- a/meshtastic/module_config.proto
++++ b/meshtastic/module_config.proto
+@@ -428,8 +428,16 @@
+     // Tag 3 (position_precision_bits) was removed because precision is now derived
+     // from the channel's own position_precision ceiling.
+     // None of these tags ever shipped in a stable release.
+-    reserved 1, 2, 3, 5, 7, 10, 12, 13, 14;
+-    reserved "enabled", "position_dedup_enabled", "position_precision_bits", "nodeinfo_direct_response", "rate_limit_enabled", "drop_unknown_enabled", "exhaust_hop_telemetry", "exhaust_hop_position", "router_preserve_hops";
++    // MeshApp: reserved upstream, retained only to edit firmware older than 2.8.
++    bool enabled = 1 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool position_dedup_enabled = 2 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    uint32 position_precision_bits = 3 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool nodeinfo_direct_response = 5 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool rate_limit_enabled = 7 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool drop_unknown_enabled = 10 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool exhaust_hop_telemetry = 12 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool exhaust_hop_position = 13 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
++    bool router_preserve_hops = 14 [(meshtastic.field_metadata) = {deprecated_since: "2.8.0"}];
+ 
+     /*
+      * Minimum interval in seconds between position updates from the same node.

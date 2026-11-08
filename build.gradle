@@ -42,10 +42,10 @@ import java.time.ZoneOffset
 plugins {
 	id 'java'
 	id 'application'
-	id 'org.graalvm.buildtools.native' version '1.1.4'
-	id 'com.google.protobuf' version '0.10.0'
+	id 'org.graalvm.buildtools.native' version '1.1.18'
+	id 'com.google.protobuf' version '0.10.1'
 	id 'org.openjfx.javafxplugin' version '0.1.0'
-	id 'io.github.jwharm.flatpak-gradle-generator' version '1.7.0'
+	id 'io.github.jwharm.flatpak-gradle-generator' version '1.9.0'
 }
 
 // Versions can be overridden with -P...; defaults match CI and release builds.
@@ -57,7 +57,7 @@ def javaReleaseVersion = providers.gradleProperty('meshappJavaReleaseVersion')
 		.map { it.toString().trim().toInteger() }
 		.orElse(javaVersion)
 		.get()
-def javaFxVersion = '25.0.3'
+def javaFxVersion = '27.0.1'
 def javaFxPlatform = providers.gradleProperty('meshappJavaFxPlatform')
 		.map { it.toString().trim() }
 		.orElse('')
@@ -139,7 +139,7 @@ def baseRuntimeJvmArgs = {
 
 application {
 	mainClass = 'com.meshtastic.client.MeshAppLauncher'
-	// JavaFX 25 calls restricted native APIs and uses internal APIs for window integration.
+	// JavaFX calls restricted native APIs and uses internal APIs for window integration.
 	// These permissions must reach every generated start script and jpackage launcher.
 	def jvmArgs = baseRuntimeJvmArgs() + [
 //		'-Dprism.order=sw',
@@ -297,25 +297,28 @@ configurations.configureEach {
 
 dependencies {
 	// Runtime/application dependencies.
-	implementation 'com.google.protobuf:protobuf-java:4.33.4'
+	implementation 'com.google.protobuf:protobuf-java:4.36.2'
+	implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
 	implementation 'com.googlecode.lanterna:lanterna:3.1.5'
-	implementation 'com.miglayout:miglayout-javafx:11.4.2'
-	implementation 'ch.qos.logback:logback-classic:1.5.32'
-	implementation 'com.fazecast:jSerialComm:2.11.0'
-	implementation 'com.google.code.gson:gson:2.11.0'
+	implementation 'com.miglayout:miglayout-javafx:11.5.2'
+	implementation 'ch.qos.logback:logback-classic:1.6.6'
+	implementation 'com.fazecast:jSerialComm:2.11.4'
+	implementation 'com.google.code.gson:gson:2.15.0'
+	// H2 2.5.250/2.5.252 can lose committed data after crash recovery; wait for a fixed release.
+	// https://github.com/h2database/h2database/issues/4446
 	implementation 'com.h2database:h2:2.4.240'
 	implementation 'org.luaj:luaj-jse:3.0.1'
 	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
 	implementation 'software.coley:bento-fx:0.15.1'
-	implementation('io.github.mkpaz:atlantafx-base:2.1.0') {
+	implementation('io.github.mkpaz:atlantafx-base:3.0.0') {
 		// AtlantaFX publishes its own org.openjfx version, which can otherwise move
 		// the project to another JavaFX line through conflict resolution.
 		exclude group: 'org.openjfx'
 	}
-	implementation 'net.java.dev.jna:jna:5.16.0'
-	implementation 'net.java.dev.jna:jna-platform:5.16.0'
+	implementation 'net.java.dev.jna:jna:5.19.1'
+	implementation 'net.java.dev.jna:jna-platform:5.19.1'
 	implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
-	testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+	testImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
@@ -342,8 +345,8 @@ tasks.flatpakGradleGenerator {
 protobuf {
 	protoc {
 		artifact = protocClassifier.get()
-			? "com.google.protobuf:protoc:4.33.4:${protocClassifier.get()}@exe"
-			: 'com.google.protobuf:protoc:4.33.4'
+			? "com.google.protobuf:protoc:4.36.2:${protocClassifier.get()}@exe"
+			: 'com.google.protobuf:protoc:4.36.2'
 	}
 }
 
@@ -681,19 +684,28 @@ tasks.named('test') {
 		if (moduleProcess.exitValue() != 0) {
 			throw new GradleException("Failed to inspect test Java modules: ${modules.trim()}")
 		}
-		def nativeAccess = modules.readLines().any { it.startsWith('javafx.graphics@') }
+		def embeddedJavaFx = modules.readLines().any { it.startsWith('javafx.graphics@') }
+		def nativeAccess = embeddedJavaFx
 			? '--enable-native-access=javafx.graphics,ALL-UNNAMED'
 			: '--enable-native-access=ALL-UNNAMED'
-		setJvmArgs((getJvmArgs() ?: []).findAll {
+		def testJvmArgs = (getJvmArgs() ?: []).findAll {
 			!it.toString().startsWith('--enable-native-access=')
-		} + nativeAccess)
+		} + nativeAccess
+		if (embeddedJavaFx) {
+			// Native window tests need the same reflective access as the application launcher.
+			testJvmArgs += [
+				'--add-opens=javafx.graphics/javafx.stage=ALL-UNNAMED',
+				'--add-opens=javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
+				'--add-opens=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED'
+			]
+		}
+		setJvmArgs(testJvmArgs.unique())
 	}
 	if (org.gradle.internal.os.OperatingSystem.current().isLinux()
 			&& !System.getenv('DISPLAY')?.trim()
 			&& !System.getenv('WAYLAND_DISPLAY')?.trim()) {
 		systemProperty 'java.awt.headless', 'true'
-		systemProperty 'glass.platform', 'Monocle'
-		systemProperty 'monocle.platform', 'Headless'
+		// TestEnvironmentSupport selects the backend for the JavaFX actually loaded by the JVM.
 		systemProperty 'prism.order', 'sw'
 		systemProperty 'testfx.robot', 'glass'
 		systemProperty 'testfx.headless', 'true'

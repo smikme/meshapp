@@ -254,6 +254,15 @@ public final class NodeUtils {
         rows.add(new String[]{"\uD83D\uDD00", I18n.t("node.detail.hops"),
                 node.hasHopsAway() ? String.valueOf(node.getHopsAway()) : null});
 
+        if (node.getXeddsaSigned() != null) {
+            rows.add(new String[]{"", I18n.t("node.detail.xeddsaSigned"),
+                    I18n.t(node.getXeddsaSigned() ? "common.yes" : "common.no")});
+        }
+        if (node.getHeardOnCurrentLora() != null) {
+            rows.add(new String[]{"", I18n.t("node.detail.heardOnCurrentLora"),
+                    I18n.t(node.getHeardOnCurrentLora() ? "common.yes" : "common.no")});
+        }
+
         int level = node.getBatteryLevel();
         String battery = null;
         if (BatteryLevelEstimator.hasBatteryPercent(level, node.getVoltage())) {

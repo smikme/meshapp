@@ -300,6 +300,8 @@ public class MessageBubbleFactory {
             return;
         }
 
+        label.setTooltip(status == MeshMessage.DeliveryStatus.VERIFIED
+                ? new Tooltip(I18n.t("chat.delivery.verified")) : null);
         label.setText(null);
         label.setGraphic(null);
         label.setContentDisplay(ContentDisplay.TEXT_ONLY);
@@ -308,6 +310,10 @@ public class MessageBubbleFactory {
         switch (status) {
             case SENDING -> label.setText("⏳");
             case DELIVERED -> label.setText("✓");
+            case VERIFIED -> {
+                label.setText("✓✓");
+                label.getStyleClass().add("chat-bubble-status-ok");
+            }
             case CONFIRMED -> {
                 if (directMessage) {
                     label.setGraphic(createOkStatusIcon());

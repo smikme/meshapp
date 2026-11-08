@@ -70,6 +70,12 @@ public final class MessageService {
                 .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
         if (replyId != 0) { dataBuilder.setReplyId(replyId); }
         MeshProtos.Data data = dataBuilder.build();
+        int authenticationOverhead = com.meshtastic.client.utils.MeshtasticPayloadLimits
+                .channelAuthenticationOverhead(state, channelIndex);
+        if (authenticationOverhead > 0 && data.getSerializedSize() + authenticationOverhead > 233) {
+            throw new IllegalArgumentException(com.meshtastic.client.i18n.I18n.t(
+                    "chat.messageTooLong", 228 - authenticationOverhead - (replyId != 0 ? 5 : 0)));
+        }
 
         if (replyId != 0) {
             log.info("REPLY_DEBUG send channel: replyId={} (0x{}), payloadBytes={}",

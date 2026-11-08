@@ -158,10 +158,79 @@ public final class NodeCacheService {
             "rx_snr",
             "rx_rssi",
             "hop_start",
-            "hop_limit"
+            "hop_limit",
+            "adc_voltage_ch0",
+            "adc_voltage_ch1",
+            "adc_voltage_ch2",
+            "adc_voltage_ch3",
+            "adc_voltage_ch4",
+            "adc_voltage_ch5",
+            "adc_voltage_ch6",
+            "adc_voltage_ch7",
+            "one_wire_temperature_ch0",
+            "one_wire_temperature_ch1",
+            "one_wire_temperature_ch2",
+            "one_wire_temperature_ch3",
+            "one_wire_temperature_ch4",
+            "one_wire_temperature_ch5",
+            "one_wire_temperature_ch6",
+            "one_wire_temperature_ch7",
+            "lightning_strike_count_1h",
+            "lightning_distance_km",
+            "pm_status_flags",
+            "soil_ph",
+            "ph",
+            "electrical_conductivity",
+            "salinity",
+            "nitrogen",
+            "phosphorus",
+            "potassium",
+            "dissolved_oxygen",
+            "orp",
+            "chemical_oxygen_demand",
+            "turbidity",
+            "nitrate",
+            "ammonium",
+            "biochemical_oxygen_demand",
+            "solar_irradiance"
     };
 
     private static final String[][] EXTENDED_TELEMETRY_COLUMNS = {
+            {"adc_voltage_ch0", "adc_voltage_ch0 REAL"},
+            {"adc_voltage_ch1", "adc_voltage_ch1 REAL"},
+            {"adc_voltage_ch2", "adc_voltage_ch2 REAL"},
+            {"adc_voltage_ch3", "adc_voltage_ch3 REAL"},
+            {"adc_voltage_ch4", "adc_voltage_ch4 REAL"},
+            {"adc_voltage_ch5", "adc_voltage_ch5 REAL"},
+            {"adc_voltage_ch6", "adc_voltage_ch6 REAL"},
+            {"adc_voltage_ch7", "adc_voltage_ch7 REAL"},
+            {"one_wire_temperature_ch0", "one_wire_temperature_ch0 REAL"},
+            {"one_wire_temperature_ch1", "one_wire_temperature_ch1 REAL"},
+            {"one_wire_temperature_ch2", "one_wire_temperature_ch2 REAL"},
+            {"one_wire_temperature_ch3", "one_wire_temperature_ch3 REAL"},
+            {"one_wire_temperature_ch4", "one_wire_temperature_ch4 REAL"},
+            {"one_wire_temperature_ch5", "one_wire_temperature_ch5 REAL"},
+            {"one_wire_temperature_ch6", "one_wire_temperature_ch6 REAL"},
+            {"one_wire_temperature_ch7", "one_wire_temperature_ch7 REAL"},
+            {"lightning_strike_count_1h", "lightning_strike_count_1h BIGINT"},
+            {"lightning_distance_km", "lightning_distance_km REAL"},
+            {"pm_status_flags", "pm_status_flags BIGINT"},
+            {"soil_ph", "soil_ph REAL"},
+            {"ph", "ph REAL"},
+            {"electrical_conductivity", "electrical_conductivity REAL"},
+            {"salinity", "salinity REAL"},
+            {"nitrogen", "nitrogen REAL"},
+            {"phosphorus", "phosphorus REAL"},
+            {"potassium", "potassium REAL"},
+            {"dissolved_oxygen", "dissolved_oxygen REAL"},
+            {"orp", "orp REAL"},
+            {"chemical_oxygen_demand", "chemical_oxygen_demand REAL"},
+            {"turbidity", "turbidity REAL"},
+            {"nitrate", "nitrate REAL"},
+            {"ammonium", "ammonium REAL"},
+            {"biochemical_oxygen_demand", "biochemical_oxygen_demand REAL"},
+            {"solar_irradiance", "solar_irradiance REAL"},
+
             {"packet_id", "packet_id BIGINT DEFAULT 0"},
             {"telemetry_variant", "telemetry_variant VARCHAR(40)"},
             {"device_uptime_seconds", "device_uptime_seconds BIGINT"},
@@ -502,6 +571,9 @@ public final class NodeCacheService {
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
                 // Migration: public_key column in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN public_key VARBINARY"); } catch (SQLException ignored) {}
+                stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS xeddsa_signed BOOLEAN");
+                stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS heard_on_current_lora BOOLEAN");
+
                 // Migration: is_unmessagable flag in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN unmessagable BOOLEAN"); } catch (SQLException ignored) {}
                 // Migration: ignored column (v5 migration may not have run on fresh-install DBs)
@@ -530,8 +602,8 @@ public final class NodeCacheService {
             mergeStmt = dbConnection.prepareStatement("""
                 MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
-                                  battery_level, externally_powered, voltage, hops_away, channel, public_key, unmessagable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  battery_level, externally_powered, voltage, hops_away, channel, public_key, unmessagable, xeddsa_signed, heard_on_current_lora)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement(telemetryInsertSql(), Statement.RETURN_GENERATED_KEYS);
@@ -715,7 +787,8 @@ public final class NodeCacheService {
                 || node.getHwModel() == null
                 || node.getPublicKey() == null
                 || node.getPublicKey().length == 0
-                || node.getUnmessagable() == null;
+                || node.getUnmessagable() == null
+                || node.getXeddsaSigned() == null;
         if (!needsIdentity) { return; }
 
         String nodeId = node.getNodeId();
@@ -743,6 +816,7 @@ public final class NodeCacheService {
         if (node.getUnmessagable() == null && cached.getUnmessagable() != null) {
             node.setUnmessagable(cached.getUnmessagable());
         }
+        if (node.getXeddsaSigned() == null) { node.setXeddsaSigned(cached.getXeddsaSigned()); }
     }
 
     /**
@@ -1447,6 +1521,41 @@ public final class NodeCacheService {
         e.setRxRssi(rs.getInt("rx_rssi"));
         e.setHopStart(rs.getInt("hop_start"));
         e.setHopLimit(rs.getInt("hop_limit"));
+        e.setAdcVoltageCh0(nullableFloat(rs, "adc_voltage_ch0"));
+        e.setAdcVoltageCh1(nullableFloat(rs, "adc_voltage_ch1"));
+        e.setAdcVoltageCh2(nullableFloat(rs, "adc_voltage_ch2"));
+        e.setAdcVoltageCh3(nullableFloat(rs, "adc_voltage_ch3"));
+        e.setAdcVoltageCh4(nullableFloat(rs, "adc_voltage_ch4"));
+        e.setAdcVoltageCh5(nullableFloat(rs, "adc_voltage_ch5"));
+        e.setAdcVoltageCh6(nullableFloat(rs, "adc_voltage_ch6"));
+        e.setAdcVoltageCh7(nullableFloat(rs, "adc_voltage_ch7"));
+        e.setOneWireTemperatureCh0(nullableFloat(rs, "one_wire_temperature_ch0"));
+        e.setOneWireTemperatureCh1(nullableFloat(rs, "one_wire_temperature_ch1"));
+        e.setOneWireTemperatureCh2(nullableFloat(rs, "one_wire_temperature_ch2"));
+        e.setOneWireTemperatureCh3(nullableFloat(rs, "one_wire_temperature_ch3"));
+        e.setOneWireTemperatureCh4(nullableFloat(rs, "one_wire_temperature_ch4"));
+        e.setOneWireTemperatureCh5(nullableFloat(rs, "one_wire_temperature_ch5"));
+        e.setOneWireTemperatureCh6(nullableFloat(rs, "one_wire_temperature_ch6"));
+        e.setOneWireTemperatureCh7(nullableFloat(rs, "one_wire_temperature_ch7"));
+        e.setLightningStrikeCount1h(nullableLong(rs, "lightning_strike_count_1h"));
+        e.setLightningDistanceKm(nullableFloat(rs, "lightning_distance_km"));
+        e.setPmStatusFlags(nullableLong(rs, "pm_status_flags"));
+        e.setSoilPh(nullableFloat(rs, "soil_ph"));
+        e.setPh(nullableFloat(rs, "ph"));
+        e.setElectricalConductivity(nullableFloat(rs, "electrical_conductivity"));
+        e.setSalinity(nullableFloat(rs, "salinity"));
+        e.setNitrogen(nullableFloat(rs, "nitrogen"));
+        e.setPhosphorus(nullableFloat(rs, "phosphorus"));
+        e.setPotassium(nullableFloat(rs, "potassium"));
+        e.setDissolvedOxygen(nullableFloat(rs, "dissolved_oxygen"));
+        e.setOrp(nullableFloat(rs, "orp"));
+        e.setChemicalOxygenDemand(nullableFloat(rs, "chemical_oxygen_demand"));
+        e.setTurbidity(nullableFloat(rs, "turbidity"));
+        e.setNitrate(nullableFloat(rs, "nitrate"));
+        e.setAmmonium(nullableFloat(rs, "ammonium"));
+        e.setBiochemicalOxygenDemand(nullableFloat(rs, "biochemical_oxygen_demand"));
+        e.setSolarIrradiance(nullableFloat(rs, "solar_irradiance"));
+
         loadOneWireTemperatures(telemetryId, e);
         return e;
     }
@@ -1700,6 +1809,8 @@ public final class NodeCacheService {
         if (src.getUnmessagable() != null) {
             dst.setUnmessagable(src.getUnmessagable());
         }
+        if (src.getXeddsaSigned() != null) { dst.setXeddsaSigned(src.getXeddsaSigned()); }
+        if (src.getHeardOnCurrentLora() != null) { dst.setHeardOnCurrentLora(src.getHeardOnCurrentLora()); }
 
     }
 
@@ -1874,6 +1985,8 @@ public final class NodeCacheService {
         } else {
             ps.setNull(18, Types.BOOLEAN);
         }
+        ps.setObject(19, n.getXeddsaSigned(), Types.BOOLEAN);
+        ps.setObject(20, n.getHeardOnCurrentLora(), Types.BOOLEAN);
     }
 
     private static void bindTelemetry(PreparedStatement ps, TelemetryEntry entry, String ownerNodeId) throws SQLException {
@@ -1988,6 +2101,40 @@ public final class NodeCacheService {
         ps.setInt(i++, entry.getRxRssi());
         ps.setInt(i++, entry.getHopStart());
         ps.setInt(i++, entry.getHopLimit());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh0());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh1());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh2());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh3());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh4());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh5());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh6());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh7());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh0());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh1());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh2());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh3());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh4());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh5());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh6());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh7());
+        setNullableLong(ps, i++, entry.getLightningStrikeCount1h());
+        setNullableFloat(ps, i++, entry.getLightningDistanceKm());
+        setNullableLong(ps, i++, entry.getPmStatusFlags());
+        setNullableFloat(ps, i++, entry.getSoilPh());
+        setNullableFloat(ps, i++, entry.getPh());
+        setNullableFloat(ps, i++, entry.getElectricalConductivity());
+        setNullableFloat(ps, i++, entry.getSalinity());
+        setNullableFloat(ps, i++, entry.getNitrogen());
+        setNullableFloat(ps, i++, entry.getPhosphorus());
+        setNullableFloat(ps, i++, entry.getPotassium());
+        setNullableFloat(ps, i++, entry.getDissolvedOxygen());
+        setNullableFloat(ps, i++, entry.getOrp());
+        setNullableFloat(ps, i++, entry.getChemicalOxygenDemand());
+        setNullableFloat(ps, i++, entry.getTurbidity());
+        setNullableFloat(ps, i++, entry.getNitrate());
+        setNullableFloat(ps, i++, entry.getAmmonium());
+        setNullableFloat(ps, i++, entry.getBiochemicalOxygenDemand());
+        setNullableFloat(ps, i++, entry.getSolarIrradiance());
         if (i != TELEMETRY_HISTORY_COLUMNS.length + 1) {
             throw new SQLException("Telemetry bind count mismatch: expected "
                     + TELEMETRY_HISTORY_COLUMNS.length + ", bound " + (i - 1));
@@ -2128,6 +2275,8 @@ public final class NodeCacheService {
         if (!rs.wasNull()) {
             node.setUnmessagable(unmessagable);
         }
+        node.setXeddsaSigned(rs.getObject("xeddsa_signed", Boolean.class));
+        node.setHeardOnCurrentLora(rs.getObject("heard_on_current_lora", Boolean.class));
         return node;
     }
 

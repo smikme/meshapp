@@ -123,6 +123,11 @@ public final class ChannelPropertiesDialog {
         pskRow.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(pskField, Priority.ALWAYS);
 
+        CheckBox aeadCheck = new CheckBox(I18n.t("chat.channel.aead"));
+        aeadCheck.setTooltip(new javafx.scene.control.Tooltip(I18n.t("chat.channel.aeadHelp")));
+        aeadCheck.setDisable(!state.getFirmwareCapabilities().authenticatedChannels());
+        aeadCheck.setSelected(currentSettings.getUseAead());
+
         // Uplink / Downlink / Position
         CheckBox uplinkCheck = new CheckBox("Uplink");
         uplinkCheck.setSelected(currentSettings.getUplinkEnabled());
@@ -183,7 +188,7 @@ public final class ChannelPropertiesDialog {
         btnRow.setPadding(new Insets(10, 0, 0, 0));
 
         panel.getChildren().addAll(title, sep, nameLabel, nameField, encLabel, pskRow,
-                uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
+                aeadCheck, uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
         // Save handling.
         saveBtn.setOnAction(e -> {
@@ -206,29 +211,36 @@ public final class ChannelPropertiesDialog {
                 }
             }
 
+            if (aeadCheck.isSelected()
+                    && com.meshtastic.client.utils.MeshtasticChannelCrypto.resolvePsk(psk, currentChannel.getRole(), state) == null) {
+                statusLabel.setText(I18n.t("chat.channel.aeadKeyRequired"));
+                return;
+            }
+
             // Build the Channel protobuf while preserving the current id and role.
             ChannelProtos.ChannelSettings.Builder settingsBuilder =
-                    ChannelProtos.ChannelSettings.newBuilder()
+                    currentSettings.toBuilder()
                             .setName(channelName)
                             .setPsk(psk)
                             .setId(currentSettings.getId())
                             .setUplinkEnabled(uplinkCheck.isSelected())
-                            .setDownlinkEnabled(downlinkCheck.isSelected());
+                            .setDownlinkEnabled(downlinkCheck.isSelected())
+                            .setUseAead(aeadCheck.isSelected());
 
             if (positionCheck.isSelected()) {
                 int bits = PRECISION_BITS[(int) precisionSlider.getValue()];
                 settingsBuilder.setModuleSettings(
-                        ChannelProtos.ModuleSettings.newBuilder()
+                        currentSettings.getModuleSettings().toBuilder()
                                 .setPositionPrecision(bits)
                                 .build());
             } else {
                 settingsBuilder.setModuleSettings(
-                        ChannelProtos.ModuleSettings.newBuilder()
+                        currentSettings.getModuleSettings().toBuilder()
                                 .setPositionPrecision(0)
                                 .build());
             }
 
-            ChannelProtos.Channel channel = ChannelProtos.Channel.newBuilder()
+            ChannelProtos.Channel channel = currentChannel.toBuilder()
                     .setIndex(channelIndex)
                     .setSettings(settingsBuilder.build())
                     .setRole(currentChannel.getRole())
