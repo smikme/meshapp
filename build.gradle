@@ -312,6 +312,8 @@ configurations.configureEach {
 }
 
 dependencies {
+	implementation 'io.nayuki:qrcodegen:1.8.0' // Local MeshCore sharing QR codes; no network service.
+
 	// Runtime/application dependencies.
 	implementation 'com.google.protobuf:protobuf-java:4.36.2'
 	implementation 'org.bouncycastle:bcprov-jdk18on:1.86'

@@ -205,40 +205,22 @@ The bundled schemas are pinned to the released [Meshtastic 2.8.2 Alpha](https://
 
 ### MeshCore
 
-MeshCore is supported in two variants:
+Choose `MeshCore Companion` for chats and device management over BLE, TCP or
+USB/Serial. TCP/Serial uses official length-prefixed frames (`3C` host → radio,
+`3E` radio → host); BLE carries one raw payload per GATT operation.
 
-- `MeshCore KISS` works over TCP or Serial / USB.
-- `MeshCore Companion` works over BLE, TCP, or Serial / USB.
+Companion supports persistent channel/DM history, ACK tracking and retry, editable
+radio settings, contacts, channels, sharing links/QR and advanced diagnostic/RPC
+operations. KISS is a separate modem mode with radio/power settings, raw DATA and
+TxDone; it does not provide Companion chats.
 
-MeshCore Companion does not use the KISS format. For BLE it uses:
+The implementation targets official Companion protocol 14. Software tests pass;
+physical-radio acceptance and some advanced-operation fixtures are still pending.
+Existing custom raw-stream bridges must adopt official framing.
 
-- service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
-- TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
+Details: [support and limitations](docs/meshcore-support.md),
+[capability matrix](docs/meshcore-capabilities.md), [API](docs/meshcore-api.md).
 
-When connecting over TCP or Serial, the device must send Companion packets without an additional KISS wrapper.
-
-Currently supported:
-
-- KISS format (`FEND`, `FESC`, and escape sequences) for TCP and Serial
-- reading device information through MeshCore `SetHardware`: name, version, identifier, LoRa parameters, TX power, battery, statistics, RSSI/SNR data, and TX status
-- MeshCore Companion BLE profile with RX/TX UUIDs, subscription to TX notifications, and `APP_START`
-- `FrameFormat.MESHCORE_COMPANION` for Companion packets over TCP and Serial
-- information about the local device, public key, device data, battery, and storage
-- contacts and channel information in the shared nodes and chat screens
-- incoming and outgoing channel messages and direct messages through Companion Protocol
-- viewing MeshCore information in settings without editing
-- MeshCore Companion packets in LoRa Debug
-- active protocol display in the connection card
-
-Limitations:
-
-- MeshCore KISS works only over TCP and Serial.
-- MeshCore Companion over TCP/Serial works only with devices that send Companion packets without a KISS wrapper.
-- MeshCore KISS is currently used for modem mode and reading device information; chats, direct messages, and the main user workflows are implemented through MeshCore Companion.
-- MeshCore Companion does not include functions that belong only to Meshtastic: saving settings through Admin protobuf, reactions, route checks, and Meshtastic bot commands.
-
-Details: [docs/meshcore-support.md](docs/meshcore-support.md).
 
 ---
 

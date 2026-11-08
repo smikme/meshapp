@@ -373,6 +373,10 @@ public final class RemoteRpcHostService {
                     ConnectionManager.getInstance().setSelectedConnectionId(id);
                     return CompletableFuture.completedFuture(connectionActionResult(id));
                 })
+                .register("meshcore.status", (params, context) -> CompletableFuture.completedFuture(
+                        com.meshtastic.client.protocol.meshcore.MeshCoreRpc.status(requireMeshCoreRuntime())))
+                .register("meshcore.execute", (params, context) ->
+                        com.meshtastic.client.protocol.meshcore.MeshCoreRpc.execute(requireMeshCoreRuntime(), params).thenApply(value -> (JsonElement) value))
                 .register("chat.list", (params, context) ->
                         CompletableFuture.completedFuture(chatList()))
                 .register("chat.messages", (params, context) ->
@@ -2068,6 +2072,12 @@ public final class RemoteRpcHostService {
 
     private static String nodeIdFromNum(int nodeNum) {
         return String.format("!%08x", nodeNum);
+    }
+
+    private MeshCoreCompanionProtocolRuntime requireMeshCoreRuntime() {
+        var runtime=activeHostConnection().meshCoreRuntime();
+        if(runtime==null)throw new IllegalStateException("Selected connection is not MeshCore Companion");
+        return runtime;
     }
 
     private ActiveHostConnection activeHostConnection() {

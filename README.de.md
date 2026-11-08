@@ -206,40 +206,21 @@ Die Schemas sind auf die veröffentlichte [Meshtastic 2.8.2 Alpha](https://githu
 
 ### MeshCore
 
-MeshCore wird in zwei Varianten unterstützt:
+Für Chats und Geräteverwaltung `MeshCore Companion` über BLE, TCP oder USB/Serial
+wählen. TCP/Serial verwendet das offizielle Framing mit Länge (`3C` zum Funkgerät,
+`3E` vom Funkgerät); BLE überträgt einen Payload je GATT-Operation.
 
-- `MeshCore KISS` funktioniert über TCP oder Serial / USB.
-- `MeshCore Companion` funktioniert über BLE, TCP oder Serial / USB.
+Companion bietet Kanal-/DM-Verlauf, ACK-Zuordnung und Wiederholung, bearbeitbare
+Radio-/Kontakt-/Kanaleinstellungen, Links/QR und Diagnose-/RPC-Operationen. KISS ist
+ein eigener Modemmodus mit Radio/Leistung, Raw DATA und TxDone, ohne Companion-Chats.
 
-MeshCore Companion verwendet kein KISS-Format. Für BLE nutzt es:
+Ziel ist das offizielle Companion-Protokoll 14. Softwaretests bestehen; Prüfungen
+mit Funkgeräten und unabhängige Fixtures einiger erweiterter Operationen fehlen
+noch. Alte ungerahmte Bridges müssen auf offizielles Framing umgestellt werden.
 
-- service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
-- TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
+Details: [Unterstützung und Grenzen](docs/meshcore-support.de.md),
+[Fähigkeitsmatrix](docs/meshcore-capabilities.md), [API](docs/meshcore-api.md).
 
-Bei Verbindungen über TCP oder Serial muss das Gerät Companion-Pakete ohne zusätzlichen KISS-Wrapper senden.
-
-Derzeit unterstützt:
-
-- KISS-Format (`FEND`, `FESC` und Escape-Sequenzen) für TCP und Serial
-- Lesen von Geräteinformationen über MeshCore `SetHardware`: Name, Version, Kennung, LoRa-Parameter, TX-Leistung, Akku, Statistiken, RSSI/SNR-Daten und TX-Status
-- MeshCore-Companion-BLE-Profil mit RX/TX-UUIDs, Abonnement von TX-Benachrichtigungen und `APP_START`
-- `FrameFormat.MESHCORE_COMPANION` für Companion-Pakete über TCP und Serial
-- Informationen über lokales Gerät, öffentlichen Schlüssel, Gerätedaten, Akku und Speicher
-- Kontakte und Kanalinformationen in den gemeinsamen Knoten- und Chat-Bildschirmen
-- eingehende und ausgehende Kanalnachrichten und Direktnachrichten über das Companion Protocol
-- Anzeige von MeshCore-Informationen in den Einstellungen ohne Bearbeitung
-- MeshCore-Companion-Pakete in LoRa Debug
-- Anzeige des aktiven Protokolls in der Verbindungskarte
-
-Einschränkungen:
-
-- MeshCore KISS funktioniert nur über TCP und Serial.
-- MeshCore Companion über TCP/Serial funktioniert nur mit Geräten, die Companion-Pakete ohne KISS-Wrapper senden.
-- MeshCore KISS wird derzeit für Modembetrieb und das Lesen von Geräteinformationen genutzt; Chats, Direktnachrichten und die wichtigsten Benutzerabläufe sind über MeshCore Companion umgesetzt.
-- MeshCore Companion enthält keine Funktionen, die nur zu Meshtastic gehören: Speichern von Einstellungen über Admin-Protobuf, Reaktionen, Routenprüfungen und Meshtastic-Botbefehle.
-
-Details: [docs/meshcore-support.de.md](docs/meshcore-support.de.md).
 
 ---
 

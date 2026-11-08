@@ -1,63 +1,98 @@
 package com.meshtastic.client.connection;
 
-import com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames;
+import static org.junit.jupiter.api.Assertions.*;
+
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-/**
- * @author Konstantin A. Smirnov (ks@privatepractice.app)
- */
 class MeshCoreCompanionFrameParserTest {
-
     @Test
-    void flushesVariableSelfInfoPacketOnSilence() {
-        MeshCoreCompanionFrameParser parser = new MeshCoreCompanionFrameParser();
-        byte[] packet = selfInfo("meshcore-stream");
-
-        byte[] emitted = null;
-        for (byte b : packet) {
-            emitted = parser.processByte(b);
+    void officialHeaderAndBackToBackPacketsNeedNoSilence() {
+        byte[] wire = {
+            0x3e,
+            5,
+            0,
+            2,
+            1,
+            0,
+            0,
+            0,
+            0x3e,
+            9,
+            0,
+            (byte) 0x82,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            0,
+            0,
+            0x3e,
+            5,
+            0,
+            4,
+            1,
+            0,
+            0,
+            0
+        };
+        for (int split = 0; split <= wire.length; split++) {
+            var p = new MeshCoreCompanionFrameParser();
+            var out = new ArrayList<byte[]>();
+            feed(p, Arrays.copyOfRange(wire, 0, split), out);
+            assertNull(p.flushPartialFrame());
+            feed(p, Arrays.copyOfRange(wire, split, wire.length), out);
+            assertEquals(List.of(5, 9, 5), out.stream().map(b -> b.length).toList());
+            assertFalse(p.hasPartialFrame());
+            assertArrayEquals(new byte[] {(byte) 0x82, 1, 2, 3, 4, 5, 6, 0, 0}, out.get(1));
         }
-
-        assertNull(emitted);
-        assertTrue(parser.hasPartialFrame());
-        assertArrayEquals(packet, parser.flushPartialFrame());
-        assertFalse(parser.hasPartialFrame());
     }
 
     @Test
-    void emitsFixedDeviceInfoPacketImmediately() {
-        MeshCoreCompanionFrameParser parser = new MeshCoreCompanionFrameParser();
-        byte[] packet = new byte[80];
-        packet[0] = (byte) MeshCoreCompanionFrames.PACKET_DEVICE_INFO;
-        packet[1] = 3;
-
-        byte[] emitted = null;
-        for (byte b : packet) {
-            emitted = parser.processByte(b);
-        }
-
-        assertArrayEquals(packet, emitted);
-        assertFalse(parser.hasPartialFrame());
+    void unknownPayloadDoesNotChangeFraming() {
+        var p = new MeshCoreCompanionFrameParser();
+        var out = new ArrayList<byte[]>();
+        feed(p, new byte[] {0x3e, 3, 0, (byte) 0xfe, 0x3e, 0, 0x3e, 1, 0, 10}, out);
+        assertEquals(2, out.size());
+        assertArrayEquals(new byte[] {(byte) 0xfe, 0x3e, 0}, out.getFirst());
     }
 
-    private static byte[] selfInfo(String name) {
-        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
-        byte[] packet = new byte[58 + nameBytes.length];
-        packet[0] = (byte) MeshCoreCompanionFrames.PACKET_SELF_INFO;
-        packet[1] = 1;
-        packet[2] = 10;
-        packet[3] = 20;
-        for (int i = 0; i < 32; i++) {
-            packet[4 + i] = (byte) i;
+    @Test
+    void noiseInvalidLengthAndTimedOutPartialRecover() {
+        var now = new AtomicLong();
+        var p = new MeshCoreCompanionFrameParser(now::get);
+        var out = new ArrayList<byte[]>();
+        feed(
+                p,
+                new byte[] {0x55, 0x66, 0x3e, 0, 0, 0x3e, (byte) 255, (byte) 255, 0x3e, 4, 0, 2},
+                out);
+        assertTrue(p.hasPartialFrame());
+        now.set(5001);
+        assertNull(p.flushPartialFrame());
+        assertFalse(p.hasPartialFrame());
+        feed(p, new byte[] {0x3e, 1, 0, 10}, out);
+        assertEquals(1, out.size());
+        assertArrayEquals(new byte[] {10}, out.getFirst());
+    }
+
+    @Test
+    void outgoingUsesHostDirectionAndLittleEndianLength() {
+        assertArrayEquals(
+                new byte[] {0x3c, 2, 0, 0x16, 3},
+                MeshCoreCompanionFrameParser.encode(new byte[] {0x16, 3}));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> MeshCoreCompanionFrameParser.encode(new byte[177]));
+    }
+
+    private static void feed(MeshCoreCompanionFrameParser p, byte[] bytes, List<byte[]> out) {
+        for (byte b : bytes) {
+            byte[] frame = p.processByte(b);
+            if (frame != null) out.add(frame);
         }
-        System.arraycopy(nameBytes, 0, packet, 58, nameBytes.length);
-        return packet;
     }
 }

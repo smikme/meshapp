@@ -212,7 +212,7 @@ class SerialConnectionTest {
     }
 
     @Test
-    void companionVariablePacketFlushesAfterInterByteSilence() throws Exception {
+    void companionLengthDelimitedPacketSurvivesSplitReads() throws Exception {
         FakeSerialPort port = new FakeSerialPort();
         CountDownLatch packetLatch = new CountDownLatch(1);
         AtomicReference<byte[]> packetRef = new AtomicReference<>();
@@ -226,6 +226,7 @@ class SerialConnectionTest {
 
         connection.connect();
         byte[] selfInfo = companionSelfInfo();
+        port.enqueueIncoming((byte)0x3e, (byte)selfInfo.length, (byte)0);
         port.enqueueIncoming(Arrays.copyOfRange(selfInfo, 0, 20));
         port.enqueueIncoming(Arrays.copyOfRange(selfInfo, 20, selfInfo.length));
 

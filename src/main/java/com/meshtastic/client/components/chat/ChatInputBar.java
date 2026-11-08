@@ -819,7 +819,11 @@ public class ChatInputBar extends VBox {
     }
 
     /** Maximum text byte length after protobuf overhead and reply mode are accounted for. */
+    private java.util.function.IntSupplier protocolTextLimit = () -> -1;
+    public void setProtocolTextLimit(java.util.function.IntSupplier supplier) { protocolTextLimit = supplier; updateCharCount(); }
     private int getMaxTextBytes() {
+        int protocolLimit=protocolTextLimit.getAsInt();
+        if(protocolLimit>=0)return protocolLimit;
         int overhead = PROTO_OVERHEAD;
         if (replyToMessage != null) {
             overhead += REPLY_ID_OVERHEAD;
@@ -857,7 +861,8 @@ public class ChatInputBar extends VBox {
         hideCommandSuggestions();
         int replyId = replyToMessage != null
                 ? replyToMessage.getPacketId() : 0;
-        onSend.accept(new SendRequest(text, replyId));
+        try { onSend.accept(new SendRequest(text, replyId)); }
+        catch (RuntimeException failure) { return; } // Preserve a draft rejected by the protocol/UI callback.
         clearAttachedImage(false);
         messageInput.clear();
         cancelReply();

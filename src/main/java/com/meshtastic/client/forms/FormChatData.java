@@ -444,7 +444,7 @@ abstract class FormChatData extends FormChatRequests {
         }
         if (state == null || protocolHandler == null) {
             if (meshCoreCompanionRuntime != null) {
-                Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.channelPropertiesMeshtasticOnly"));
+                com.meshtastic.client.components.chat.MeshCoreChannelDialog.show(meshCoreCompanionRuntime,item.getChannelIndex(),this::reloadChatList);
                 return;
             }
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
@@ -835,6 +835,9 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     protected void showCreateChannelDialog() {
+        if(meshCoreCompanionRuntime != null) {
+            com.meshtastic.client.components.chat.MeshCoreChannelDialog.show(meshCoreCompanionRuntime,null,this::reloadChatList);return;
+        }
         if (protocolHandler == null) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.createChannelsMeshtasticOnly"));
             return;

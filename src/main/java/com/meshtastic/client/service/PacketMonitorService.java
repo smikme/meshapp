@@ -378,7 +378,7 @@ public final class PacketMonitorService {
                 System.currentTimeMillis(),
                 direction,
                 packetType != null && !packetType.isBlank() ? packetType : "RAW",
-                "MESHCORE_COMPANION",
+                packetType != null && packetType.startsWith("MeshCore Radio") ? "MESHCORE_RADIO" : "MESHCORE_COMPANION",
                 direction == Direction.OUTGOING ? ownerNodeId : "MeshCore",
                 direction == Direction.OUTGOING ? "MeshCore" : ownerNodeId,
                 payloadText,
@@ -729,6 +729,7 @@ public final class PacketMonitorService {
                     'TRANSPORT_LORA_ALT2',
                     'TRANSPORT_LORA_ALT3',
                     'MESHCORE_COMPANION',
+                    'MESHCORE_RADIO',
                     'TRANSPORT_MQTT'
                 )
                 """;
@@ -772,7 +773,7 @@ public final class PacketMonitorService {
                  "TRANSPORT_LORA_ALT1",
                  "TRANSPORT_LORA_ALT2",
                  "TRANSPORT_LORA_ALT3",
-                 "MESHCORE_COMPANION" -> true;
+                 "MESHCORE_COMPANION", "MESHCORE_RADIO" -> true;
             default -> false;
         };
     }
@@ -820,7 +821,7 @@ public final class PacketMonitorService {
                 stmt.execute("""
                         CREATE TABLE IF NOT EXISTS lora_packet_logs (
                             id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
-                            owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                            owner_node_id       VARCHAR(80) NOT NULL DEFAULT '',
                             captured_at         BIGINT NOT NULL,
                             direction           VARCHAR(10) NOT NULL,
                             packet_type         VARCHAR(40) NOT NULL,
@@ -1227,7 +1228,8 @@ public final class PacketMonitorService {
                     'TRANSPORT_LORA_ALT1',
                     'TRANSPORT_LORA_ALT2',
                     'TRANSPORT_LORA_ALT3',
-                    'MESHCORE_COMPANION'
+                    'MESHCORE_COMPANION',
+                    'MESHCORE_RADIO'
                 )
                 """);
         }
@@ -1261,7 +1263,8 @@ public final class PacketMonitorService {
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT1' THEN 'lora alt 1'
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT2' THEN 'lora alt 2'
                             WHEN transport_mechanism = 'TRANSPORT_LORA_ALT3' THEN 'lora alt 3'
-                            WHEN transport_mechanism = 'MESHCORE_COMPANION' THEN 'meshcore companion'
+                            WHEN transport_mechanism = 'MESHCORE_COMPANION' THEN 'meshcore companion legacy'
+                            WHEN transport_mechanism = 'MESHCORE_RADIO' THEN 'meshcore radio'
                             WHEN transport_mechanism = 'TRANSPORT_MQTT' THEN 'mqtt'
                             WHEN transport_mechanism = 'TRANSPORT_MULTICAST_UDP' THEN 'multicast udp'
                             WHEN transport_mechanism = 'TRANSPORT_API' THEN 'api'

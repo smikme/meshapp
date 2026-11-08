@@ -1,270 +1,262 @@
 package com.meshtastic.client.protocol.meshcore;
 
-import com.meshtastic.client.connection.FrameFormat;
-import com.meshtastic.client.connection.FrameFormatAwareConnection;
-import com.meshtastic.client.connection.TransportConnection;
+import com.meshtastic.client.connection.*;
 import com.meshtastic.client.model.ProtocolType;
-import com.meshtastic.client.protocol.ProtocolRuntime;
-import com.meshtastic.client.protocol.ProtocolRuntimeContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.meshtastic.client.protocol.*;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import java.nio.*;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.Consumer;
 
-/**
- * Protocol runtime for MeshCore KISS modem devices.
- * <p>
- * The runtime switches a byte-stream transport into KISS framing, sends the
- * initial {@code SetHardware} requests, and accumulates device metadata in
- * {@link MeshCoreKissState}.
- *
- * @author Konstantin A. Smirnov (ks@privatepractice.app)
- */
+/** KISS modem: serialized hardware operations and one DATA transmission until TxDone. */
 public final class MeshCoreKissProtocolRuntime implements ProtocolRuntime<MeshCoreKissState> {
-
-    private static final Logger log = LoggerFactory.getLogger(MeshCoreKissProtocolRuntime.class);
-    private static final long READY_TIMEOUT_MS = 3_000L;
-
     private final TransportConnection transport;
     private final MeshCoreKissState state = new MeshCoreKissState();
-    private final CompletableFuture<MeshCoreKissState> readyFuture = new CompletableFuture<>();
+    private final CompletableFuture<MeshCoreKissState> ready = new CompletableFuture<>();
     private final ScheduledExecutorService scheduler;
-
-    private volatile boolean closed;
+    private final MeshCoreCommandQueue commands;
+    private final ExecutorService writer =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "meshcore-kiss-write");
+                t.setDaemon(true);
+                return t;
+            });
+    private final CopyOnWriteArrayList<Consumer<byte[]>> listeners = new CopyOnWriteArrayList<>();
+    private final ArrayDeque<byte[]> received = new ArrayDeque<>();
+    private boolean started, closed;
 
     MeshCoreKissProtocolRuntime(ProtocolRuntimeContext context) {
-        this.transport = context.transportConnection();
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "meshcore-kiss-runtime-" + context.connectionId());
-            t.setDaemon(true);
-            return t;
-        });
+        transport = context.transportConnection();
+        scheduler =
+                Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "meshcore-kiss-" + context.connectionId());
+                    t.setDaemon(true);
+                    return t;
+                });
+        commands =
+                new MeshCoreCommandQueue(
+                        scheduler,
+                        b ->
+                                CompletableFuture.supplyAsync(
+                                                () ->
+                                                        transport.sendBytesAsync(
+                                                                MeshCoreKissFrames.frame(b), true),
+                                                writer)
+                                        .thenCompose(java.util.function.Function.identity()),
+                        e -> {
+                            state.setReady(false);
+                            state.setLastError(e.getMessage());
+                            ready.completeExceptionally(e);
+                        },
+                        this);
     }
 
-    /**
-     * Returns the protocol type handled by this runtime.
-     *
-     * @return {@link ProtocolType#MESHCORE_KISS}
-     */
     @Override
     public ProtocolType getProtocolType() {
         return ProtocolType.MESHCORE_KISS;
     }
 
-    /**
-     * Returns the state assembled from MeshCore KISS responses.
-     *
-     * @return mutable runtime state
-     */
     @Override
     public MeshCoreKissState getState() {
         return state;
     }
 
-    /**
-     * Returns the runtime readiness future.
-     *
-     * @return future completed after the first valid KISS response
-     */
-    @Override
-    public CompletableFuture<MeshCoreKissState> getReadyFuture() {
-        return readyFuture;
-    }
-
-    /**
-     * Starts the KISS handshake and subscribes this runtime to incoming frames.
-     *
-     * @return connection readiness future
-     */
-    @Override
-    public CompletableFuture<MeshCoreKissState> start() {
-        if (transport instanceof FrameFormatAwareConnection frameAware) {
-            frameAware.setFrameFormat(FrameFormat.KISS);
-        }
-        transport.setDataListener(this::handleFrame);
-        sendInitialRequests();
-        scheduler.schedule(() -> {
-            if (!readyFuture.isDone()) {
-                readyFuture.completeExceptionally(new IllegalStateException(
-                        "MeshCore KISS device did not respond during handshake"));
-            }
-        }, READY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        return readyFuture;
-    }
-
-    /**
-     * Returns the owner id once device identity has been received.
-     *
-     * @return short owner id in the {@code mc:<12 hex>} form, or {@code null}
-     */
     @Override
     public String getOwnerId() {
         return state.getOwnerId();
     }
 
-    /**
-     * Stops the runtime, unregisters the listener, and fails pending readiness.
-     */
     @Override
-    public void close() {
+    public CompletableFuture<MeshCoreKissState> getReadyFuture() {
+        return ready;
+    }
+
+    @Override
+    public synchronized CompletableFuture<MeshCoreKissState> start() {
+        if (started) return ready;
+        started = true;
+        if (transport instanceof FrameFormatAwareConnection stream)
+            stream.setFrameFormat(FrameFormat.KISS);
+        transport.setDataListener(this::receive);
+        hardware(0x16, new byte[0])
+                .whenComplete((v, e) -> {
+                    if (e != null) {
+                        ready.completeExceptionally(e);
+                        return;
+                    }
+                    state.setReady(true);
+                    ready.complete(state);
+                    refresh();
+                });
+        return ready;
+    }
+
+    public CompletableFuture<Void> refresh() {
+        CompletableFuture<byte[]> chain = CompletableFuture.completedFuture(new byte[0]);
+        for (int cmd : new int[] {0x11, 0x01, 0x0b, 0x0c, 0x13, 0x12, 0x17}) {
+            final int c = cmd;
+            chain = chain.thenCompose(v -> hardware(c, new byte[0]));
+        }
+        return chain.thenAccept(v -> {});
+    }
+
+    /** All official SetHardware requests, including crypto and sensors, are available to API clients. */
+    public CompletableFuture<byte[]> hardware(int command, byte[] payload) {
+        if (command < 1 || command > 0x1a || payload.length > 510)
+            throw new IllegalArgumentException("Invalid KISS hardware command or size");
+        byte[] body = new byte[2 + payload.length];
+        body[0] = 6;
+        body[1] = (byte) command;
+        System.arraycopy(payload, 0, body, 2, payload.length);
+        int response =
+                switch (command) {
+                    case 9, 10, 0x18, 0x19 -> 0xf0;
+                    default -> command | 0x80;
+                };
+        return commands.submit(body, response, 5_000, this::applyResponse)
+                .thenApply(p -> Arrays.copyOfRange(p, 1, p.length));
+    }
+
+    public CompletableFuture<Void> sendData(byte[] data) {
+        if (data.length < 1 || data.length > 255)
+            throw new IllegalArgumentException("KISS DATA requires 1..255 bytes");
+        byte[] body = new byte[data.length + 1];
+        System.arraycopy(data, 0, body, 1, data.length);
+        return commands.submit(body, 0xf8, 120_000, this::applyResponse)
+                .thenAccept(p -> {
+                    if (p[1] != 1)
+                        throw new CompletionException(
+                                new IllegalStateException("Radio transmission failed"));
+                });
+    }
+
+    public CompletableFuture<Void> setRadio(long frequencyHz, long bandwidthHz, int sf, int cr) {
+        if (frequencyHz < 150_000_000L
+                || frequencyHz > 2_500_000_000L
+                || bandwidthHz < 7000
+                || bandwidthHz > 500000
+                || sf < 5
+                || sf > 12
+                || cr < 5
+                || cr > 8) throw new IllegalArgumentException("Invalid modem radio parameters");
+        byte[] p =
+                ByteBuffer.allocate(10)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .putInt((int) frequencyHz)
+                        .putInt((int) bandwidthHz)
+                        .put((byte) sf)
+                        .put((byte) cr)
+                        .array();
+        return hardware(9, p).thenCompose(v -> hardware(0x0b, new byte[0])).thenAccept(v -> {});
+    }
+
+    public CompletableFuture<Void> setPower(int dbm) {
+        if (dbm < -9 || dbm > 30) throw new IllegalArgumentException("TX power out of range");
+        return hardware(10, new byte[] {(byte) dbm})
+                .thenCompose(v -> hardware(0x0c, new byte[0]))
+                .thenAccept(v -> {});
+    }
+
+    public CompletableFuture<Void> setCsma(int command, int value) {
+        if (command < 1 || command > 5 || value < 0 || value > 255)
+            throw new IllegalArgumentException("Invalid CSMA setting");
+        return commands.submit(new byte[] {(byte) command, (byte) value}, -2, 5000, p -> {})
+                .thenAccept(v -> {});
+    }
+
+    public void addDataListener(Consumer<byte[]> listener) {
+        listeners.add(listener);
+    }
+
+    public void removeDataListener(Consumer<byte[]> listener) {
+        listeners.remove(listener);
+    }
+
+    public synchronized List<byte[]> receivedData() {
+        return received.stream().map(byte[]::clone).toList();
+    }
+
+    private synchronized void receive(byte[] frame) {
+        if (closed || frame == null || frame.length == 0 || (frame[0] & 0xf0) != 0) return;
+        int command = frame[0] & 15;
+        if (command == 0) {
+            if (frame.length < 2 || frame.length > 256) return;
+            byte[] data = Arrays.copyOfRange(frame, 1, frame.length);
+            received.addLast(data);
+            while (received.size() > 100) received.removeFirst();
+            for (var listener : listeners) listener.accept(data.clone());
+            return;
+        }
+        if (command != 6 || frame.length < 2) return;
+        byte[] response = Arrays.copyOfRange(frame, 1, frame.length);
+        int type = response[0] & 255;
+        if (type == 0xf9) {
+            if (response.length >= 3) state.setLastRxMeta(response[1] / 4.0f, response[2]);
+            return;
+        }
+        if (type == 0xf1) {
+            if (response.length < 2) return;
+            state.setLastError("KISS error " + (response[1] & 255));
+            commands.accept(new byte[] {1, response[1]});
+            return;
+        }
+        commands.accept(response);
+    }
+
+    private void applyResponse(byte[] p) {
+        int type = p[0] & 255;
+        int size =
+                switch (type) {
+                    case 0x81, 0x87, 0x88 -> 33;
+                    case 0x84 -> 65;
+                    case 0x8b -> 11;
+                    case 0x92 -> 13;
+                    case 0x93, 0x94, 0x90, 0x91 -> 3;
+                    case 0x8f -> 5;
+                    case 0x83, 0x8c, 0x8d, 0x8e, 0x96, 0x9a, 0xf8 -> 2;
+                    default -> 1;
+                };
+        MeshCoreCompanionProtocolRuntime.requireLength(p, size);
+        switch (type) {
+            case 0x81 -> state.setIdentityHex(HexFormat.of().formatHex(p, 1, 33));
+            case 0x91 -> state.setFirmwareVersion(p[1] & 255);
+            case 0x96 -> {
+                String name = new String(p, 1, p.length - 1, StandardCharsets.UTF_8);
+                if (name.isBlank()) throw new IllegalArgumentException("Empty modem name");
+                state.setDeviceName(name);
+            }
+            case 0x8b ->
+                    state.setRadioParameters(
+                            new MeshCoreKissState.RadioParameters(
+                                    MeshCoreCompanionFrames.unsignedIntLe(p, 1),
+                                    MeshCoreCompanionFrames.unsignedIntLe(p, 5),
+                                    p[9] & 255,
+                                    p[10] & 255));
+            case 0x8c -> state.setTxPowerDbm((int) p[1]);
+            case 0x93 -> state.setBatteryMillivolts(MeshCoreCompanionFrames.unsignedShortLe(p, 1));
+            case 0x92 ->
+                    state.setStats(
+                            new MeshCoreKissState.Stats(
+                                    MeshCoreCompanionFrames.unsignedIntLe(p, 1),
+                                    MeshCoreCompanionFrames.unsignedIntLe(p, 5),
+                                    MeshCoreCompanionFrames.unsignedIntLe(p, 9)));
+            case 0xf8 -> state.setLastTxSuccess(p[1] == 1);
+            default -> {}
+        }
+    }
+
+    @Override
+    public synchronized void close() {
+        if (closed) return;
         closed = true;
         transport.setDataListener(null);
+        commands.close();
         scheduler.shutdownNow();
-        if (!readyFuture.isDone()) {
-            readyFuture.completeExceptionally(new IllegalStateException("MeshCore KISS runtime closed"));
-        }
-    }
-
-    /**
-     * Sends the initial MeshCore KISS metadata requests.
-     */
-    private void sendInitialRequests() {
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_DEVICE_NAME);
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_VERSION);
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_IDENTITY);
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_RADIO);
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_TX_POWER);
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_BATTERY);
-        sendSetHardware(MeshCoreKissFrames.REQ_GET_STATS);
-        sendSetHardware(MeshCoreKissFrames.REQ_PING);
-    }
-
-    /**
-     * Sends a single {@code SetHardware} request.
-     */
-    private void sendSetHardware(int subCommand) {
-        transport.sendBytes(MeshCoreKissFrames.setHardwareRequest(subCommand), false);
-    }
-
-    /**
-     * Handles one incoming, unescaped KISS frame.
-     */
-    private void handleFrame(byte[] frame) {
-        if (closed || frame == null || frame.length == 0) {
-            return;
-        }
-
-        int command = frame[0] & 0x0F;
-        if (command == MeshCoreKissFrames.CMD_DATA) {
-            log.debug("MeshCore KISS data frame received ({} bytes)", Math.max(0, frame.length - 1));
-            return;
-        }
-        if (command != MeshCoreKissFrames.CMD_SET_HARDWARE || frame.length < 2) {
-            log.debug("Ignoring non-MeshCore KISS frame: command=0x{}", Integer.toHexString(command));
-            return;
-        }
-
-        int subCommand = frame[1] & 0xFF;
-        byte[] payload = MeshCoreKissFrames.setHardwarePayload(frame);
-        applySetHardwareResponse(subCommand, payload);
-        completeReady();
-    }
-
-    /**
-     * Marks the runtime ready after the first recognized response.
-     */
-    private void completeReady() {
-        state.setReady(true);
-        readyFuture.complete(state);
-    }
-
-    /**
-     * Applies a {@code SetHardware} response to the runtime state.
-     */
-    private void applySetHardwareResponse(int subCommand, byte[] payload) {
-        switch (subCommand) {
-            case MeshCoreKissFrames.RESP_DEVICE_NAME -> {
-                String name = new String(payload, StandardCharsets.UTF_8).trim();
-                state.setDeviceName(name.isBlank() ? null : name);
-                log.info("MeshCore KISS device name: {}", state.getDeviceName());
-            }
-            case MeshCoreKissFrames.RESP_IDENTITY -> {
-                state.setIdentityHex(MeshCoreKissFrames.hex(payload));
-                log.info("MeshCore KISS identity received ({} bytes)", payload.length);
-            }
-            case MeshCoreKissFrames.RESP_VERSION -> {
-                if (payload.length >= 1) {
-                    state.setFirmwareVersion(payload[0] & 0xFF);
-                }
-            }
-            case MeshCoreKissFrames.RESP_RADIO -> parseRadio(payload);
-            case MeshCoreKissFrames.RESP_TX_POWER -> {
-                if (payload.length >= 1) {
-                    state.setTxPowerDbm((int) payload[0]);
-                }
-            }
-            case MeshCoreKissFrames.RESP_BATTERY -> {
-                if (payload.length >= 2) {
-                    state.setBatteryMillivolts(unsignedShortLe(payload, 0));
-                }
-            }
-            case MeshCoreKissFrames.RESP_STATS -> parseStats(payload);
-            case MeshCoreKissFrames.RESP_TX_DONE -> {
-                if (payload.length >= 1) {
-                    state.setLastTxSuccess(payload[0] != 0);
-                }
-            }
-            case MeshCoreKissFrames.RESP_RX_META -> {
-                if (payload.length >= 2) {
-                    float snrDb = ((int) payload[0]) / 4.0f;
-                    int rssiDbm = (int) payload[1];
-                    state.setLastRxMeta(snrDb, rssiDbm);
-                }
-            }
-            case MeshCoreKissFrames.RESP_ERROR -> {
-                String message = payload.length >= 1
-                        ? "MeshCore KISS error 0x" + String.format("%02X", payload[0] & 0xFF)
-                        : "MeshCore KISS error";
-                state.setLastError(message);
-                log.warn(message);
-            }
-            case MeshCoreKissFrames.RESP_OK, MeshCoreKissFrames.RESP_PONG -> {
-                // Valid handshake responses without additional state.
-            }
-            default -> log.debug("Unhandled MeshCore KISS response 0x{}", Integer.toHexString(subCommand));
-        }
-    }
-
-    /**
-     * Parses LoRa radio parameters from the little-endian payload.
-     */
-    private void parseRadio(byte[] payload) {
-        if (payload.length < 10) {
-            return;
-        }
-        ByteBuffer buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN);
-        long frequencyHz = Integer.toUnsignedLong(buffer.getInt());
-        long bandwidthHz = Integer.toUnsignedLong(buffer.getInt());
-        int spreadingFactor = buffer.get() & 0xFF;
-        int codingRate = buffer.get() & 0xFF;
-        state.setRadioParameters(new MeshCoreKissState.RadioParameters(
-                frequencyHz, bandwidthHz, spreadingFactor, codingRate));
-    }
-
-    /**
-     * Parses packet statistics counters from the little-endian payload.
-     */
-    private void parseStats(byte[] payload) {
-        if (payload.length < 12) {
-            return;
-        }
-        ByteBuffer buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN);
-        state.setStats(new MeshCoreKissState.Stats(
-                Integer.toUnsignedLong(buffer.getInt()),
-                Integer.toUnsignedLong(buffer.getInt()),
-                Integer.toUnsignedLong(buffer.getInt())));
-    }
-
-    /**
-     * Reads an unsigned 16-bit little-endian value from the payload.
-     */
-    private static int unsignedShortLe(byte[] payload, int offset) {
-        return (payload[offset] & 0xFF) | ((payload[offset + 1] & 0xFF) << 8);
+        writer.shutdownNow();
+        state.setReady(false);
+        listeners.clear();
+        ready.completeExceptionally(new CancellationException("KISS disconnected"));
     }
 }

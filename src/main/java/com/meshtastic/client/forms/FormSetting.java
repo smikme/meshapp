@@ -17,6 +17,7 @@ import com.meshtastic.client.forms.settings.DevicePowerActionController;
 import com.meshtastic.client.forms.settings.DeviceTimeSyncController;
 import com.meshtastic.client.forms.settings.FirmwareUpdateController;
 import com.meshtastic.client.forms.settings.MeshCoreSettingsTreeBuilder;
+import com.meshtastic.client.forms.settings.MeshCoreSettingsPane;
 import com.meshtastic.client.forms.settings.MeshtasticConfigTreeBuilder;
 import com.meshtastic.client.forms.settings.NodeCacheSettingsController;
 import com.meshtastic.client.forms.settings.RingtoneSettingsController;
@@ -79,6 +80,11 @@ public class FormSetting extends Form {
     private DeviceState state;
     private ProtocolHandler handler;
     private MeshCoreCompanionState meshCoreCompanionState;
+    private com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime meshCoreRuntime;
+    private MeshCoreSettingsPane meshCorePane;
+    private com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocolRuntime kissRuntime;
+    private com.meshtastic.client.forms.settings.MeshCoreKissSettingsPane kissPane;
+    private Node standardConfigPanel;
     private RemoteRpcState remoteRpcState;
     private RemoteAdminBackend remoteSettingsBackend;
     private RemoteAdminSession remoteSettingsSession;
@@ -161,7 +167,8 @@ public class FormSetting extends Form {
             I18n.t("settings.tab.cache"),
             createScrollableSettingsPanel(cacheController.createPanel())
         );
-        configTab = new Tab(I18n.t("settings.tab.config"), createConfigPanel());
+        standardConfigPanel = createConfigPanel();
+        configTab = new Tab(I18n.t("settings.tab.config"), standardConfigPanel);
         firmwareTab = new Tab(
             I18n.t("settings.tab.firmware"),
             createScrollableSettingsPanel(firmwareUpdateController.createPanel())
@@ -213,6 +220,8 @@ public class FormSetting extends Form {
     @Override
     public void formClose() {
         closeRemoteSettingsBackend();
+        if(meshCorePane!=null){meshCorePane.close();meshCorePane=null;}
+        if(kissPane!=null){kissPane.close();kissPane=null;}
     }
 
     @Override
@@ -234,7 +243,10 @@ public class FormSetting extends Form {
             .map(ConnectionEntry::getId)
             .map(mgr::getProtocolRuntime)
             .orElse(null);
+        var kiss=runtime instanceof com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocolRuntime modem?modem:null;
+        if(kissRuntime!=kiss){if(kissPane!=null)kissPane.close();kissPane=null;kissRuntime=kiss;}
         if (runtime != null && runtime.getState() instanceof RemoteRpcState rpcState) {
+            if(meshCorePane!=null)meshCorePane.close();meshCorePane=null;meshCoreRuntime=null;
             if (remoteRpcState != rpcState) {
                 closeRemoteSettingsBackend();
                 remoteRpcState = rpcState;
@@ -267,6 +279,12 @@ public class FormSetting extends Form {
         this.state = newState;
         this.handler = newHandler;
         this.meshCoreCompanionState = newMeshCoreState;
+        var companion = runtime instanceof com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime mc ? mc : null;
+        if (meshCoreRuntime != companion) {
+            if (meshCorePane != null) meshCorePane.close();
+            meshCorePane = null;
+            meshCoreRuntime = companion;
+        }
         ringtoneController.observe(newState);
     }
 
@@ -289,6 +307,8 @@ public class FormSetting extends Form {
         ringtoneController.observe(null);
         state = null;
         handler = null;
+        if(meshCorePane != null) meshCorePane.close();
+        meshCorePane=null;meshCoreRuntime=null;
         meshCoreCompanionState = null;
         observedConfigLoadFuture = null;
         fullConfigRoot = null;
@@ -573,10 +593,16 @@ public class FormSetting extends Form {
         refreshConnection();
 
         if (remoteSettingsBackend != null) {
+            configTab.setContent(standardConfigPanel);
             reloadRemoteSettingsTree();
             return;
         }
 
+        if(kissRuntime!=null){
+            if(kissPane==null)kissPane=new com.meshtastic.client.forms.settings.MeshCoreKissSettingsPane(kissRuntime);
+            ScrollPane modemScroll=new ScrollPane(kissPane);modemScroll.setFitToWidth(true);configTab.setContent(modemScroll);return;
+        }
+        configTab.setContent(standardConfigPanel);
         boolean meshtasticConnected = state != null && handler != null;
         boolean meshCoreConnected =
             state != null && meshCoreCompanionState != null;
@@ -596,7 +622,8 @@ public class FormSetting extends Form {
         }
 
         if (meshCoreConnected && !meshtasticConnected) {
-            showMeshCoreSettingsTree(meshCoreCompanionState);
+            if(meshCorePane == null) meshCorePane = new MeshCoreSettingsPane(meshCoreRuntime);
+            configTab.setContent(meshCorePane);
             return;
         }
 

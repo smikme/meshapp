@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -47,6 +48,7 @@ public class BleConnection implements MeshtasticConnection {
     private final Object sendInfrastructureLock = new Object();
     private final AtomicLong writeSequence = new AtomicLong();
     private final AtomicLong connectionGeneration = new AtomicLong();
+    private final AtomicReference<CompletableFuture<Void>> inFlightResult = new AtomicReference<>();
     private final AtomicReference<BleWriteDiagnostics> inFlightWrite = new AtomicReference<>();
     private final AtomicBoolean platformDisposed = new AtomicBoolean(false);
     private final AtomicLong activePasskeyRequestId = new AtomicLong();
@@ -251,15 +253,21 @@ public class BleConnection implements MeshtasticConnection {
 
     @Override
     public void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
+        sendBytesAsync(data, expectResponseAfterWrite);
+    }
+
+    @Override
+    public CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponseAfterWrite) {
+        CompletableFuture<Void> result = new CompletableFuture<>();
         if (!isConnected()) {
             log.warn("Cannot send: BLE not connected to {}", address);
-            return;
+            return CompletableFuture.failedFuture(new IllegalStateException("BLE write unavailable or queue full"));
         }
         BleProtocolProfile activeProfile = activePayloadProfile();
         if (activeProfile.usesSerialFramePayload() && data.length <= BleConstants.SERIAL_FRAME_HEADER_SIZE) {
             log.warn("BLE send: data too short ({} bytes), expected > {} header bytes",
                     data.length, BleConstants.SERIAL_FRAME_HEADER_SIZE);
-            return;
+            return CompletableFuture.failedFuture(new IllegalStateException("BLE write unavailable or queue full"));
         }
 
         byte[] payload = activeProfile.usesSerialFramePayload()
@@ -271,7 +279,7 @@ public class BleConnection implements MeshtasticConnection {
         ThreadPoolExecutor executor = writeExecutor;
         if (executor == null || executor.isShutdown()) {
             log.warn("BLE send infrastructure is unavailable for {}", address);
-            return;
+            return CompletableFuture.failedFuture(new IllegalStateException("BLE write unavailable or queue full"));
         }
 
         long opId = writeSequence.incrementAndGet();
@@ -282,12 +290,12 @@ public class BleConnection implements MeshtasticConnection {
         if (!expectResponseAfterWrite && payload.length > LOW_PRIORITY_MAX_PAYLOAD_BYTES) {
             log.warn("Dropping oversized low-priority BLE write #{} ({} bytes, limit={}, queueDepth={})",
                     opId, payload.length, LOW_PRIORITY_MAX_PAYLOAD_BYTES, queueDepth);
-            return;
+            return CompletableFuture.failedFuture(new IllegalStateException("BLE write unavailable or queue full"));
         }
         if (!expectResponseAfterWrite && queueDepth >= LOW_PRIORITY_SEND_QUEUE_CAPACITY) {
             log.warn("Dropping low-priority BLE write #{} ({} bytes, queueDepth={}, limit={})",
                     opId, payload.length, queueDepth, LOW_PRIORITY_SEND_QUEUE_CAPACITY);
-            return;
+            return CompletableFuture.failedFuture(new IllegalStateException("BLE write unavailable or queue full"));
         }
 
         log.debug("Queued BLE write #{} ({} bytes, expectResponseAfterWrite={}, callerThread={}, queueDepth={})",
@@ -295,11 +303,13 @@ public class BleConnection implements MeshtasticConnection {
 
         try {
             executor.execute(new BleWriteTask(
-                    opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation));
+                    opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation, result));
         } catch (RejectedExecutionException e) {
+            result.completeExceptionally(e);
             log.warn("BLE send queue rejected write #{} ({} bytes, queueDepth={})",
                     opId, payload.length, queueDepth, e);
         }
+        return result;
     }
 
     @Override
@@ -384,6 +394,8 @@ public class BleConnection implements MeshtasticConnection {
     }
 
     private void shutdownSendInfrastructure(String reason) {
+        CompletableFuture<Void> pending=inFlightResult.getAndSet(null);
+        if(pending!=null)pending.completeExceptionally(new IllegalStateException("BLE disconnected during write"));
         BleWriteDiagnostics current = inFlightWrite.get();
         if (current != null) {
             log.warn("BLE write #{} is still in progress during {} (payload={} bytes, callerThread={}, writeThread={})",
@@ -401,6 +413,10 @@ public class BleConnection implements MeshtasticConnection {
 
         if (executorToStop != null) {
             List<Runnable> dropped = executorToStop.shutdownNow();
+            for (Runnable task : dropped) {
+                if (task instanceof BleWriteTask write) write.result.completeExceptionally(
+                        new IllegalStateException("Transport disconnected"));
+            }
             if (!dropped.isEmpty()) {
                 log.info("Dropped {} queued BLE writes during {}", dropped.size(), reason);
             }
@@ -443,13 +459,15 @@ public class BleConnection implements MeshtasticConnection {
                               boolean expectResponseAfterWrite,
                               String callerThread,
                               long queuedAtNanos,
-                              long generation) {
+                              long generation, CompletableFuture<Void> result) {
         if (generation != connectionGeneration.get()) {
             log.debug("Skipping stale BLE write #{} because connection generation changed", opId);
+            result.completeExceptionally(new IllegalStateException("Connection replaced"));
             return;
         }
         if (!isConnected()) {
             log.debug("Skipping BLE write #{} because transport is no longer connected", opId);
+            result.completeExceptionally(new IllegalStateException("Transport disconnected"));
             return;
         }
 
@@ -468,6 +486,11 @@ public class BleConnection implements MeshtasticConnection {
                 generation
         );
         inFlightWrite.set(diagnostics);
+        inFlightResult.set(result);
+        if(generation!=connectionGeneration.get() || !isConnected()) {
+            inFlightResult.compareAndSet(result,null);inFlightWrite.compareAndSet(diagnostics,null);
+            result.completeExceptionally(new IllegalStateException("BLE connection replaced during write"));return;
+        }
 
         ScheduledFuture<?> warnFuture = scheduleWriteWatchdog(diagnostics, WRITE_WARN_THRESHOLD_MS, false);
         ScheduledFuture<?> errorFuture = scheduleWriteWatchdog(diagnostics, WRITE_ERROR_THRESHOLD_MS, true);
@@ -489,18 +512,21 @@ public class BleConnection implements MeshtasticConnection {
                 errorFuture.cancel(false);
             }
             inFlightWrite.compareAndSet(diagnostics, null);
+            inFlightResult.compareAndSet(result,null);
         }
 
         long finishedAtNanos = System.nanoTime();
         long writeDurationMs = TimeUnit.NANOSECONDS.toMillis(finishedAtNanos - startedAtNanos);
 
         if (failure != null) {
+            result.completeExceptionally(failure);
             log.error("BLE write #{} crashed after {} ms (payload={} bytes, callerThread={}, writeThread={})",
                     opId, writeDurationMs, payload.length, callerThread, writeThread, failure);
             return;
         }
 
         if (success) {
+            result.complete(null);
             if (writeDurationMs >= WRITE_WARN_THRESHOLD_MS) {
                 log.warn("BLE write #{} completed slowly in {} ms (payload={} bytes, callerThread={}, writeThread={})",
                         opId, writeDurationMs, payload.length, callerThread, writeThread);
@@ -509,6 +535,7 @@ public class BleConnection implements MeshtasticConnection {
             }
             log.debug("Sent {} bytes to BLE device {}", payload.length, address);
         } else {
+            result.completeExceptionally(new IllegalStateException("BLE write failed"));
             log.warn("BLE write #{} failed after {} ms (payload={} bytes, callerThread={}, writeThread={})",
                     opId, writeDurationMs, payload.length, callerThread, writeThread);
             log.warn("Failed to send {} bytes to BLE device {}", payload.length, address);
@@ -547,24 +574,26 @@ public class BleConnection implements MeshtasticConnection {
         private final String callerThread;
         private final long queuedAtNanos;
         private final long generation;
+        private final CompletableFuture<Void> result;
 
         private BleWriteTask(long opId,
                              byte[] payload,
                              boolean expectResponseAfterWrite,
                              String callerThread,
                              long queuedAtNanos,
-                             long generation) {
+                             long generation, CompletableFuture<Void> result) {
             this.opId = opId;
             this.payload = payload;
             this.expectResponseAfterWrite = expectResponseAfterWrite;
             this.callerThread = callerThread;
             this.queuedAtNanos = queuedAtNanos;
             this.generation = generation;
+            this.result = result;
         }
 
         @Override
         public void run() {
-            performWrite(opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation);
+            performWrite(opId, payload, expectResponseAfterWrite, callerThread, queuedAtNanos, generation, result);
         }
 
         @Override

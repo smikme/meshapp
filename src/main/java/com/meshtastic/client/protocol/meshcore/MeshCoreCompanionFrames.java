@@ -42,19 +42,19 @@ public final class MeshCoreCompanionFrames {
     public static final int PACKET_MESSAGES_WAITING = 0x83;
     public static final int PACKET_LOG_DATA = 0x88;
 
-    private MeshCoreCompanionFrames() {
-    }
+    private MeshCoreCompanionFrames() {}
 
     /**
      * Creates an {@code APP_START} command.
- *
+     *
      * @param appName application name written after the packet service header
      * @return raw Companion packet ready for transport
      */
     public static byte[] appStart(String appName) {
-        byte[] nameBytes = appName == null || appName.isBlank()
-                ? new byte[0]
-                : appName.getBytes(StandardCharsets.UTF_8);
+        byte[] nameBytes =
+                appName == null || appName.isBlank()
+                        ? new byte[0]
+                        : appName.getBytes(StandardCharsets.UTF_8);
         byte[] frame = new byte[8 + nameBytes.length];
         frame[0] = (byte) CMD_APP_START;
         System.arraycopy(nameBytes, 0, frame, 8, nameBytes.length);
@@ -67,7 +67,7 @@ public final class MeshCoreCompanionFrames {
      * @return raw Companion {@code DEVICE_QUERY} packet
      */
     public static byte[] deviceQuery() {
-        return new byte[]{(byte) CMD_DEVICE_QUERY, 0x03};
+        return new byte[] {(byte) CMD_DEVICE_QUERY, 0x03};
     }
 
     /**
@@ -76,7 +76,7 @@ public final class MeshCoreCompanionFrames {
      * @return raw Companion {@code GET_BATTERY} packet
      */
     public static byte[] getBattery() {
-        return new byte[]{(byte) CMD_GET_BATTERY};
+        return new byte[] {(byte) CMD_GET_BATTERY};
     }
 
     /**
@@ -85,22 +85,22 @@ public final class MeshCoreCompanionFrames {
      * @return raw Companion {@code GET_CONTACTS} packet
      */
     public static byte[] getContacts() {
-        return new byte[]{(byte) CMD_GET_CONTACTS};
+        return new byte[] {(byte) CMD_GET_CONTACTS};
     }
 
     /**
      * Creates a command that requests MeshCore channel information.
- *
+     *
      * @param channelIndex channel index in the {@code 0..7} range
      * @return raw Companion {@code GET_CHANNEL} packet
      */
     public static byte[] getChannel(int channelIndex) {
-        return new byte[]{(byte) CMD_GET_CHANNEL, (byte) (channelIndex & 0xFF)};
+        return new byte[] {(byte) CMD_GET_CHANNEL, (byte) (channelIndex & 0xFF)};
     }
 
     /**
      * Creates a command that sends text to a MeshCore channel.
- *
+     *
      * @param channelIndex     channel index in the {@code 0..7} range
      * @param timestampSeconds sender Unix timestamp in seconds
      * @param text             message text
@@ -119,13 +119,14 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Creates a command that sends a direct message to a contact public-key prefix.
- *
+     *
      * @param publicKeyPrefix  first 6 bytes of the recipient public key
      * @param timestampSeconds sender Unix timestamp in seconds
      * @param text             message text
      * @return raw Companion {@code SEND_TXT_MSG} packet
      */
-    public static byte[] sendDirectText(byte[] publicKeyPrefix, long timestampSeconds, String text) {
+    public static byte[] sendDirectText(
+            byte[] publicKeyPrefix, long timestampSeconds, String text) {
         byte[] prefix = Arrays.copyOf(publicKeyPrefix == null ? new byte[0] : publicKeyPrefix, 6);
         byte[] textBytes = safeTextBytes(text);
         byte[] packet = new byte[13 + textBytes.length];
@@ -144,17 +145,18 @@ public final class MeshCoreCompanionFrames {
      * @return raw Companion {@code GET_MESSAGE} packet
      */
     public static byte[] getMessage() {
-        return new byte[]{(byte) CMD_GET_MESSAGE};
+        return new byte[] {(byte) CMD_GET_MESSAGE};
     }
 
     /**
      * Extracts the public key from a {@code SELF_INFO} packet.
- *
+     *
      * @param selfInfoPacket raw {@code SELF_INFO} packet
      * @return 32 public-key bytes, or an empty array when the packet is invalid
      */
     public static byte[] publicKey(byte[] selfInfoPacket) {
-        if (selfInfoPacket == null || selfInfoPacket.length < 36
+        if (selfInfoPacket == null
+                || selfInfoPacket.length < 36
                 || (selfInfoPacket[0] & 0xFF) != PACKET_SELF_INFO) {
             return new byte[0];
         }
@@ -163,47 +165,45 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Reads a variable-length UTF-8 string from a packet.
- *
+     *
      * @param packet raw Companion packet
      * @param offset start offset of the string
-     * @return trimmed string, or {@code null} when no string is present
+     * @return decoded string, or {@code null} for an invalid field offset
      */
     public static String text(byte[] packet, int offset) {
-        if (packet == null || offset >= packet.length) {
-            return null;
-        }
-        String text = new String(packet, offset, packet.length - offset, StandardCharsets.UTF_8)
-                .replace("\u0000", "")
-                .trim();
-        return text.isBlank() ? null : text;
+        if (packet == null || offset < 0 || offset > packet.length) return null;
+        int end = offset;
+        while (end < packet.length && packet[end] != 0) end++;
+        return new String(packet, offset, end - offset, StandardCharsets.UTF_8);
     }
 
     /**
      * Reads a UTF-8 string with a fixed maximum length.
- *
+     *
      * @param packet raw Companion packet
      * @param offset start offset of the string
      * @param length maximum field length in bytes
-     * @return trimmed string, or {@code null} when no string is present
+     * @return decoded string, or {@code null} for an invalid field offset
      */
     public static String fixedText(byte[] packet, int offset, int length) {
         if (packet == null || offset >= packet.length || length <= 0) {
             return null;
         }
         int available = Math.min(length, packet.length - offset);
-        String text = new String(packet, offset, available, StandardCharsets.UTF_8)
-                .replace("\u0000", "")
-                .trim();
+        String text =
+                new String(packet, offset, available, StandardCharsets.UTF_8)
+                        .replace("\u0000", "")
+                        .trim();
         return text.isBlank() ? null : text;
     }
 
     /**
      * Reads a fixed-length UTF-8 string up to the first {@code 0x00}.
- *
+     *
      * @param packet raw Companion packet
      * @param offset start offset of the string
      * @param length maximum field length in bytes
-     * @return trimmed string, or {@code null} when no string is present
+     * @return decoded string, or {@code null} for an invalid field offset
      */
     public static String nullTerminatedText(byte[] packet, int offset, int length) {
         if (packet == null || offset >= packet.length || length <= 0) {
@@ -214,13 +214,12 @@ public final class MeshCoreCompanionFrames {
         while (zero < end && packet[zero] != 0) {
             zero++;
         }
-        String text = new String(packet, offset, zero - offset, StandardCharsets.UTF_8).trim();
-        return text.isBlank() ? null : text;
+        return new String(packet, offset, zero - offset, StandardCharsets.UTF_8);
     }
 
     /**
      * Reads an unsigned 16-bit little-endian value.
- *
+     *
      * @param packet raw Companion packet
      * @param offset first-byte offset
      * @return value in the {@code 0..65535} range, or {@code 0} when data is insufficient
@@ -234,7 +233,7 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Reads an unsigned 32-bit little-endian value.
- *
+     *
      * @param packet raw Companion packet
      * @param offset first-byte offset
      * @return unsigned-int value, or {@code 0} when data is insufficient
@@ -252,7 +251,7 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Reads a signed 32-bit little-endian value.
- *
+     *
      * @param packet raw Companion packet
      * @param offset first-byte offset
      * @return signed int, or {@code 0} when data is insufficient
@@ -269,7 +268,7 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Encodes bytes as lowercase HEX.
- *
+     *
      * @param data source bytes; {@code null} is treated as an empty array
      * @return HEX string without separators
      */
@@ -278,14 +277,11 @@ public final class MeshCoreCompanionFrames {
     }
 
     /**
-     * Returns a short MeshCore node id for a public key.
-     * <p>
-     * The full public key remains in runtime state; the UI and database receive
-     * a stable short identifier, {@code mc:<12 hex>}, compatible with existing
-     * chat-field constraints.
- *
+     * Returns a full MeshCore identity when all 32 public-key bytes are available.
+     * Legacy six-byte identifiers are accepted only for compatibility/prefix resolution.
+     *
      * @param publicKeyHex full or partial public key in HEX
-     * @return node id in the {@code mc:abcdef123456} form, or {@code null}
+     * @return {@code mc:<64 hex>} for a full key, a legacy prefix ID, or {@code null}
      */
     public static String nodeIdFromPublicKeyHex(String publicKeyHex) {
         if (publicKeyHex == null) {
@@ -295,12 +291,15 @@ public final class MeshCoreCompanionFrames {
         if (normalized.length() < 12) {
             return null;
         }
-        return "mc:" + normalized.substring(0, 12);
+        return "mc:"
+                + (normalized.length() >= 64
+                        ? normalized.substring(0, 64)
+                        : normalized.substring(0, 12));
     }
 
     /**
      * Returns the first 6 public-key bytes from a MeshCore node id.
- *
+     *
      * @param nodeId node id in the {@code mc:<12 hex>} form
      * @return 6-byte public-key prefix, or an empty array
      */
@@ -313,7 +312,7 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Decodes a HEX string into bytes.
- *
+     *
      * @param hex HEX string without separators
      * @return byte array; invalid input produces an empty array
      */
@@ -339,7 +338,7 @@ public final class MeshCoreCompanionFrames {
 
     /**
      * Checks whether a packet looks like a recognized MeshCore Companion Protocol response.
- *
+     *
      * @param packet raw Companion packet
      * @return {@code true} when the first byte matches a known packet type
      */
@@ -366,16 +365,21 @@ public final class MeshCoreCompanionFrames {
                     PACKET_ADVERTISEMENT,
                     PACKET_ACK,
                     PACKET_MESSAGES_WAITING,
-                    PACKET_LOG_DATA -> true;
+                    PACKET_LOG_DATA ->
+                    true;
             default -> false;
         };
     }
 
     private static byte[] safeTextBytes(String text) {
-        return text == null ? new byte[0] : text.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = text == null ? new byte[0] : text.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length == 0 || bytes.length > 160 || text.indexOf(0) >= 0)
+            throw new IllegalArgumentException(
+                    "MeshCore text must contain 1..160 UTF-8 bytes, without NUL");
+        return bytes;
     }
 
-    private static void writeIntLe(byte[] packet, int offset, long value) {
+    public static void writeIntLe(byte[] packet, int offset, long value) {
         long unsigned = value & 0xFFFF_FFFFL;
         packet[offset] = (byte) (unsigned & 0xFF);
         packet[offset + 1] = (byte) ((unsigned >>> 8) & 0xFF);

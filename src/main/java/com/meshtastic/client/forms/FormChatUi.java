@@ -1146,6 +1146,8 @@ abstract class FormChatUi extends FormChatBase {
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8),
                 this::showMeshFilesImage
         );
+        input.setProtocolTextLimit(() -> meshCoreCompanionRuntime == null ? -1 : meshCoreCompanionRuntime.maxTextBytes(
+                selectedChat != null && selectedChat.getType() == ChatItem.ChatType.DIRECT_MESSAGE));
         input.setAuthenticationOverheadSupplier(() ->
                 meshCoreCompanionRuntime == null && selectedChat != null
                         && selectedChat.getType() == ChatItem.ChatType.CHANNEL
@@ -1265,12 +1267,19 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
 
-        boolean sent = switch (selectedChat.getType()) {
+        boolean sent;
+        try { sent = switch (selectedChat.getType()) {
             case CHANNEL -> sendChannelMessage(request);
             case DIRECT_MESSAGE -> sendDirectMessage(request);
-        };
+        }; } catch (RuntimeException error) {
+            Toast.show(Toast.Type.ERROR, com.meshtastic.client.components.chat.MeshCoreChannelDialog.message(error));
+            throw error; // ChatInputBar keeps the draft when the send callback fails.
+        }
         if (sent) {
             refreshCurrentChatAfterLocalSend();
+        } else if(meshCoreCompanionRuntime!=null) {
+            Toast.show(Toast.Type.ERROR,I18n.t("meshcore.sendRejected"));
+            throw new IllegalStateException(I18n.t("meshcore.sendRejected"));
         }
     }
 

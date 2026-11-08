@@ -121,6 +121,7 @@ abstract class FormChatRequests extends FormChatMessages {
 
     /** Starts reply mode for a message. */
     protected void startReply(MeshMessage msg) {
+        if(meshCoreCompanionRuntime != null) {Toast.show(Toast.Type.WARNING,I18n.t("meshcore.replyUnsupported"));return;}
         chatInputBar.startReply(msg, nameResolver.resolveSenderName(msg));
     }
 

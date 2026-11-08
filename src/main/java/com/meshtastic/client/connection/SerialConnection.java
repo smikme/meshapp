@@ -257,34 +257,30 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     @Override
-    public synchronized void sendBytes(byte[] data) {
-        sendBytes(data, true);
+    public synchronized void sendBytes(byte[] data) { sendBytes(data, true); }
+
+    @Override
+    public synchronized void sendBytes(byte[] data, boolean expectResponse) {
+        sendBytesAsync(data, expectResponse);
     }
 
     @Override
-    public synchronized void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
-        if (!isConnected()) {
-            log.warn("Cannot send: serial port {} not connected", portName);
-            return;
-        }
-        if (expectResponseAfterWrite) {
-            long writeStartedAt = currentTimeMillis.getAsLong();
-            lastWriteAtMillis = writeStartedAt;
-            awaitingResponseAfterWrite = true;
-            readTimeoutsSinceWrite = 0;
-        }
+    public synchronized java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+        if (!isConnected()) return java.util.concurrent.CompletableFuture.failedFuture(
+                new IllegalStateException("Transport disconnected"));
         try {
+            if (expectResponse) {
+                lastWriteAtMillis = currentTimeMillis.getAsLong();
+                awaitingResponseAfterWrite = true;
+                readTimeoutsSinceWrite = 0;
+            }
             nativePort.write(data, 0, data.length);
-            log.trace("Sent {} bytes to serial {}", data.length, portName);
-        } catch (ConnectionException e) {
-            if (expectResponseAfterWrite) {
-                awaitingResponseAfterWrite = false;
-            }
-            log.error("Write failed to serial {}", portName, e);
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        } catch (Exception e) {
+            awaitingResponseAfterWrite = false;
             ConnectionListener listener = connectionListener;
-            if (listener != null) {
-                listener.onConnectionError("Write failed: " + e.getMessage(), e);
-            }
+            if (listener != null) listener.onConnectionError("Write failed: " + e.getMessage(), e);
+            return java.util.concurrent.CompletableFuture.failedFuture(e);
         }
     }
 

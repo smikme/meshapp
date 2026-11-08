@@ -5,6 +5,7 @@ import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
+
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.TelemetryProtos;
@@ -24,6 +25,83 @@ public class MeshCoreCompanionState {
     private final Map<String, String> nodeIdsByPublicKeyPrefix = new ConcurrentHashMap<>();
     private final Map<String, byte[]> publicKeysByNodeId = new ConcurrentHashMap<>();
 
+    private final Map<String, MeshCoreContact> contacts = new ConcurrentHashMap<>();
+    private final Map<Integer, MeshCoreChannel> channels = new ConcurrentHashMap<>();
+    private final Map<String, Integer> nodeNumbers = new ConcurrentHashMap<>();
+    private final java.util.concurrent.CopyOnWriteArrayList<Runnable> listeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public enum Phase {
+        DISCONNECTED,
+        HANDSHAKE,
+        SYNCING,
+        READY,
+        ERROR
+    }
+
+    private volatile Phase phase = Phase.DISCONNECTED;
+
+    public Phase getPhase() {
+        return phase;
+    }
+
+    void setPhase(Phase phase) {
+        this.phase = phase;
+        fireChanged();
+    }
+
+    public void addListener(Runnable listener) {
+        listeners.add(listener);
+    }
+
+    public void removeListener(Runnable listener) {
+        listeners.remove(listener);
+    }
+
+    void fireChanged() {
+        for (var listener : listeners) listener.run();
+    }
+
+    public Map<String, MeshCoreContact> getContacts() {
+        return Map.copyOf(contacts);
+    }
+
+    public Map<Integer, MeshCoreChannel> getMeshCoreChannels() {
+        return Map.copyOf(channels);
+    }
+
+    void putContact(MeshCoreContact contact) {
+        contacts.put(contact.id(), contact);
+    }
+
+    void putChannel(MeshCoreChannel channel) {
+        channels.put(channel.index(), channel);
+        updateChannel(channel.index(), channel.name(), channel.enabled());
+        fireChanged();
+    }
+
+    void removeContact(String id) {
+        contacts.remove(id);
+        publicKeysByNodeId.remove(id);
+        Integer number = nodeNumbers.remove(id);
+        if (number != null) {
+            deviceState.getNodeDb().remove(number);
+            deviceState.fireNodeUpdateListeners(number);
+        }
+        fireChanged();
+    }
+
+    private synchronized int nodeNumber(String id) {
+        return nodeNumbers.computeIfAbsent(
+                id,
+                key -> {
+                    int candidate = nodeNumFromNodeId(key);
+                    while (deviceState.getNodeDb().containsKey(candidate))
+                        candidate = candidate == Integer.MAX_VALUE ? 1 : candidate + 1;
+                    return candidate;
+                });
+    }
+
     private volatile boolean ready;
     private volatile String deviceName;
     private volatile String publicKeyHex;
@@ -32,12 +110,41 @@ public class MeshCoreCompanionState {
     private volatile Double advertisementLatitude;
     private volatile Double advertisementLongitude;
     private volatile Boolean multiAcks;
+    private volatile int multiAckCount;
+    private volatile boolean repeatEnabled;
+    private volatile int pathHashMode;
+
+    public int getMultiAckCount() {
+        return multiAckCount;
+    }
+
+    void setMultiAckCount(int count) {
+        multiAckCount = count;
+        setMultiAcks(count != 0);
+    }
+
+    public boolean isRepeatEnabled() {
+        return repeatEnabled;
+    }
+
+    void setRepeatEnabled(boolean enabled) {
+        repeatEnabled = enabled;
+    }
+
+    public int getPathHashMode() {
+        return pathHashMode;
+    }
+
+    void setPathHashMode(int mode) {
+        pathHashMode = mode;
+    }
+
     private volatile Integer advertisementLocationPolicy;
     private volatile Integer telemetryModeBase;
     private volatile Integer telemetryModeLocation;
     private volatile Integer telemetryModeEnvironment;
     private volatile Boolean manualAddContacts;
-    private volatile Double radioFrequencyKhz;
+    private volatile Double radioFrequencyMhz;
     private volatile Double radioBandwidthKhz;
     private volatile Integer radioSpreadingFactor;
     private volatile Integer radioCodingRate;
@@ -59,7 +166,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Reports whether the required {@code SELF_INFO} response has been received.
- *
+     *
      * @return {@code true} once the Companion handshake is considered complete
      */
     public boolean isReady() {
@@ -76,7 +183,7 @@ public class MeshCoreCompanionState {
      * MeshCore Companion does not use Meshtastic protobuf as its wire format,
      * but Chat, Nodes, and Dashboard already consume {@link DeviceState}. The
      * runtime fills this object with contacts, channels, messages, and telemetry.
- *
+     *
      * @return bridge state for the UI and local history
      */
     public DeviceState getDeviceState() {
@@ -85,7 +192,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the MeshCore device name reported by {@code SELF_INFO}.
- *
+     *
      * @return device name, or {@code null}
      */
     public String getDeviceName() {
@@ -99,7 +206,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the device public key as HEX.
- *
+     *
      * @return public-key HEX string, or {@code null}
      */
     public String getPublicKeyHex() {
@@ -119,7 +226,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the stable owner id used by higher-level services.
- *
+     *
      * @return {@code meshcore:<publicKeyHex>}, or {@code null}
      */
     public String getOwnerId() {
@@ -128,7 +235,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the MeshCore advertisement type for the local device.
- *
+     *
      * @return raw {@code ADV_TYPE_*}, or {@code null}
      */
     public Integer getAdvertisementType() {
@@ -142,7 +249,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the latitude from the self advertisement.
- *
+     *
      * @return latitude, or {@code null}
      */
     public Double getAdvertisementLatitude() {
@@ -151,7 +258,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the longitude from the self advertisement.
- *
+     *
      * @return longitude, or {@code null}
      */
     public Double getAdvertisementLongitude() {
@@ -206,16 +313,23 @@ public class MeshCoreCompanionState {
         this.manualAddContacts = manualAddContacts;
     }
 
+    public Double getRadioFrequencyMhz() {
+        return radioFrequencyMhz;
+    }
+
+    /** @deprecated use the unit-correct getter. */
+    @Deprecated
     public Double getRadioFrequencyKhz() {
-        return radioFrequencyKhz;
+        return getRadioFrequencyMhz();
     }
 
     public Double getRadioBandwidthKhz() {
         return radioBandwidthKhz;
     }
 
-    void setRadioParameters(Double frequencyKhz, Double bandwidthKhz, Integer spreadingFactor, Integer codingRate) {
-        this.radioFrequencyKhz = frequencyKhz;
+    void setRadioParameters(
+            Double frequencyKhz, Double bandwidthKhz, Integer spreadingFactor, Integer codingRate) {
+        this.radioFrequencyMhz = frequencyKhz;
         this.radioBandwidthKhz = bandwidthKhz;
         this.radioSpreadingFactor = spreadingFactor;
         this.radioCodingRate = codingRate;
@@ -231,7 +345,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the device's current transmit power.
- *
+     *
      * @return TX power in dBm, or {@code null}
      */
     public Integer getTxPowerDbm() {
@@ -245,7 +359,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the maximum allowed transmit power.
- *
+     *
      * @return maximum TX power in dBm, or {@code null}
      */
     public Integer getMaxTxPowerDbm() {
@@ -258,7 +372,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the Companion firmware protocol version.
- *
+     *
      * @return protocol version, or {@code null}
      */
     public Integer getFirmwareProtocolVersion() {
@@ -271,7 +385,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the maximum contact count reported by the device.
- *
+     *
      * @return maximum contact count, or {@code null}
      */
     public Integer getMaxContacts() {
@@ -284,7 +398,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the maximum channel count reported by the device.
- *
+     *
      * @return maximum channel count, or {@code null}
      */
     public Integer getMaxChannels() {
@@ -297,7 +411,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the BLE PIN from device info when the firmware exposes it.
- *
+     *
      * @return PIN, or {@code null}
      */
     public Integer getBlePin() {
@@ -310,7 +424,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the firmware build string.
- *
+     *
      * @return build string, or {@code null}
      */
     public String getFirmwareBuild() {
@@ -323,7 +437,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the device model.
- *
+     *
      * @return model, or {@code null}
      */
     public String getModel() {
@@ -337,7 +451,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the firmware version text.
- *
+     *
      * @return firmware version, or {@code null}
      */
     public String getFirmwareVersion() {
@@ -350,7 +464,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the battery voltage.
- *
+     *
      * @return voltage in millivolts, or {@code null}
      */
     public Integer getBatteryMillivolts() {
@@ -365,7 +479,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the amount of used device storage.
- *
+     *
      * @return used storage in KB, or {@code null}
      */
     public Long getUsedStorageKb() {
@@ -374,7 +488,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the total device storage capacity.
- *
+     *
      * @return total storage in KB, or {@code null}
      */
     public Long getTotalStorageKb() {
@@ -388,7 +502,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the latest MeshCore Companion error.
- *
+     *
      * @return error text, or {@code null}
      */
     public String getLastError() {
@@ -397,11 +511,12 @@ public class MeshCoreCompanionState {
 
     void setLastError(String lastError) {
         this.lastError = lastError;
+        fireChanged();
     }
 
     /**
      * Returns the contact count announced at the start of a sync response.
- *
+     *
      * @return contact count, or {@code null}
      */
     public Integer getContactCount() {
@@ -414,7 +529,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Returns the timestamp of the latest contact-list change.
- *
+     *
      * @return Unix timestamp, or {@code null}
      */
     public Long getContactsLastModified() {
@@ -427,27 +542,29 @@ public class MeshCoreCompanionState {
 
     /**
      * Updates a channel in the compatible {@link DeviceState}.
- *
+     *
      * @param channelIndex MeshCore channel index
      * @param channelName  channel name
      * @param enabled      whether the channel is active
      */
     void updateChannel(int channelIndex, String channelName, boolean enabled) {
-        ChannelProtos.Channel.Role role = !enabled
-                ? ChannelProtos.Channel.Role.DISABLED
-                : channelIndex == 0
-                ? ChannelProtos.Channel.Role.PRIMARY
-                : ChannelProtos.Channel.Role.SECONDARY;
-        String name = channelName == null || channelName.isBlank()
-                ? channelIndex == 0 ? "Public" : "Ch " + channelIndex
-                : channelName;
-        ChannelProtos.Channel channel = ChannelProtos.Channel.newBuilder()
-                .setIndex(channelIndex)
-                .setRole(role)
-                .setSettings(ChannelProtos.ChannelSettings.newBuilder().setName(name))
-                .build();
+        ChannelProtos.Channel.Role role =
+                !enabled
+                        ? ChannelProtos.Channel.Role.DISABLED
+                        : channelIndex == 0
+                                ? ChannelProtos.Channel.Role.PRIMARY
+                                : ChannelProtos.Channel.Role.SECONDARY;
+        String name =
+                channelName == null || channelName.isBlank()
+                        ? channelIndex == 0 ? "Public" : "Ch " + channelIndex
+                        : channelName;
+        ChannelProtos.Channel channel =
+                ChannelProtos.Channel.newBuilder()
+                        .setIndex(channelIndex)
+                        .setRole(role)
+                        .setSettings(ChannelProtos.ChannelSettings.newBuilder().setName(name))
+                        .build();
         deviceState.updateChannel(channel);
-        deviceState.setChannelCatalogReady(true);
     }
 
     /**
@@ -462,7 +579,7 @@ public class MeshCoreCompanionState {
 
     /**
      * Adds or updates a MeshCore contact in the node database.
- *
+     *
      * @param publicKey  full or partial contact public key
      * @param type raw {@code ADV_TYPE_*}
      * @param name advertised name
@@ -471,16 +588,19 @@ public class MeshCoreCompanionState {
      * @param longitude  advertised longitude, or {@code null}
      * @return contact node id, or {@code null}
      */
-    String updateContact(byte[] publicKey,
-                         int type,
-                         String name,
-                         long lastAdvert,
-                         Double latitude,
-                         Double longitude) {
+    String updateContact(
+            byte[] publicKey,
+            int type,
+            String name,
+            long lastAdvert,
+            Double latitude,
+            Double longitude) {
         if (publicKey == null || publicKey.length < 6) {
             return null;
         }
-        String nodeId = MeshCoreCompanionFrames.nodeIdFromPublicKeyHex(MeshCoreCompanionFrames.hex(publicKey));
+        String nodeId =
+                MeshCoreCompanionFrames.nodeIdFromPublicKeyHex(
+                        MeshCoreCompanionFrames.hex(publicKey));
         if (nodeId == null) {
             return null;
         }
@@ -488,7 +608,7 @@ public class MeshCoreCompanionState {
         publicKeysByNodeId.put(nodeId, publicKeyCopy);
         nodeIdsByPublicKeyPrefix.put(publicKeyPrefixHex(publicKeyCopy), nodeId);
 
-        NodeData node = deviceState.getOrCreateNode(nodeNumFromNodeId(nodeId));
+        NodeData node = deviceState.getOrCreateNode(nodeNumber(nodeId));
         node.setNodeId(nodeId);
         node.setPublicKey(publicKeyCopy);
         node.setLongName(name == null || name.isBlank() ? nodeId : name);
@@ -509,91 +629,116 @@ public class MeshCoreCompanionState {
     /**
      * Adds an incoming MeshCore channel message.
      */
-    void addIncomingChannelMessage(int channelIndex,
-                                   String text,
-                                   long timestamp,
-                                   Integer pathLength,
-                                   Float snr,
-                                   int packetId) {
-        ensureDefaultChannel();
+    MeshMessage addIncomingChannelMessage(
+            int channelIndex,
+            String text,
+            long timestamp,
+            Integer pathLength,
+            Float snr,
+            int packetId) {
+
         String fromNodeId = "mc:channel";
         ensureSyntheticNode(fromNodeId, "MeshCore Channel", "CHAN");
-        MeshMessage message = new MeshMessage(
-                fromNodeId,
-                "!ffffffff",
-                channelIndex,
-                text,
-                normalizeTimestamp(timestamp),
-                false);
+        MeshMessage message =
+                new MeshMessage(
+                        fromNodeId,
+                        "!ffffffff",
+                        channelIndex,
+                        text,
+                        normalizeTimestamp(timestamp),
+                        false);
         message.setPacketId(packetId);
-        message.setSenderName("MeshCore");
+        int separator = text.indexOf(": ");
+        message.setSenderName(
+                separator > 0 && separator <= 32 ? text.substring(0, separator) : "MeshCore");
         if (pathLength != null && pathLength >= 0 && pathLength <= 254) {
-            message.setHopStart(pathLength);
+            message.setHopStart(pathLength & 63);
         }
         if (snr != null) {
             message.setRxSnr(snr);
         }
         deviceState.addMessage(message);
+        return message;
     }
 
     /**
      * Adds an incoming MeshCore direct message.
      */
-    void addIncomingDirectMessage(byte[] publicKeyPrefix,
-                                  String text,
-                                  long timestamp,
-                                  Integer pathLength,
-                                  Float snr,
-                                  int packetId) {
+    MeshMessage addIncomingDirectMessage(
+            byte[] publicKeyPrefix,
+            String text,
+            long timestamp,
+            Integer pathLength,
+            Float snr,
+            int packetId,
+            String signerPrefix) {
         String peerNodeId = resolveNodeIdFromPrefix(publicKeyPrefix);
         if (peerNodeId == null) {
             peerNodeId = updateContact(publicKeyPrefix, 1, null, timestamp, null, null);
         }
         if (peerNodeId == null) {
-            return;
+            return null;
         }
         NodeData peerNode = deviceState.getNodeByNodeId(peerNodeId);
-        MeshMessage message = new MeshMessage(
-                peerNodeId,
-                ownerId != null ? ownerId : "!ffffffff",
-                0,
-                text,
-                normalizeTimestamp(timestamp),
-                false);
+        MeshMessage message =
+                new MeshMessage(
+                        peerNodeId,
+                        ownerId != null ? ownerId : "!ffffffff",
+                        0,
+                        text,
+                        normalizeTimestamp(timestamp),
+                        false);
         message.setPacketId(packetId);
         if (peerNode != null && peerNode.getLongName() != null) {
             message.setSenderName(peerNode.getLongName());
         }
         if (pathLength != null && pathLength >= 0 && pathLength <= 254) {
-            message.setHopStart(pathLength);
+            message.setHopStart(pathLength & 63);
         }
         if (snr != null) {
             message.setRxSnr(snr);
         }
+        if (signerPrefix != null && !signerPrefix.isEmpty())
+            message.setSenderName(
+                    (message.getSenderName() == null ? peerNodeId : message.getSenderName())
+                            + " ["
+                            + signerPrefix
+                            + "]");
         deviceState.addDirectMessage(message, peerNodeId);
+        return message;
     }
 
     /**
      * Returns the first 6 bytes of a public key for sending a direct message.
- *
+     *
      * @param nodeId MeshCore contact node id
      * @return 6-byte prefix, or an empty array
      */
     byte[] publicKeyPrefixForNode(String nodeId) {
-        byte[] publicKey = publicKeysByNodeId.get(nodeId);
-        if (publicKey != null && publicKey.length >= 6) {
-            return Arrays.copyOf(publicKey, 6);
+        byte[] key = publicKeysByNodeId.get(nodeId);
+        if (key == null && nodeId != null && nodeId.length() == 15) {
+            String resolved =
+                    resolveNodeIdFromPrefix(
+                            MeshCoreCompanionFrames.publicKeyPrefixFromNodeId(nodeId));
+            key = publicKeysByNodeId.get(resolved);
         }
-        return MeshCoreCompanionFrames.publicKeyPrefixFromNodeId(nodeId);
+        if (key == null || key.length != 32) return new byte[0];
+        String resolved = resolveNodeIdFromPrefix(Arrays.copyOf(key, 6));
+        if (resolved != null && resolved.startsWith("mc:pending:"))
+            throw new IllegalStateException("Ambiguous MeshCore public-key prefix");
+        return resolved == null ? new byte[0] : Arrays.copyOf(key, 6);
     }
 
-    private String resolveNodeIdFromPrefix(byte[] publicKeyPrefix) {
-        if (publicKeyPrefix == null || publicKeyPrefix.length < 6) {
-            return null;
-        }
-        String prefixHex = publicKeyPrefixHex(publicKeyPrefix);
-        String existing = nodeIdsByPublicKeyPrefix.get(prefixHex);
-        return existing != null ? existing : MeshCoreCompanionFrames.nodeIdFromPublicKeyHex(prefixHex);
+    String resolveNodeIdFromPrefix(byte[] prefix) {
+        if (prefix == null || prefix.length != 6) return null;
+        String hex = MeshCoreCompanionFrames.hex(prefix);
+        var matches =
+                publicKeysByNodeId.entrySet().stream()
+                        .filter(e ->
+                                e.getValue().length == 32
+                                        && publicKeyPrefixHex(e.getValue()).equals(hex))
+                        .toList();
+        return matches.size() != 1 ? "mc:pending:" + hex : matches.getFirst().getKey();
     }
 
     private void updateOwnerNode() {
@@ -601,7 +746,7 @@ public class MeshCoreCompanionState {
             return;
         }
         byte[] publicKey = MeshCoreCompanionFrames.hexToBytes(publicKeyHex);
-        int nodeNum = nodeNumFromNodeId(ownerId);
+        int nodeNum = nodeNumber(ownerId);
         deviceState.setMyNodeNum(nodeNum);
 
         String longName = deviceName == null || deviceName.isBlank() ? "MeshCore" : deviceName;
@@ -621,20 +766,18 @@ public class MeshCoreCompanionState {
         if (batteryMillivolts != null) {
             owner.setVoltage(batteryMillivolts / 1000.0f);
         }
-        if (txPowerDbm != null) {
-            owner.setAirUtilTx(txPowerDbm);
-        }
-        MeshProtos.User.Builder user = MeshProtos.User.newBuilder()
-                .setId(ownerId)
-                .setLongName(longName)
-                .setShortName(shortName);
+
+        MeshProtos.User.Builder user =
+                MeshProtos.User.newBuilder()
+                        .setId(ownerId)
+                        .setLongName(longName)
+                        .setShortName(shortName);
         if (publicKey.length > 0) {
             user.setPublicKey(ByteString.copyFrom(publicKey));
         }
         deviceState.setOwnerInfo(user.build());
         deviceState.fireOwnerInfoListeners();
         deviceState.fireNodeUpdateListeners(nodeNum);
-        ensureDefaultChannel();
     }
 
     private void addBatteryTelemetry() {
@@ -648,7 +791,7 @@ public class MeshCoreCompanionState {
     }
 
     private void ensureSyntheticNode(String nodeId, String longName, String shortName) {
-        NodeData node = deviceState.getOrCreateNode(nodeNumFromNodeId(nodeId));
+        NodeData node = deviceState.getOrCreateNode(nodeNumber(nodeId));
         node.setNodeId(nodeId);
         node.setLongName(longName);
         node.setShortName(shortName);
@@ -690,6 +833,7 @@ public class MeshCoreCompanionState {
         return switch (advertisementType) {
             case 2 -> "REPEATER";
             case 3 -> "ROOM";
+            case 4 -> "SENSOR";
             default -> "CLIENT";
         };
     }

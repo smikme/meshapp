@@ -390,7 +390,7 @@ public final class NodeCacheService {
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS nodes (
-                        node_id       VARCHAR(20) PRIMARY KEY,
+                        node_id       VARCHAR(80) PRIMARY KEY,
                         node_num      INT,
                         long_name     VARCHAR(100),
                         short_name    VARCHAR(10),
@@ -415,8 +415,8 @@ public final class NodeCacheService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS node_flags (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
-                        node_id       VARCHAR(20) NOT NULL,
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
+                        node_id       VARCHAR(80) NOT NULL,
                         favorite      BOOLEAN DEFAULT FALSE,
                         ignored       BOOLEAN DEFAULT FALSE,
                         PRIMARY KEY (owner_node_id, node_id)
@@ -427,8 +427,8 @@ public final class NodeCacheService {
                     CREATE TABLE IF NOT EXISTS telemetry_history (
                         id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
                         ts                  BIGINT NOT NULL,
-                        node_id             VARCHAR(20) NOT NULL,
-                        owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                        node_id             VARCHAR(80) NOT NULL,
+                        owner_node_id       VARCHAR(80) NOT NULL DEFAULT '',
                         packet_id           BIGINT DEFAULT 0,
                         telemetry_variant   VARCHAR(40),
                         battery_level       INT,

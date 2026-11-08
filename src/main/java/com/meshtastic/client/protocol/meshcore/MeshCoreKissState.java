@@ -64,7 +64,7 @@ public class MeshCoreKissState {
     /**
      * Returns the stable owner id used by higher-level services.
  *
-     * @return short MeshCore node id in the {@code mc:<12 hex>} form, or {@code null}
+     * @return full MeshCore node id in the {@code mc:<64 hex>} form, or {@code null}
      */
     public String getOwnerId() {
         return ownerId;
