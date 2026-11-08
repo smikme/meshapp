@@ -6,6 +6,7 @@ import com.meshtastic.client.utils.NativeResourceLoader;
 import com.sun.jna.Callback;
 import com.sun.jna.Library;
 import com.sun.jna.Native;
+import com.sun.jna.NativeLong;
 import com.sun.jna.Pointer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class LinuxGtkTrayService implements AppTrayService {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxGtkTrayService.class);
-    private static final int APP_INDICATOR_CATEGORY_APPLICATION_STATUS = 0;
+    private static final String APP_INDICATOR_CATEGORY_APPLICATION_STATUS = "ApplicationStatus";
     private static final int APP_INDICATOR_STATUS_PASSIVE = 0;
     private static final int APP_INDICATOR_STATUS_ACTIVE = 1;
     private static final String APP_INDICATOR_ID = "app.privatepractice.meshapp";
@@ -196,22 +197,23 @@ public final class LinuxGtkTrayService implements AppTrayService {
             if (OsDetect.isLinuxFlatpak()) {
                 // Flatpak exports owned icon names to the host icon theme. A temporary path inside
                 // the sandbox is not visible to GNOME Shell, so use the exported tray icon by name.
-                createdIndicator = library.app_indicator_new(
-                        APP_INDICATOR_ID,
+                createdIndicator = createIndicator(
+                        library,
+                        gObject,
                         FLATPAK_TRAY_ICON_NAME,
-                        APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
+                        null);
             } else {
                 String fileName = iconPath.getFileName().toString();
                 int extensionStart = fileName.lastIndexOf('.');
                 String iconName = extensionStart > 0 ? fileName.substring(0, extensionStart) : fileName;
-                createdIndicator = library.app_indicator_new_with_path(
-                        APP_INDICATOR_ID,
+                createdIndicator = createIndicator(
+                        library,
+                        gObject,
                         iconName,
-                        APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
                         iconPath.getParent().toAbsolutePath().toString());
             }
             if (createdIndicator == null) {
-                log.warn("app_indicator_new_with_path returned null");
+                log.warn("AppIndicator construction returned null");
                 return false;
             }
 
@@ -236,6 +238,29 @@ public final class LinuxGtkTrayService implements AppTrayService {
             log.debug("AppIndicator is unavailable; using legacy GTK status icon", t);
             return false;
         }
+    }
+
+    static Pointer createIndicator(AppIndicatorLibrary library,
+                                   GObjectLibrary objects,
+                                   String iconName,
+                                   String iconThemePath) {
+        // The deprecated app_indicator_new* wrappers only set these GObject properties.
+        // Keep the GTK/dbusmenu ABI: the GLib rewrite uses a different menu protocol that
+        // is not a drop-in replacement for KDE's StatusNotifier host.
+        NativeLong type = library.app_indicator_get_type();
+        if (iconThemePath == null) {
+            return objects.g_object_new(type,
+                    "id", APP_INDICATOR_ID,
+                    "category", APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
+                    "icon-name", iconName,
+                    null);
+        }
+        return objects.g_object_new(type,
+                "id", APP_INDICATOR_ID,
+                "category", APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
+                "icon-name", iconName,
+                "icon-theme-path", iconThemePath,
+                null);
     }
 
     private void installLegacyStatusIcon(Path iconPath, Runnable onActivate) {
@@ -341,16 +366,15 @@ public final class LinuxGtkTrayService implements AppTrayService {
         void gtk_main_quit();
     }
 
-    private interface AppIndicatorLibrary extends Library {
-        Pointer app_indicator_new(String id, String iconName, int category);
-
-        Pointer app_indicator_new_with_path(String id, String iconName, int category, String iconThemePath);
+    interface AppIndicatorLibrary extends Library {
+        NativeLong app_indicator_get_type();
         void app_indicator_set_status(Pointer indicator, int status);
         void app_indicator_set_menu(Pointer indicator, Pointer menu);
         void app_indicator_set_title(Pointer indicator, String title);
     }
 
-    private interface GObjectLibrary extends Library {
+    interface GObjectLibrary extends Library {
+        Pointer g_object_new(NativeLong objectType, String firstPropertyName, Object... properties);
         long g_signal_connect_data(Pointer instance,
                                    String detailedSignal,
                                    Callback handler,

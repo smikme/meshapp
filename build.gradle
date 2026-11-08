@@ -60,7 +60,7 @@ plugins {
 	id 'application'
 	id 'org.graalvm.buildtools.native' version '1.1.18'
 	id 'com.google.protobuf' version '0.10.1'
-	id 'org.openjfx.javafxplugin' version '0.1.0'
+	id 'org.openjfx.javafxplugin' version '0.1.0' apply false
 	id 'io.github.jwharm.flatpak-gradle-generator' version '1.9.0'
 }
 
@@ -187,7 +187,19 @@ application {
 	applicationDefaultJvmArgs = jvmArgs
 }
 
+// Reuse OpenJFX's dependency/variant configuration without applying its 0.1.0 run hook:
+// that hook reads Task.extensions during execution, which Gradle 10 no longer permits.
+// The module path for our classpath application is configured on run below.
+apply plugin: com.google.gradle.osdetector.OsDetectorPlugin
+extensions.create('javafx', org.openjfx.gradle.JavaFXOptions, sourceSets,
+	extensions.getByType(com.google.gradle.osdetector.OsDetector))
+org.openjfx.gradle.JavaFXModule.values().each { module ->
+	dependencies.components.withModule("org.openjfx:${module.artifactName}",
+		org.openjfx.gradle.metadatarule.JavaFXComponentMetadataRule)
+}
+
 javafx {
+	configuration = 'implementation'
 	version = javaFxVersion
 	modules = ['javafx.controls']
 	if (javaFxPlatform.get()) {
@@ -198,6 +210,19 @@ javafx {
 // ============================================================================
 // SECTION 3: Versioning, Java toolchain, repositories and dependencies
 // ============================================================================
+
+// Providers track Git output used during configuration and defer commands used only by tasks.
+// An explicit working directory also supports invoking Gradle with -p from another directory.
+def gitOutput = { List<String> arguments ->
+	providers.exec {
+		workingDir = layout.projectDirectory.asFile
+		commandLine(['git'] + arguments)
+	}.standardOutput.asText.map { it.trim() }
+}
+def gitHeadTags = gitOutput(['tag', '--points-at', 'HEAD'])
+def gitDescription = gitOutput(['describe', '--tags', '--always', '--dirty'])
+def gitCommitCount = gitOutput(['rev-list', '--count', 'HEAD'])
+def gitShortHash = gitOutput(['rev-parse', '--short=4', 'HEAD'])
 
 // Accepts vX.Y.Z and X.Y.Z. Other Git labels are not treated as release versions.
 def parseReleaseVersionInfo = { rawTag ->
@@ -236,7 +261,7 @@ def resolveReleaseVersionInfo = {
 	}
 
 	try {
-		def tags = 'git tag --points-at HEAD'.execute().text.readLines()
+		def tags = gitHeadTags.get().readLines()
 			.collect { it.trim() }
 			.findAll { !it.isEmpty() }
 			.collect { tag ->
@@ -277,7 +302,7 @@ version = configuredApplicationVersion ?: {
 		return releaseVersionInfo.tag
 	}
 	try {
-		return 'git describe --tags --always --dirty'.execute().text.trim() ?: 'dev'
+		return gitDescription.get() ?: 'dev'
 	} catch (ignored) {
 		return 'dev'
 	}
@@ -302,8 +327,8 @@ repositories {
 configurations.configureEach {
 	resolutionStrategy.eachDependency { details ->
 		if (details.requested.group == 'org.openjfx' && details.requested.name.startsWith('javafx-')) {
-			// Any transitive org.openjfx dependency must match the version declared
-			// through org.openjfx.javafxplugin; otherwise Gradle may resolve a newer
+			// Any transitive org.openjfx dependency must match the JavaFX configuration;
+			// otherwise Gradle may resolve a newer
 			// version and silently move the build to another JavaFX line.
 			details.useVersion(javaFxVersion)
 			details.because("Keep all JavaFX modules aligned with the configured project version ${javaFxVersion}")
@@ -434,7 +459,7 @@ tasks.register('generateVersionProperties') {
 		dir.mkdirs()
 		def versionCode = '0'
 		try {
-			versionCode = 'git rev-list --count HEAD'.execute().text.trim() ?: '0'
+			versionCode = gitCommitCount.get() ?: '0'
 		} catch (ignored) {}
 		new File(dir, 'version.properties').text =
 			"version=${applicationVersion}\n" +
@@ -744,12 +769,12 @@ def resolvePackageVersion = { os ->
 		return releasePackageVersion
 	}
 	try {
-		def count = 'git rev-list --count HEAD'.execute().text.trim()
+		def count = gitCommitCount.get()
 		if (os.isMacOsX()) {
 			// macOS jpackage allows 1-3 numbers only
 			return "2.0.${count}"
 		}
-		def hash = 'git rev-parse --short=4 HEAD'.execute().text.trim()
+		def hash = gitShortHash.get()
 		// Fallback for dev builds without a release tag; MSI upgrades still use
 		// the first three version components.
 		def minor = Integer.parseInt(hash, 16) % 65536
@@ -1771,7 +1796,20 @@ javadoc {
 	exclude 'org/meshtastic/proto/**'
 	failOnError = false
 }
-tasks.named("run") {
+tasks.named('run', JavaExec) {
+	def runtimeClasspath = sourceSets.main.runtimeClasspath
+	def fxPlatform = javafx.platform
+	def fxModules = javafx.modules.join(',')
+	def fxModulePath = runtimeClasspath.filter { file ->
+		org.openjfx.gradle.JavaFXModule.values().any { module ->
+			module.compareJarFileName(fxPlatform, file.name) || module.moduleJarFileName == file.name
+		}
+	}
+	classpath = runtimeClasspath - fxModulePath
+	jvmArgumentProviders.add({ ->
+		['--module-path', fxModulePath.asPath, '--add-modules', fxModules]
+	} as CommandLineArgumentProvider)
+
 	// GUI run always executes. On macOS, plain JavaExec does not create the correct Dock/Cmd+Tab
 	// identity, so this task delegates to the temporary .app launcher defined below.
 	outputs.upToDateWhen { false }
