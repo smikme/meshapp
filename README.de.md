@@ -23,7 +23,7 @@
 
 <p align="center">
   Primäre Entwicklungsplattform:
-  <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
+  <a href="https://github.com/smikme/meshapp">github.com/smikme/meshapp</a>
 </p>
 
 [Installation](#installation)
@@ -55,32 +55,22 @@ Verbindungstyp und Protokoll werden getrennt ausgewählt. Sie können sich zum B
 
 ## Installation
 
-Fertige Pakete werden auf der [Gitea-Release-Seite](https://git.privatepractice.app/covox/meshapp/releases) veröffentlicht.
+Fertige Pakete werden auf der [GitHub-Releases-Seite](https://github.com/smikme/meshapp/releases) veröffentlicht.
 
 - macOS: `.dmg` herunterladen, öffnen und MeshApp in den Programme-Ordner verschieben.
 - Windows: `.msi`-Installer herunterladen und ausführen.
 - Debian / Ubuntu: `.deb`-Paket herunterladen und mit `apt` oder dem Paketmanager installieren.
 - Linux AppImage: `.AppImage` herunterladen, ausführbar machen und starten.
 
-Flatpak-Nutzer können MeshApp über die veröffentlichte Flatpak-Referenz installieren:
+Laden Sie das `.flatpak`-Paket von GitHub Releases herunter. Installation und Aktualisierung erfolgen aus der heruntergeladenen Datei (Dateiname entsprechend ersetzen):
 
 ```bash
-flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.freedesktop.Platform//25.08
+flatpak install --user ./MeshApp-v2.4.0-linux-x86_64.flatpak
 flatpak run app.privatepractice.meshapp
 ```
 
-Wenn das Repository `meshapp` früher mit dem alten direkten `/repo/`-Befehl hinzugefügt wurde und Flatpak `public key not found` meldet, entfernen Sie das alte Remote und fügen Sie es erneut hinzu:
-
-```bash
-flatpak remote-delete --user --force meshapp
-flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
-```
-
-So aktualisieren Sie die Flatpak-Installation:
-
-```bash
-flatpak update app.privatepractice.meshapp
-```
 
 ---
 
@@ -351,7 +341,7 @@ Fertige Pakete (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) benötigen dies
 ### Start aus dem Quellcode
 
 ```bash
-git clone https://git.privatepractice.app/covox/meshapp.git
+git clone https://github.com/smikme/meshapp.git
 cd meshapp
 
 # JavaFX-Anwendung
@@ -459,7 +449,7 @@ Wenn VisualVM `Provided Memory settings are invalid` anzeigt, öffnen Sie die Ei
 | Serial | Native JNA-Backends + jSerialComm-Erkennung | Nativer COM-/tty-Zugriff |
 | BLE | CoreBluetooth / WinRT / BlueZ über JNA | BLE-Gerätesuche, GATT und Pairing |
 | Native Integrationen | JNA + OS-Integrationen | Mica, Vibrancy, Tray-/Statusleisten-Integration und Plattformschichten |
-| Build | Gradle 9.4.1 + Protobuf + CMake + jpackage | Java-Code, native Bibliotheken und Installer-Builds |
+| Build | Gradle 9.8.2 + Protobuf + CMake + jpackage | Java-Code, native Bibliotheken und Installer-Builds |
 
 ---
 
@@ -580,34 +570,11 @@ Während `processResources` baut Gradle native Komponenten:
 - macOS: `libmeshapp-serial.dylib` für serielle Modem-Steuerleitungen
 - macOS: `libmeshapp-tray.dylib` für Tray-/Statusleisten-Element
 
-### Signierung und Notarisierung unter macOS
+### Signierung der macOS-Versionen
 
-Standardmäßig versieht `./gradlew jpackage` unter macOS die `.app` mit einer Ad-hoc-Signatur. Das reicht für lokale Tests, aber eine aus dem Browser heruntergeladene `.dmg` kann die Gatekeeper-Meldung **"The application is damaged and can't be opened."** erhalten.
+GitHub-Versionen verwenden Ad-hoc-Signaturen. Für Apple Silicon und Intel werden separate DMG-Dateien erstellt. Developer ID und Notarisierung sind nicht eingerichtet; Gatekeeper kann eine ausdrückliche Freigabe zum Öffnen verlangen.
 
-Release-Builds benötigen Zugangsdaten für die `Developer ID`-Signierung:
-
-- `MAC_SIGNING_KEY_USER_NAME` oder `-PmacSigningKeyUserName=...`
-- `MAC_SIGNING_KEYCHAIN` oder `-PmacSigningKeychain=...`
-- `MAC_PACKAGE_SIGNING_PREFIX` oder `-PmacPackageSigningPrefix=...`, Standardwert ist `com.meshtastic`
-
-Für einen Gitea-Runner im Daemon-Modus ist es besser, das Zertifikat aus Secrets in einen temporären Keychain zu importieren:
-
-- `MAC_SIGNING_CERTIFICATE_P12`
-- `MAC_SIGNING_CERTIFICATE_PASSWORD`
-- `MAC_SIGNING_KEYCHAIN_PASSWORD`
-
-Herunterladbare Builds benötigen `Developer ID Application`. `Apple Development` eignet sich für Entwicklung, aber nicht für Release-DMG-Builds.
-
-Notarisierung kann auf eine der folgenden Arten aktiviert werden:
-
-- `MAC_NOTARY_KEYCHAIN_PROFILE` oder `-PmacNotaryKeychainProfile=...`
-- `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
-- `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
-- In CI kann `MAC_NOTARY_KEY_FILE_BASE64` statt `MAC_NOTARY_KEY_FILE` übergeben werden
-
-Danach baut `./gradlew jpackage` signierte `.app` und `.dmg` und führt anschließend `notarytool submit --wait` und `stapler` aus.
-
-Wenn der Gitea-Runner kein `Developer ID Application` hat, baut der Workflow das macOS-Artefakt weiterhin unter demselben Namen, überspringt aber `spctl`- und Notarisierungsprüfungen.
+Siehe [GitHub-Build und Veröffentlichung](docs/github-release.md) sowie [Format der Anwendungsupdates](docs/self-update.md).
 
 ### Installation unter macOS
 

@@ -46,7 +46,7 @@ modules:
             meshapp_protoc_classifier=linux-aarch_64
             ;;
         esac
-        gradle-dist/gradle-9.4.1/bin/gradle --offline --no-daemon installDist \
+        gradle-dist/gradle-9.8.2/bin/gradle --offline --no-daemon installDist \
           -PmeshappJavaVersion=25 \
           -PmeshappJavaReleaseVersion=25 \
           -PmeshappJavaFxPlatform="${meshapp_javafx_platform}" \
@@ -65,13 +65,18 @@ modules:
       - install -Dm644 src/main/resources/emoji/LICENSE-GRAPHICS /app/share/licenses/app.privatepractice.meshapp/emoji/LICENSE-GRAPHICS
       - install -Dm644 src/main/resources/emoji/SOURCE.txt /app/share/licenses/app.privatepractice.meshapp/emoji/SOURCE.txt
     sources:
-      - type: git
-        url: https://git.privatepractice.app/covox/meshapp.git
-        tag: v2.1.10
-        commit: fdb87d10c9917cc9b4a2b24d1ea428952b45b010
+      - type: dir
+        path: .
+        skip:
+          - .git
+          - .gradle
+          - build
+          - .flatpak-builder
+          - offline-repository
+          - .release-secrets
       - type: archive
-        url: https://services.gradle.org/distributions/gradle-9.4.1-bin.zip
-        sha256: 2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb
+        url: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+        sha256: 21bd5da2de49b642904077f38c0efdc7778e92b3ed0889392dca61b97e389607
         dest: gradle-dist
       - flatpak-sources-x86_64.json
       - flatpak-sources-aarch64.json

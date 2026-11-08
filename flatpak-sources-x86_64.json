@@ -361,6 +361,22 @@
   },
   {
     "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/io/nayuki/qrcodegen/1.8.0/qrcodegen-1.8.0.jar",
+    "sha512": "c1e6bfc12ba09e492c6ecca68724c0b0f704dc0f32627c54ad52c2905aa1b47eb0f73ab832dff15961a80c5a62b5b2a56173addbeb7928a1826e053413b02a4a",
+    "dest": "./offline-repository/io/nayuki/qrcodegen/1.8.0",
+    "dest-filename": "qrcodegen-1.8.0.jar",
+    "only-arches": ["x86_64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/io/nayuki/qrcodegen/1.8.0/qrcodegen-1.8.0.pom",
+    "sha512": "d29c14441571540072c9505b8bdfa539289542ac3e49d3efc3008e583607fceefe28c89e7a4b7b293f30a4ba1b58db0434b7b5451cc5af51a3b8cbc29268fc9d",
+    "dest": "./offline-repository/io/nayuki/qrcodegen/1.8.0",
+    "dest-filename": "qrcodegen-1.8.0.pom",
+    "only-arches": ["x86_64"]
+  },
+  {
+    "type": "file",
     "url": "https://plugins.gradle.org/m2/kr/motd/maven/os-maven-plugin/1.7.1/os-maven-plugin-1.7.1.jar",
     "sha512": "e67fd34fb8ed011cd3983b8694820c42464b50b62129c086d7cca87b83963ea19291e0ebd1ae6ee9c409bf7a81dffa3b01fc39ba483ac03630bf5551fd83ca5c",
     "dest": "./offline-repository/kr/motd/maven/os-maven-plugin/1.7.1",
@@ -605,6 +621,30 @@
     "sha512": "a1329153a4e03de724497f4ded397dedaf15b26b1108d0402022815e73e5774a3e67d6a15740dec1fedf14cba81fcd52fa55544e910d2da8e9a7108b0865abcc",
     "dest": "./offline-repository/org/graalvm/buildtools/utils/1.1.18",
     "dest-filename": "utils-1.1.18.pom",
+    "only-arches": ["x86_64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/annotations/26.1.0/annotations-26.1.0.jar",
+    "sha512": "f1ccde58143b38ce7d064b1e9800cd84c438d3f992727620a136e86151fe2839e10a77fd2a1424fd4e7516aa4465cae1692b9cc0d57fd35c41651c90c591ad00",
+    "dest": "./offline-repository/org/jetbrains/annotations/26.1.0",
+    "dest-filename": "annotations-26.1.0.jar",
+    "only-arches": ["x86_64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/annotations/26.1.0/annotations-26.1.0.module",
+    "sha512": "11acdf608c6b23415a1f019309db1985ce302e43a196c1a406023c49b90285f75316b046c3677e354ccbd68d4917fad62f797341dcaeda0e0705165c2f7ea7ab",
+    "dest": "./offline-repository/org/jetbrains/annotations/26.1.0",
+    "dest-filename": "annotations-26.1.0.module",
+    "only-arches": ["x86_64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/jetbrains/annotations/26.1.0/annotations-26.1.0.pom",
+    "sha512": "6f8ab058079cc2248ab3117243616e9bc37788f9e3731315fb4033e74590ef8ff9f910df8e347d0dea0570262563240909fe886cfd567c8859b4ed68bd592ca5",
+    "dest": "./offline-repository/org/jetbrains/annotations/26.1.0",
+    "dest-filename": "annotations-26.1.0.pom",
     "only-arches": ["x86_64"]
   },
   {

@@ -1,6 +1,8 @@
 HELP.md
 .gradle
 build/
+.release-secrets/
+__pycache__/
 .flatpak-builder/
 offline-repository/
 /src/main/resources/linux-*/

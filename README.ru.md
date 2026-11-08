@@ -23,7 +23,7 @@
  
 <p align="center">
   Основная площадка разработки:
-  <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
+  <a href="https://github.com/smikme/meshapp">github.com/smikme/meshapp</a>
 </p>
 
 [Установка](#установка)
@@ -55,32 +55,22 @@ MeshApp — настольное приложение для устройств 
 
 ## Установка
 
-Готовые пакеты публикуются на [странице релизов Gitea](https://git.privatepractice.app/covox/meshapp/releases).
+Готовые пакеты публикуются на [странице GitHub Releases](https://github.com/smikme/meshapp/releases).
 
 - macOS: скачайте `.dmg`, откройте его и перенесите MeshApp в Applications.
 - Windows: скачайте и запустите `.msi`-инсталлятор.
 - Debian / Ubuntu: скачайте `.deb`-пакет и установите его через `apt` или пакетный менеджер.
 - Linux AppImage: скачайте `.AppImage`, сделайте файл исполняемым и запустите его.
 
-Пользователи Flatpak могут установить MeshApp через опубликованный Flatpak ref:
+Скачайте пакет `.flatpak` из GitHub Releases. Установка и обновление выполняются из скачанного файла (подставьте его имя):
 
 ```bash
-flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.freedesktop.Platform//25.08
+flatpak install --user ./MeshApp-v2.4.0-linux-x86_64.flatpak
 flatpak run app.privatepractice.meshapp
 ```
 
-Если репозиторий `meshapp` был добавлен старой командой напрямую на `/repo/` и Flatpak сообщает `public key not found`, удалите старый remote и добавьте его заново:
-
-```bash
-flatpak remote-delete --user --force meshapp
-flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
-```
-
-Обновление Flatpak-установки:
-
-```bash
-flatpak update app.privatepractice.meshapp
-```
 
 ---
 
@@ -351,7 +341,7 @@ MeshApp IDE — встроенная среда для Lua-скриптов и �
 ### Запуск из исходников
 
 ```bash
-git clone https://git.privatepractice.app/covox/meshapp.git
+git clone https://github.com/smikme/meshapp.git
 cd meshapp
 
 # JavaFX-приложение
@@ -459,7 +449,7 @@ MESHAPP_JMX_PORT=9011
 | Serial | Нативные JNA-бэкенды + поиск через jSerialComm | Нативный доступ к COM/tty |
 | BLE | CoreBluetooth / WinRT / BlueZ через JNA | Поиск BLE-устройств, GATT и сопряжение |
 | Нативные интеграции | JNA + интеграции с ОС | Mica, vibrancy, системный значок и платформенные слои |
-| Сборка | Gradle 9.4.1 + Protobuf + CMake + jpackage | Сборка Java-кода, нативных библиотек и инсталляторов |
+| Сборка | Gradle 9.8.2 + Protobuf + CMake + jpackage | Сборка Java-кода, нативных библиотек и инсталляторов |
 
 ---
 
@@ -555,7 +545,7 @@ flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedeskto
 
 Среду выполнения можно переопределить через `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` и `-PflatpakBranch=...`.
 
-Для публикации на Flathub используется `app.privatepractice.meshapp.yml`. После изменения Gradle-зависимостей нужно пересобрать список Maven-источников для офлайн-сборки:
+Для локальной офлайн-сборки Flatpak используется `app.privatepractice.meshapp.yml`. После изменения Gradle-зависимостей нужно пересобрать список Maven-источников для офлайн-сборки:
 
 ```bash
 scripts/update-flatpak-sources.sh
@@ -580,34 +570,11 @@ flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepra
 - macOS: `libmeshapp-serial.dylib` для линий управления serial-модемом
 - macOS: `libmeshapp-tray.dylib` для системного значка
 
-### Подпись и нотаризация на macOS
+### Подпись выпусков macOS
 
-По умолчанию `./gradlew jpackage` на macOS делает ad-hoc-подпись `.app`. Для локальной проверки этого достаточно, но скачанный из браузера `.dmg` может получить от Gatekeeper сообщение **«Приложение повреждено, его не удается открыть»**.
+Выпуски на GitHub используют ad-hoc-подпись. Для Apple Silicon и Intel создаются отдельные DMG. Developer ID и нотаризация не настроены; Gatekeeper может потребовать разрешение на запуск скачанного приложения.
 
-Для релизной сборки нужны учётные данные для подписи `Developer ID`:
-
-- `MAC_SIGNING_KEY_USER_NAME` или `-PmacSigningKeyUserName=...`
-- `MAC_SIGNING_KEYCHAIN` или `-PmacSigningKeychain=...`
-- `MAC_PACKAGE_SIGNING_PREFIX` или `-PmacPackageSigningPrefix=...`, по умолчанию `com.meshtastic`
-
-Для раннера Gitea в режиме демона лучше импортировать сертификат из секретов во временную связку ключей:
-
-- `MAC_SIGNING_CERTIFICATE_P12`
-- `MAC_SIGNING_CERTIFICATE_PASSWORD`
-- `MAC_SIGNING_KEYCHAIN_PASSWORD`
-
-Для скачиваемых сборок нужен `Developer ID Application`. `Apple Development` подходит для разработки, но не для релизного DMG.
-
-Нотаризацию можно включить одним из способов:
-
-- `MAC_NOTARY_KEYCHAIN_PROFILE` или `-PmacNotaryKeychainProfile=...`
-- `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
-- `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
-- В CI вместо `MAC_NOTARY_KEY_FILE` можно передать `MAC_NOTARY_KEY_FILE_BASE64`
-
-После этого `./gradlew jpackage` соберёт подписанные `.app` и `.dmg`, затем выполнит `notarytool submit --wait` и `stapler`.
-
-Если в раннере Gitea нет `Developer ID Application`, рабочий процесс всё равно соберёт macOS-артефакт с прежним именем, но пропустит проверки `spctl` и нотаризации.
+Настройка описана в [инструкции по GitHub CI и релизам](docs/github-release.md), формат обновлений — в [документации self-update](docs/self-update.md).
 
 ### Установка на macOS
 

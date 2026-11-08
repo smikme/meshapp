@@ -24,7 +24,7 @@ import java.util.Locale;
 import java.util.UUID;
 
 /**
- * Loads the Lua script catalog from the MeshApp Store Gitea repository.
+ * Loads the static Lua script catalog published on GitHub Pages.
  */
 public final class LuaScriptStoreService {
 
@@ -32,7 +32,7 @@ public final class LuaScriptStoreService {
     private static final Gson JSON = new Gson();
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
     private static final String DIRECTORY_API_URL_TEMPLATE =
-            "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=%s";
+            "https://smikme.github.io/meshapp/store/%s/catalog.json";
     private static final String STORE_BRANCH_RU = "ru";
     private static final String STORE_BRANCH_EN = "en";
 
@@ -101,7 +101,7 @@ public final class LuaScriptStoreService {
     private List<StoreEntry> parseDirectory(String directoryJson) {
         JsonElement root = JsonParser.parseString(directoryJson);
         if (!root.isJsonArray()) {
-            throw new IllegalArgumentException("Gitea returned unexpected directory response");
+            throw new IllegalArgumentException("Unexpected script catalog response");
         }
         JsonArray array = root.getAsJsonArray();
         List<StoreEntry> entries = new ArrayList<>();
@@ -136,7 +136,7 @@ public final class LuaScriptStoreService {
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         int status = response.statusCode();
         if (status < 200 || status >= 300) {
-            throw new IOException("Gitea request failed: HTTP " + status);
+            throw new IOException("Script catalog request failed: HTTP " + status);
         }
         return response.body();
     }

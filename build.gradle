@@ -461,10 +461,16 @@ tasks.register('generateVersionProperties') {
 	doLast {
 		def dir = outputDir.get().asFile
 		dir.mkdirs()
-		def versionCode = '0'
-		try {
-			versionCode = gitCommitCount.get() ?: '0'
-		} catch (ignored) {}
+		// Stable across rebuilds, branches and checkout depth. Development builds never
+		// participate in the public update channel. Keep in sync with scripts/ci/release.py.
+		def versionCode = 0
+		if (releaseVersionInfo != null) {
+			def parts = releaseVersionInfo.packageVersion.tokenize('.').collect { it.toInteger() }
+			if (parts[0] > 255 || parts[1] > 255 || parts[2] > 999) {
+				throw new GradleException('Release version must fit major/minor 0..255 and patch 0..999')
+			}
+			versionCode = parts[0] * 1000000 + parts[1] * 1000 + parts[2]
+		}
 		new File(dir, 'version.properties').text =
 			"version=${applicationVersion}\n" +
 			"versionCode=${versionCode}\n"
@@ -475,6 +481,10 @@ sourceSets.main.resources.srcDir(generatedResourcesDir)
 
 def updatePublicKey = providers.gradleProperty('meshappUpdateEd25519PublicKey')
 		.orElse(providers.environmentVariable('MESHAPP_UPDATE_ED25519_PUBLIC_KEY'))
+		.orElse(providers.provider {
+			def keyFile = file('config/update-public-key.pem')
+			keyFile.isFile() ? keyFile.getText('UTF-8') : ''
+		})
 		.map { it.toString().trim() }
 		.orElse('')
 
@@ -623,7 +633,7 @@ if (OperatingSystem.current().isWindows()) {
 		def nativeDir = file('native/windows-ble')
 		def buildDir = new File(nativeDir, 'build')
 		def dllOutput = new File(buildDir, 'Release/meshapp-ble.dll')
-		def dllDest = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
+		def dllDest = layout.buildDirectory.file('generated/resources/win32-x86-64/meshapp-ble.dll').get().asFile
 
 		inputs.files(fileTree(nativeDir) { include '*.cpp', '*.h', 'CMakeLists.txt' })
 		outputs.file(dllDest)
@@ -992,7 +1002,7 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 
 	// Windows: copy meshapp-ble.dll (WinRT BLE) into lib/ for packaging.
 	if (os.isWindows()) {
-		def bleDll = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
+		def bleDll = layout.buildDirectory.file('generated/resources/win32-x86-64/meshapp-ble.dll').get().asFile
 		if (bleDll.exists()) {
 			Files.copy(
 				bleDll.toPath(),
@@ -1587,7 +1597,7 @@ def writeFlatpakMetainfo = { File sourceFile, File targetFile, String appVersion
 			.findAll { it.name() == 'image' }
 			.each { image ->
 				def current = image.text()
-				def updated = current.replaceAll(/\/raw\/tag\/v?\d+\.\d+\.\d+\//, "/raw/tag/${releaseTag}/")
+				def updated = current.replaceAll(/(raw\.githubusercontent\.com\/smikme\/meshapp\/)(?:main|v?\d+\.\d+\.\d+)\//, "\$1${releaseTag}/")
 				if (updated != current) {
 					image.setValue(updated)
 				}
