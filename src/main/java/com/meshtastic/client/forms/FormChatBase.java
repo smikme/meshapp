@@ -233,11 +233,10 @@ abstract class FormChatBase extends Form {
     protected final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutDirty = new AtomicBoolean();
 
-    protected final Runnable messageListener = this::scheduleMessageRefresh;
     protected final Consumer<MessageChangeEvent> messageChangeListener = this::scheduleMessageChangeRefresh;
     protected final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
     protected final ChangeListener<Number> chatFontSizeListener =
-            (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
+            (_, _, _) -> Platform.runLater(this::handleChatFontSizeChanged);
 
     /**
      * Under heavy traffic, scheduling one Platform.runLater call per event can

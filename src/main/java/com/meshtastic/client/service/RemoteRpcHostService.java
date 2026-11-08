@@ -376,7 +376,7 @@ public final class RemoteRpcHostService {
                 .register("meshcore.status", (_, _) -> CompletableFuture.completedFuture(
                         com.meshtastic.client.protocol.meshcore.MeshCoreRpc.status(requireMeshCoreRuntime())))
                 .register("meshcore.execute", (params, _) ->
-                        com.meshtastic.client.protocol.meshcore.MeshCoreRpc.execute(requireMeshCoreRuntime(), params).<JsonElement>thenApply(value -> value))
+                        com.meshtastic.client.protocol.meshcore.MeshCoreRpc.execute(requireMeshCoreRuntime(), params).thenApply(value -> value))
                 .register("chat.list", (_, _) ->
                         CompletableFuture.completedFuture(chatList()))
                 .register("chat.messages", (params, _) ->

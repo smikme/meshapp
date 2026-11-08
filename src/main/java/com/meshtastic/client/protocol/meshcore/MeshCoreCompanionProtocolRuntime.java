@@ -1,5 +1,7 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import static com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames.*;
+
 import com.meshtastic.client.connection.*;
 import com.meshtastic.client.model.*;
 import com.meshtastic.client.protocol.*;
@@ -91,19 +93,19 @@ public final class MeshCoreCompanionProtocolRuntime
             stream.setFrameFormat(FrameFormat.MESHCORE_COMPANION);
         state.setPhase(MeshCoreCompanionState.Phase.HANDSHAKE);
         transport.setDataListener(this::handlePacket);
-        request(MeshCoreCompanionFrames.appStart("MeshApp"), 5)
+        request(MeshCoreCompanionFrames.appStart("MeshApp"), PACKET_SELF_INFO)
                 .thenCompose(_ -> {
                     storage.bindAlias(state.getOwnerId(), state.getOwnerId(), true);
                     for (byte[] contact : storage.contacts(state.getOwnerId()))
                         parseContact(contact);
-                    return request(MeshCoreCompanionFrames.deviceQuery(), 13);
+                    return request(MeshCoreCompanionFrames.deviceQuery(), PACKET_DEVICE_INFO);
                 })
                 .thenCompose(_ -> {
                     state.setPhase(MeshCoreCompanionState.Phase.SYNCING);
                     return refreshContacts();
                 })
                 .thenCompose(_ -> refreshChannels())
-                .thenCompose(_ -> request(MeshCoreCompanionFrames.getBattery(), 12))
+                .thenCompose(_ -> request(MeshCoreCompanionFrames.getBattery(), PACKET_BATTERY))
                 .whenComplete((_, error) -> {
                     if (error != null) {
                         sessionFailed(error);
@@ -205,7 +207,11 @@ public final class MeshCoreCompanionProtocolRuntime
                     new IllegalStateException("Contact sync already in progress"));
         contactsSyncing = true;
         syncContacts = new HashSet<>();
-        return request(MeshCoreCompanionFrames.getContacts(), 4, 2, 3)
+        return request(
+                        MeshCoreCompanionFrames.getContacts(),
+                        PACKET_CONTACTS_END,
+                        PACKET_CONTACTS_START,
+                        PACKET_CONTACT)
                 .thenAccept(_ -> {
                     for (String id : state.getContacts().keySet())
                         if (!syncContacts.contains(id)) {
@@ -256,7 +262,7 @@ public final class MeshCoreCompanionProtocolRuntime
         byte[] command = new byte[5];
         command[0] = 4;
         MeshCoreCompanionFrames.writeIntLe(command, 1, since);
-        return request(command, 4, 2, 3)
+        return request(command, PACKET_CONTACTS_END, PACKET_CONTACTS_START, PACKET_CONTACT)
                 .thenAccept(_ -> migrateContactAliases())
                 .whenComplete((_, _) -> {
                     synchronized (this) {
@@ -489,7 +495,7 @@ public final class MeshCoreCompanionProtocolRuntime
         record(packet, true);
         int type = packet[0] & 255;
         try {
-            if (type == 0x82) {
+            if (type == PACKET_ACK) {
                 requireLength(packet, 9);
                 long hash = MeshCoreCompanionFrames.unsignedIntLe(packet, 1);
                 PendingDelivery pending = deliveries.remove(hash);
@@ -498,13 +504,13 @@ public final class MeshCoreCompanionProtocolRuntime
                     sending.remove(pending.message);
                     updateStatus(pending.message, MeshMessage.DeliveryStatus.CONFIRMED, null);
                 }
-            } else if (type == 0x83) {
+            } else if (type == PACKET_MESSAGES_WAITING) {
                 drainRequested = true;
                 if (state.isReady()) drainMessages();
             } else if (type == 0x8a) {
                 parseContact(packet);
                 if (syncContacts == null) migrateContactAliases();
-            } else if (type == 0x80 || type == 0x81) {
+            } else if (type == PACKET_ADVERTISEMENT || type == 0x81) {
                 requireLength(packet, 33);
                 request(MeshCoreCommands.keyCommand(30, Arrays.copyOfRange(packet, 1, 33)), 3);
             } else if (type == 0x8f) {
@@ -532,27 +538,27 @@ public final class MeshCoreCompanionProtocolRuntime
 
     private void parseResponse(byte[] packet) {
         switch (packet[0] & 255) {
-            case 0 -> requireLength(packet, 1);
-            case 2 -> {
+            case PACKET_OK -> requireLength(packet, 1);
+            case PACKET_CONTACTS_START -> {
                 requireLength(packet, 5);
                 parseContactsStart(packet);
             }
-            case 3 -> parseContact(packet);
-            case 4 -> {
+            case PACKET_CONTACT -> parseContact(packet);
+            case PACKET_CONTACTS_END -> {
                 requireLength(packet, 5);
                 parseContactsEnd(packet);
             }
-            case 5 -> parseSelfInfo(packet);
-            case 6 -> requireLength(packet, 10);
-            case 7, 16 -> parseContactMessage(packet);
-            case 8, 17 -> parseChannelMessage(packet);
-            case 12 -> parseBattery(packet);
-            case 13 -> {
+            case PACKET_SELF_INFO -> parseSelfInfo(packet);
+            case PACKET_MSG_SENT -> requireLength(packet, 10);
+            case PACKET_CONTACT_MSG_RECV, PACKET_CONTACT_MSG_RECV_V3 -> parseContactMessage(packet);
+            case PACKET_CHANNEL_MSG_RECV, PACKET_CHANNEL_MSG_RECV_V3 -> parseChannelMessage(packet);
+            case PACKET_BATTERY -> parseBattery(packet);
+            case PACKET_DEVICE_INFO -> {
                 requireLength(packet, 2);
                 if ((packet[1] & 255) >= 3) requireLength(packet, 80);
                 parseDeviceInfo(packet);
             }
-            case 18 -> parseChannelInfo(packet);
+            case PACKET_CHANNEL_INFO -> parseChannelInfo(packet);
             case 27 -> {
                 requireLength(packet, 9);
                 requireLength(packet, 9 + (packet[8] & 255));
@@ -572,7 +578,15 @@ public final class MeshCoreCompanionProtocolRuntime
         }
         draining = true;
         drainRequested = false;
-        request(MeshCoreCompanionFrames.getMessage(), -1, 7, 8, 10, 16, 17, 27)
+        request(
+                        MeshCoreCompanionFrames.getMessage(),
+                        -1,
+                        PACKET_CONTACT_MSG_RECV,
+                        PACKET_CHANNEL_MSG_RECV,
+                        PACKET_NO_MORE_MSGS,
+                        PACKET_CONTACT_MSG_RECV_V3,
+                        PACKET_CHANNEL_MSG_RECV_V3,
+                        27)
                 .whenComplete((packet, error) -> {
                     synchronized (this) {
                         draining = false;
@@ -580,7 +594,7 @@ public final class MeshCoreCompanionProtocolRuntime
                             state.setLastError(errorMessage(error));
                             return;
                         }
-                        if ((packet[0] & 255) != 10 || drainRequested)
+                        if ((packet[0] & 255) != PACKET_NO_MORE_MSGS || drainRequested)
                             scheduler.execute(this::drainMessages);
                     }
                 });
@@ -589,7 +603,7 @@ public final class MeshCoreCompanionProtocolRuntime
     private CompletableFuture<byte[]> getChannel(int index) {
         return submit(
                 MeshCoreCompanionFrames.getChannel(index),
-                18,
+                PACKET_CHANNEL_INFO,
                 5000,
                 p -> {
                     requireLength(p, 50);
@@ -629,7 +643,8 @@ public final class MeshCoreCompanionProtocolRuntime
 
     public CompletableFuture<Void> setRadio(double mhz, double bw, int sf, int cr, boolean repeat) {
         return setting(MeshCoreCommands.radio(mhz, bw, sf, cr, repeat))
-                .thenCompose(_ -> request(MeshCoreCompanionFrames.deviceQuery(), 13))
+                .thenCompose(
+                        _ -> request(MeshCoreCompanionFrames.deviceQuery(), PACKET_DEVICE_INFO))
                 .thenAccept(_ -> {});
     }
 
@@ -656,7 +671,8 @@ public final class MeshCoreCompanionProtocolRuntime
 
     public CompletableFuture<Void> setPin(int pin) {
         return request(MeshCoreCommands.pin(pin), 0)
-                .thenCompose(_ -> request(MeshCoreCompanionFrames.deviceQuery(), 13))
+                .thenCompose(
+                        _ -> request(MeshCoreCompanionFrames.deviceQuery(), PACKET_DEVICE_INFO))
                 .thenAccept(_ -> {});
     }
 
@@ -672,7 +688,8 @@ public final class MeshCoreCompanionProtocolRuntime
 
     private CompletableFuture<Void> setting(byte[] command) {
         return request(command, 0)
-                .thenCompose(_ -> request(MeshCoreCompanionFrames.appStart("MeshApp"), 5))
+                .thenCompose(
+                        _ -> request(MeshCoreCompanionFrames.appStart("MeshApp"), PACKET_SELF_INFO))
                 .thenAccept(_ -> {});
     }
 
@@ -1173,7 +1190,7 @@ public final class MeshCoreCompanionProtocolRuntime
         if (monitor == null) return;
         // Control traffic may carry channel secrets, keys, PINs or passwords. Persist only the
         // type.
-        if (incoming && (packet[0] & 255) == 0x88 && packet.length >= 3) {
+        if (incoming && (packet[0] & 255) == PACKET_LOG_DATA && packet.length >= 3) {
             monitor.recordRawIncoming(
                     context.connectionId(),
                     "MeshCore Radio RX",
@@ -1229,7 +1246,6 @@ public final class MeshCoreCompanionProtocolRuntime
         if (protocolVersion >= 3 && packet.length >= 80) {
             state.setMaxContacts((packet[2] & 0xFF) * 2);
             state.setMaxChannels(packet[3] & 0xFF);
-            state.setBlePin((int) MeshCoreCompanionFrames.unsignedIntLe(packet, 4));
             state.setFirmwareBuild(MeshCoreCompanionFrames.fixedText(packet, 8, 12));
             state.setModel(MeshCoreCompanionFrames.fixedText(packet, 20, 40));
             state.setFirmwareVersion(MeshCoreCompanionFrames.fixedText(packet, 60, 20));

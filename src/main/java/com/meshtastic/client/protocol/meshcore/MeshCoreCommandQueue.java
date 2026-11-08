@@ -1,5 +1,8 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import static com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames.PACKET_ERROR;
+import static com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames.PACKET_MSG_SENT;
+
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
@@ -84,11 +87,12 @@ final class MeshCoreCommandQueue implements AutoCloseable {
             if (closed || active == null || packet.length == 0) return false;
             int type = packet[0] & 255;
             Request r = active;
-            boolean error = type == 1 || type == 15 || (type == 0x86 && active.terminal == 0x85);
+            boolean error =
+                    type == PACKET_ERROR || type == 15 || (type == 0x86 && active.terminal == 0x85);
             if (!error && type != r.terminal && Arrays.stream(r.progress).noneMatch(x -> x == type))
                 return false;
             if (error) {
-                if (type == 1 && packet.length < 2) return false;
+                if (type == PACKET_ERROR && packet.length < 2) return false;
                 if (type == 0x86) {
                     try {
                         r.receive.accept(packet);
@@ -112,7 +116,7 @@ final class MeshCoreCommandQueue implements AutoCloseable {
                 abort(failure);
                 return true;
             }
-            if (type == 6 && r.terminal != 6 && packet.length >= 10)
+            if (type == PACKET_MSG_SENT && r.terminal != PACKET_MSG_SENT && packet.length >= 10)
                 r.timeoutMs =
                         Math.clamp(
                                 MeshCoreCompanionFrames.unsignedIntLe(packet, 6) + 1000,

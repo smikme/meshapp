@@ -150,7 +150,6 @@ public class MeshCoreCompanionState {
     private volatile Integer firmwareProtocolVersion;
     private volatile Integer maxContacts;
     private volatile Integer maxChannels;
-    private volatile Integer blePin;
     private volatile String firmwareBuild;
     private volatile String model;
     private volatile String firmwareVersion;
@@ -395,19 +394,6 @@ public class MeshCoreCompanionState {
 
     void setMaxChannels(Integer maxChannels) {
         this.maxChannels = maxChannels;
-    }
-
-    /**
-     * Returns the BLE PIN from device info when the firmware exposes it.
-     *
-     * @return PIN, or {@code null}
-     */
-    public Integer getBlePin() {
-        return blePin;
-    }
-
-    void setBlePin(Integer blePin) {
-        this.blePin = blePin;
     }
 
     /**

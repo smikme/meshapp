@@ -330,8 +330,16 @@ class MeshCoreCompanionProtocolRuntimeTest {
         Radio radio = new Radio();
         var rt = runtime(radio);
         var snapshot = MeshCoreRpc.status(rt);
+        assertEquals("Fixture Radio", snapshot.get("model").getAsString());
+        assertEquals("test-fw", snapshot.get("firmwareVersion").getAsString());
+        assertEquals("fixturebuild", snapshot.get("firmwareBuild").getAsString());
+        assertEquals(4660, snapshot.get("batteryMillivolts").getAsInt());
+        assertEquals(2, snapshot.get("usedStorageKb").getAsLong());
+        assertEquals(64, snapshot.get("totalStorageKb").getAsLong());
+        assertEquals(1, snapshot.get("contactCount").getAsInt());
         assertFalse(snapshot.toString().contains("secret"));
         assertFalse(snapshot.toString().contains("pin"));
+        assertFalse(snapshot.toString().contains("123456"));
         var request = new com.google.gson.JsonObject();
         request.addProperty("operation", "channel.export");
         request.addProperty("index", 0);
@@ -497,6 +505,10 @@ class MeshCoreCompanionProtocolRuntimeTest {
                     b[1] = 14;
                     b[2] = 16;
                     b[3] = (byte) channelCount;
+                    put(b, 4, 123456);
+                    System.arraycopy("fixturebuild".getBytes(StandardCharsets.UTF_8), 0, b, 8, 12);
+                    System.arraycopy("Fixture Radio".getBytes(StandardCharsets.UTF_8), 0, b, 20, 13);
+                    System.arraycopy("test-fw".getBytes(StandardCharsets.UTF_8), 0, b, 60, 7);
                     feed(b);
                 }
                 case 4 -> {
@@ -522,7 +534,7 @@ class MeshCoreCompanionProtocolRuntimeTest {
                     channelValues.put(p[1] & 255, b);
                     feed(new byte[] {0});
                 }
-                case 20 -> feed(new byte[] {12, 0x34, 0x12});
+                case 20 -> feed(new byte[] {12, 0x34, 0x12, 2, 0, 0, 0, 64, 0, 0, 0});
                 case 10 -> {
                     byte[] next = incoming.poll();
                     feed(next == null ? new byte[] {10} : next);

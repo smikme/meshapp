@@ -18,6 +18,13 @@ public final class MeshCoreRpc {
         result.addProperty("ownerId", s.getOwnerId());
         result.addProperty("name", s.getDeviceName());
         result.addProperty("protocolVersion", s.getFirmwareProtocolVersion());
+        result.addProperty("model", s.getModel());
+        result.addProperty("firmwareVersion", s.getFirmwareVersion());
+        result.addProperty("firmwareBuild", s.getFirmwareBuild());
+        result.addProperty("batteryMillivolts", s.getBatteryMillivolts());
+        result.addProperty("usedStorageKb", s.getUsedStorageKb());
+        result.addProperty("totalStorageKb", s.getTotalStorageKb());
+        result.addProperty("contactCount", s.getContactCount());
         result.addProperty("maxChannels", runtime.maxChannels());
         result.addProperty("maxContacts", s.getMaxContacts());
         result.addProperty("advertisementType", s.getAdvertisementType());

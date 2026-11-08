@@ -1,7 +1,6 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.forms.settings.ConfigSavePolicy;
@@ -278,7 +277,7 @@ class FormSettingTest {
     }
 
     @Test
-    void clearsLoadedConfigWhenConnectionIsDisconnected() throws Exception {
+    void clearsLoadedConfigWhenConnectionIsDisconnected() {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);
         entry.setConnected(true);
@@ -357,7 +356,7 @@ class FormSettingTest {
         TabPane tabPane = onFxThread(() -> findFirst(form, TabPane.class));
 
         assertNotNull(tabPane);
-        assertFalse(onFxThread(() -> tabPane.getTabs().get(0).getContent() instanceof ScrollPane));
+        assertFalse(onFxThread(() -> tabPane.getTabs().getFirst().getContent() instanceof ScrollPane));
         assertTrue(onFxThread(() -> tabPane.getTabs().get(1).getContent() instanceof ScrollPane));
         assertTrue(onFxThread(() -> tabPane.getTabs().get(2).getContent() instanceof ScrollPane));
         assertTrue(onFxThread(() -> tabPane.getTabs().get(3).getContent() instanceof ScrollPane));
@@ -435,7 +434,7 @@ class FormSettingTest {
         ProtocolHandler actionHandler = track(new ProtocolHandler(new FakeConnection()));
 
         FormSetting form = onFxThread(FormSetting::new);
-        TreeItem<ConfigTreeItem> root = ownerInfoRoot("Old long", "NEWL", "New long", "NEWS");
+        TreeItem<ConfigTreeItem> root = modifiedOwnerInfoRoot();
 
         onFxThread(() -> {
             writeField(form, "state", actionState);
@@ -533,20 +532,17 @@ class FormSettingTest {
         return (List<Runnable>) readField(state, "ownerInfoListeners");
     }
 
-    private static TreeItem<ConfigTreeItem> ownerInfoRoot(String originalLongName,
-                                                          String originalShortName,
-                                                          String updatedLongName,
-                                                          String updatedShortName) {
+    private static TreeItem<ConfigTreeItem> modifiedOwnerInfoRoot() {
         TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Root", "root", 0));
         TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(new ConfigTreeItem("Owner", "owner_info", 0));
 
         ConfigTreeItem longName = new ConfigTreeItem(
-                "Long name", "long_name", originalLongName, String.class, null, null, "owner_info", 0);
-        longName.setValue(updatedLongName);
+                "Long name", "long_name", "Old long", String.class, null, null, "owner_info", 0);
+        longName.setValue("New long");
 
         ConfigTreeItem shortName = new ConfigTreeItem(
-                "Short name", "short_name", originalShortName, String.class, null, null, "owner_info", 0);
-        shortName.setValue(updatedShortName);
+                "Short name", "short_name", "NEWL", String.class, null, null, "owner_info", 0);
+        shortName.setValue("NEWS");
 
         ownerSection.getChildren().add(new TreeItem<>(longName));
         ownerSection.getChildren().add(new TreeItem<>(shortName));
@@ -668,7 +664,7 @@ class FormSettingTest {
     private static final class FakeConnection implements MeshtasticConnection {
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             // no-op
         }
 
