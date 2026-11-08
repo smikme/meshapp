@@ -43,9 +43,14 @@ public final class LinuxGtkTrayService implements AppTrayService {
     private volatile Thread gtkThread;
     private volatile boolean usingFallback;
 
+    // JNA keeps weak references to callbacks; retain these for as long as GTK can invoke them.
+    @SuppressWarnings("FieldCanBeLocal")
     private StatusIconActivateCallback statusActivateCallback;
+    @SuppressWarnings("FieldCanBeLocal")
     private StatusIconPopupMenuCallback statusPopupMenuCallback;
+    @SuppressWarnings("FieldCanBeLocal")
     private MenuItemActivateCallback openItemActivateCallback;
+    @SuppressWarnings("FieldCanBeLocal")
     private MenuItemActivateCallback exitItemActivateCallback;
     private IdleCallback disposeCallback;
 
@@ -136,9 +141,9 @@ public final class LinuxGtkTrayService implements AppTrayService {
             gtk.gtk_menu_shell_append(gtkMenu, exitItem);
             gtk.gtk_widget_show_all(gtkMenu);
 
-            openItemActivateCallback = (widget, userData) -> dispatch("tray-open", onActivate);
-            exitItemActivateCallback = (widget, userData) -> dispatch("tray-exit", onExit);
-            disposeCallback = userData -> {
+            openItemActivateCallback = (_, _) -> dispatch("tray-open", onActivate);
+            exitItemActivateCallback = (_, _) -> dispatch("tray-exit", onExit);
+            disposeCallback = _ -> {
                 try {
                     if (indicator != null) {
                         appIndicator.app_indicator_set_status(indicator, APP_INDICATOR_STATUS_PASSIVE);
@@ -272,8 +277,8 @@ public final class LinuxGtkTrayService implements AppTrayService {
         gtk.gtk_status_icon_set_tooltip_text(statusIcon, I18n.t("app.title"));
         gtk.gtk_status_icon_set_visible(statusIcon, true);
 
-        statusActivateCallback = (widget, userData) -> dispatch("tray-activate", onActivate);
-        statusPopupMenuCallback = (widget, button, activateTime, userData) -> {
+        statusActivateCallback = (_, _) -> dispatch("tray-activate", onActivate);
+        statusPopupMenuCallback = (_, _, _, _) -> {
             try {
                 if (menu != null) {
                     gtk.gtk_menu_popup_at_pointer(menu, null);
@@ -375,6 +380,7 @@ public final class LinuxGtkTrayService implements AppTrayService {
 
     interface GObjectLibrary extends Library {
         Pointer g_object_new(NativeLong objectType, String firstPropertyName, Object... properties);
+        @SuppressWarnings("UnusedReturnValue") // Preserve the native signature; individual handlers are not disconnected.
         long g_signal_connect_data(Pointer instance,
                                    String detailedSignal,
                                    Callback handler,
@@ -385,22 +391,27 @@ public final class LinuxGtkTrayService implements AppTrayService {
     }
 
     private interface GLibLibrary extends Library {
+        @SuppressWarnings("UnusedReturnValue") // Preserve the native signature; the one-shot idle source removes itself.
         int g_idle_add(IdleCallback function, Pointer data);
     }
 
     private interface StatusIconActivateCallback extends Callback {
+        @SuppressWarnings("unused") // Invoked by GTK through JNA.
         void invoke(Pointer widget, Pointer userData);
     }
 
     private interface StatusIconPopupMenuCallback extends Callback {
+        @SuppressWarnings("unused") // Invoked by GTK through JNA.
         void invoke(Pointer widget, int button, int activateTime, Pointer userData);
     }
 
     private interface MenuItemActivateCallback extends Callback {
+        @SuppressWarnings("unused") // Invoked by GTK through JNA.
         void invoke(Pointer widget, Pointer userData);
     }
 
     private interface IdleCallback extends Callback {
+        @SuppressWarnings("unused") // Invoked by GLib through JNA.
         boolean invoke(Pointer userData);
     }
 }

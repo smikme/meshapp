@@ -1,3 +1,5 @@
+import com.google.gradle.osdetector.OsDetector
+import com.google.gradle.osdetector.OsDetectorPlugin
 import groovy.io.FileType
 import groovy.json.JsonOutput
 import groovy.util.Node
@@ -21,6 +23,9 @@ import java.util.regex.Pattern
 import java.util.zip.ZipFile
 import org.gradle.api.tasks.StopExecutionException
 import org.gradle.internal.os.OperatingSystem
+import org.openjfx.gradle.JavaFXModule
+import org.openjfx.gradle.JavaFXOptions
+import org.openjfx.gradle.metadatarule.JavaFXComponentMetadataRule
 
 /*
  * MeshApp build layout
@@ -190,12 +195,11 @@ application {
 // Reuse OpenJFX's dependency/variant configuration without applying its 0.1.0 run hook:
 // that hook reads Task.extensions during execution, which Gradle 10 no longer permits.
 // The module path for our classpath application is configured on run below.
-apply plugin: com.google.gradle.osdetector.OsDetectorPlugin
-extensions.create('javafx', org.openjfx.gradle.JavaFXOptions, sourceSets,
-	extensions.getByType(com.google.gradle.osdetector.OsDetector))
-org.openjfx.gradle.JavaFXModule.values().each { module ->
+apply plugin: OsDetectorPlugin
+extensions.create('javafx', JavaFXOptions, sourceSets, extensions.getByType(OsDetector))
+JavaFXModule.values().each { module ->
 	dependencies.components.withModule("org.openjfx:${module.artifactName}",
-		org.openjfx.gradle.metadatarule.JavaFXComponentMetadataRule)
+		JavaFXComponentMetadataRule)
 }
 
 javafx {
@@ -1801,7 +1805,7 @@ tasks.named('run', JavaExec) {
 	def fxPlatform = javafx.platform
 	def fxModules = javafx.modules.join(',')
 	def fxModulePath = runtimeClasspath.filter { file ->
-		org.openjfx.gradle.JavaFXModule.values().any { module ->
+		JavaFXModule.values().any { module ->
 			module.compareJarFileName(fxPlatform, file.name) || module.moduleJarFileName == file.name
 		}
 	}
