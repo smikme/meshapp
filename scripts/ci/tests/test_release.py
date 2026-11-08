@@ -42,9 +42,16 @@ class ReleaseTest(unittest.TestCase):
     def test_versions_are_monotonic_and_packager_compatible(self):
         self.assertLess(release.version_info("2.4.999")[1], release.version_info("2.5.0")[1])
         self.assertEqual(release.version_info("2.4.0"), ("v2.4.0", 2004000))
-        for invalid in ("2.4.0-beta", "2.4.1000", "256.0.0", "2.256.0", "2.04.0", "../../tag", "0.0.0"):
+        self.assertEqual(release.version_info("2.4.0-unstable.1"), ("v2.4.0-unstable.1", 2003999))
+        self.assertLess(release.version_info("2.4.0-unstable.999")[1], release.version_info("2.4.0")[1])
+        for invalid in ("2.4.0-beta", "2.4.0-unstable.0", "2.4.0-unstable.01", "2.4.1000", "256.0.0", "2.256.0", "2.04.0", "../../tag", "0.0.0"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 release.version_info(invalid)
+
+    def test_unstable_cannot_generate_a_stable_feed(self):
+        self.args.version = "2.4.0-unstable.1"
+        with self.assertRaisesRegex(ValueError, "stable update feed"):
+            release.manifest(self.args)
 
     def test_rejects_incomplete_matrix(self):
         (self.assets / "MeshApp-v2.4.0-macos-x86_64.dmg").unlink()

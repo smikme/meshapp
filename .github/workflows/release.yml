@@ -1,9 +1,11 @@
 name: Build release
 on:
+  push:
+    branches: ['codex/unstable/*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'New version, for example 2.4.0. Run from main.'
+        description: '2.4.0 (stable draft from main) or 2.4.0-unstable.1 (prerelease from a branch)'
         required: true
         type: string
 permissions:
@@ -28,7 +30,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-        run: python3 scripts/ci/github-release.py preflight --version "$RELEASE_VERSION" --repository "$GITHUB_REPOSITORY"
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            RELEASE_VERSION="${GITHUB_REF_NAME#codex/unstable/}-unstable.${GITHUB_RUN_NUMBER}"
+          fi
+          python3 scripts/ci/github-release.py preflight --version "$RELEASE_VERSION" --repository "$GITHUB_REPOSITORY"
   build:
     needs: prepare
     strategy:
@@ -129,7 +135,7 @@ jobs:
           pattern: packages-*
           merge-multiple: true
           path: build/release
-      - name: Verify complete release and create draft
+      - name: Verify complete release and create stable draft or unstable prerelease
         run: |
           python3 scripts/ci/release.py finalize --version "$MESHAPP_VERSION" --commit "$RELEASE_COMMIT" --repository "$GITHUB_REPOSITORY" --source build/release
           python3 scripts/ci/github-release.py draft --version "$MESHAPP_VERSION" --commit "$RELEASE_COMMIT" --repository "$GITHUB_REPOSITORY"

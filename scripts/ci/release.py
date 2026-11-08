@@ -21,16 +21,21 @@ PLATFORMS = {
 
 
 def version_info(value):
-    match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", value)
+    match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-unstable\.[1-9]\d*)?", value)
     if not match:
-        raise ValueError("Expected version X.Y.Z or vX.Y.Z")
-    major, minor, patch = map(int, match.groups())
+        raise ValueError("Expected X.Y.Z, optionally prefixed with v and suffixed with -unstable.N")
+    major, minor, patch = map(int, match.groups()[:3])
+    suffix = match.group(4) or ""
     if major > 255 or minor > 255 or patch > 999:
         raise ValueError("Version limits: major/minor <= 255, patch <= 999")
     code = major * 1_000_000 + minor * 1000 + patch
-    if code == 0:
+    # Unstable builds are installed manually. A stable build of the same version
+    # must still be offered by the updater; no unstable update feed is published.
+    if suffix:
+        code -= 1
+    if code <= 0:
         raise ValueError("Release version must be greater than 0.0.0")
-    return f"v{major}.{minor}.{patch}", code
+    return f"v{major}.{minor}.{patch}{suffix}", code
 
 
 def digest(path):
@@ -144,6 +149,8 @@ def verify_release(directory, public_key):
 
 
 def manifest(args):
+    if "-unstable." in version_info(args.version)[0]:
+        raise ValueError("Unstable releases cannot be published to the stable update feed")
     metadata = verify_release(args.source, args.public_key)
     if metadata["version"] != version_info(args.version)[0] or metadata["repository"] != args.repository:
         raise ValueError("Release tag/repository does not match the requested publication")

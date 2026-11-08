@@ -228,7 +228,7 @@ def gitDescription = gitOutput(['describe', '--tags', '--always', '--dirty'])
 def gitCommitCount = gitOutput(['rev-list', '--count', 'HEAD'])
 def gitShortHash = gitOutput(['rev-parse', '--short=4', 'HEAD'])
 
-// Accepts vX.Y.Z and X.Y.Z. Other Git labels are not treated as release versions.
+// Native package versions stay numeric; the application/tag may carry -unstable.N.
 def parseReleaseVersionInfo = { rawTag ->
 	if (rawTag == null) {
 		return null
@@ -237,14 +237,15 @@ def parseReleaseVersionInfo = { rawTag ->
 	if (tag.startsWith('refs/tags/')) {
 		tag = tag.substring('refs/tags/'.length())
 	}
-	def matcher = tag =~ /^v?(\d+)\.(\d+)\.(\d+)$/
+	def matcher = tag =~ /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-unstable\.[1-9]\d*)?$/
 	if (!matcher.matches()) {
 		return null
 	}
 	def packageVersion = "${matcher.group(1)}.${matcher.group(2)}.${matcher.group(3)}"
 	return [
-		tag: tag.startsWith('v') ? tag : "v${packageVersion}",
-		packageVersion: packageVersion
+		tag: tag.startsWith('v') ? tag : "v${tag}",
+		packageVersion: packageVersion,
+		unstable: matcher.group(4) != null
 	]
 }
 
@@ -470,6 +471,12 @@ tasks.register('generateVersionProperties') {
 				throw new GradleException('Release version must fit major/minor 0..255 and patch 0..999')
 			}
 			versionCode = parts[0] * 1000000 + parts[1] * 1000 + parts[2]
+			if (releaseVersionInfo.unstable) {
+				versionCode--
+			}
+			if (versionCode <= 0) {
+				throw new GradleException('Release version code must be positive')
+			}
 		}
 		new File(dir, 'version.properties').text =
 			"version=${applicationVersion}\n" +

@@ -41,7 +41,10 @@ def check_newer(repo, tag):
 def preflight(a):
     tag, code = version_info(a.version)
     default = gh("api", f"repos/{a.repository}", "--jq", ".default_branch")
-    if os.environ.get("GITHUB_REF") != f"refs/heads/{default}":
+    ref_name = os.environ.get("GITHUB_REF", "")
+    if not ref_name.startswith("refs/heads/"):
+        raise ValueError("Build releases from a branch")
+    if "-unstable." not in tag and ref_name != f"refs/heads/{default}":
         raise ValueError("Run this workflow from the default branch")
     commit = run("git", "rev-parse", "HEAD")
     existing = release_for(a.repository, tag)
@@ -57,12 +60,15 @@ def preflight(a):
 
 def draft(a):
     tag, _ = version_info(a.version)
+    unstable = "-unstable." in tag
     metadata = verify_release(a.source, a.public_key)
     if metadata["version"] != tag or metadata["commit"] != a.commit or metadata["repository"] != a.repository:
         raise ValueError("Release metadata differs from the selected build")
     existing = release_for(a.repository, tag)
     if existing and not existing["draft"]:
         raise ValueError("Published releases cannot be overwritten")
+    if existing and existing["prerelease"] != unstable:
+        raise ValueError("Existing draft has a different release channel")
     ref = subprocess.run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], capture_output=True, text=True)
     if ref.returncode == 0:
         if ref.stdout.strip() != a.commit:
@@ -71,13 +77,20 @@ def draft(a):
         subprocess.run(["git", "tag", tag, a.commit], check=True)
         subprocess.run(["git", "push", "origin", f"refs/tags/{tag}"], check=True)
     if not existing:
-        gh("release", "create", tag, "--repo", a.repository, "--verify-tag", "--draft", "--title", f"MeshApp {tag}", "--generate-notes")
+        options = ["--prerelease", "--latest=false"] if unstable else []
+        gh("release", "create", tag, "--repo", a.repository, "--verify-tag", "--draft", "--title", f"MeshApp {tag}", "--generate-notes", *options)
     files = sorted(str(p) for p in a.source.iterdir() if p.is_file())
     gh("release", "upload", tag, "--repo", a.repository, "--clobber", *files)
+    if unstable:
+        # Publish only after the complete verified matrix has uploaded. This path
+        # has no signing secret or Pages permission and never changes Latest.
+        gh("release", "edit", tag, "--repo", a.repository, "--draft=false", "--prerelease", "--latest=false")
 
 
 def prepare_publish(a):
     tag, code = version_info(a.version)
+    if "-unstable." in tag:
+        raise ValueError("Unstable releases cannot be promoted through the stable workflow")
     default = gh("api", f"repos/{a.repository}", "--jq", ".default_branch")
     if os.environ.get("GITHUB_REF") != f"refs/heads/{default}":
         raise ValueError("Run publication from the default branch")
@@ -106,6 +119,8 @@ def prepare_publish(a):
 
 def publish(a):
     tag, _ = version_info(a.version)
+    if "-unstable." in tag:
+        raise ValueError("Unstable releases cannot be promoted through the stable workflow")
     check_newer(a.repository, tag)
     selected = release_for(a.repository, tag)
     if not selected:
