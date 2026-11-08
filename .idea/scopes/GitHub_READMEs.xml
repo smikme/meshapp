@@ -1,0 +1,3 @@
+<component name="DependencyValidationManager">
+  <scope name="GitHub READMEs" pattern="file:README.md||file:README.ru.md||file:README.de.md" />
+</component>

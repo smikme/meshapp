@@ -26,9 +26,7 @@
   <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
 </p>
 
-<p align="center">
-  <a href="#installation">Installation</a>
-</p>
+[Installation](#installation)
 
 <div align="right">
 

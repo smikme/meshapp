@@ -21,7 +21,13 @@ bin/
 !**/src/test/**/bin/
 
 ### IntelliJ IDEA ###
-.idea
+/.idea/*
+!/.idea/inspectionProfiles/
+/.idea/inspectionProfiles/*
+!/.idea/inspectionProfiles/Project_Default.xml
+!/.idea/scopes/
+/.idea/scopes/*
+!/.idea/scopes/GitHub_READMEs.xml
 *.iws
 *.iml
 *.ipr

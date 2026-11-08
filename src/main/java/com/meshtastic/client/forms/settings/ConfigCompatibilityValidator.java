@@ -151,7 +151,7 @@ public final class ConfigCompatibilityValidator {
                 return Optional.of(I18n.t("settings.config.compatibility.beaconFrequencySlot"));
             }
             if (beacon.getBroadcastTargetsList().stream()
-                    .filter(target -> target.hasChannelIndex())
+                    .filter(ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.BroadcastTarget::hasChannelIndex)
                     .anyMatch(target -> Integer.toUnsignedLong(target.getChannelIndex()) > 7
                             || java.util.stream.Stream.concat(changes.channels().stream(), state.getChannels().stream())
                                     .filter(channel -> channel.getIndex() == target.getChannelIndex())

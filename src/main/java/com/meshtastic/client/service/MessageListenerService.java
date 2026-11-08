@@ -219,7 +219,6 @@ public class MessageListenerService implements FromRadioListener {
         int to = packet.getTo();
         int channel = packet.getChannel();
         String text = data.getPayload().toString(StandardCharsets.UTF_8);
-        long timestamp = receivedAtSeconds;
 
         NodeData fromNode = deviceState.getOrCreateNode(from);
         String fromNodeId = fromNode.getNodeId();
@@ -235,13 +234,13 @@ public class MessageListenerService implements FromRadioListener {
             return;
         }
         if (isReactionPacket(data)) {
-            handleReactionPacket(packet, data, timestamp, to == 0xFFFFFFFF, fromNode);
+            handleReactionPacket(packet, data, receivedAtSeconds, to == 0xFFFFFFFF, fromNode);
             return;
         }
 
         String toNodeId = (to == 0xFFFFFFFF) ? "!ffffffff" : deviceState.getOrCreateNode(to).getNodeId();
 
-        MeshMessage msg = new MeshMessage(fromNodeId, toNodeId, channel, text, timestamp, false);
+        MeshMessage msg = new MeshMessage(fromNodeId, toNodeId, channel, text, receivedAtSeconds, false);
         msg.setPacketId(packet.getId());
         msg.setHopStart(packet.getHopStart());
         msg.setHopLimit(packet.getHopLimit());
@@ -339,9 +338,9 @@ public class MessageListenerService implements FromRadioListener {
                 || packet.getTransportMechanism() == MeshProtos.MeshPacket.TransportMechanism.TRANSPORT_MQTT;
     }
 
-    private boolean deferMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds, String reason) {
+    private void deferMeshPacket(MeshProtos.MeshPacket packet, long receivedAtSeconds, String reason) {
         if (packet == null) {
-            return false;
+            return;
         }
 
         int queuedPackets;
@@ -353,7 +352,6 @@ public class MessageListenerService implements FromRadioListener {
         }
         log.info("Deferring mesh packet {} on channel {} until {} (backlog={})",
                 packet.getId(), packet.getChannel(), reason, queuedPackets);
-        return true;
     }
 
     private void flushDeferredMeshPackets() {
@@ -487,20 +485,17 @@ public class MessageListenerService implements FromRadioListener {
             MessageDbService.ReactionScope reactionScope = db.findReactionScopeByPacketId(requestId);
             boolean updatedReaction = db.updateReactionStatus(requestId, reactionStatus, reactionError);
 
-            if (pending == null && !completedPacketAck && !updatedReaction) {
+            if (!completedPacketAck && !updatedReaction) {
                 log.debug("No pending message or packet ACK waiter found for requestId={}", requestId);
                 return;
             }
 
-            if (pending == null) {
-                if (updatedReaction) {
-                    fireReactionChanged(reactionScope);
-                    deviceState.fireMessageListeners();
-                    log.debug("Routing ACK received for reaction packet {}", requestId);
-                } else {
-                    log.debug("Routing ACK received for non-message packet {}", requestId);
-                }
-                return;
+            if (updatedReaction) {
+                fireReactionChanged(reactionScope);
+                deviceState.fireMessageListeners();
+                log.debug("Routing ACK received for reaction packet {}", requestId);
+            } else {
+                log.debug("Routing ACK received for non-message packet {}", requestId);
             }
         } catch (Exception e) {
             log.warn("Failed to parse routing ACK for packet {}", requestId, e);
@@ -682,10 +677,10 @@ public class MessageListenerService implements FromRadioListener {
             node.setHeardOnCurrentLora(nodeInfo.getHeardOnCurrentLora());
         }
         if (nodeInfo.hasHopsAway()) {
-            node.setHopsAway((int) nodeInfo.getHopsAway());
+            node.setHopsAway(nodeInfo.getHopsAway());
         }
         if (nodeInfo.getChannel() != 0) {
-            node.setChannel((int) nodeInfo.getChannel());
+            node.setChannel(nodeInfo.getChannel());
         }
 
         if (nodeInfo.hasDeviceMetrics()) {
@@ -893,6 +888,8 @@ public class MessageListenerService implements FromRadioListener {
         }
     }
 
+    // Older firmware still sends these deprecated telemetry fields.
+    @SuppressWarnings("deprecation")
     private static void applyEnvironmentMetrics(TelemetryProtos.EnvironmentMetrics em, NodeData node, TelemetryEntry entry) {
         if (em.hasTemperature()) {
             entry.setTemperature(em.getTemperature());
@@ -995,6 +992,8 @@ public class MessageListenerService implements FromRadioListener {
         if (sw.hasSolarIrradiance()) { entry.setSolarIrradiance(sw.getSolarIrradiance()); }
     }
 
+    // Older firmware still sends these deprecated telemetry fields.
+    @SuppressWarnings("deprecation")
     private static void applyPowerMetrics(TelemetryProtos.PowerMetrics pm, TelemetryEntry entry) {
         if (pm.hasCh1Voltage()) { entry.setCh1Voltage(pm.getCh1Voltage()); }
         if (pm.hasCh1Current()) { entry.setCh1Current(pm.getCh1Current()); }

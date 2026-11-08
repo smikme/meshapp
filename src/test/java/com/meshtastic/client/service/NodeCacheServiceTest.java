@@ -25,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 class NodeCacheServiceTest {
 
     @TempDir
@@ -343,7 +345,7 @@ class NodeCacheServiceTest {
         List<TelemetryEntry> restoredEntries =
                 service.loadTelemetryForNode("!bbbbbbbb", 0, Long.MAX_VALUE, "!aaaaaaaa");
         assertEquals(1, restoredEntries.size());
-        TelemetryEntry restored = restoredEntries.get(0);
+        TelemetryEntry restored = restoredEntries.getFirst();
 
         assertEquals("ENVIRONMENT_METRICS", restored.getTelemetryVariant());
         assertEquals(87, restored.getBatteryLevel());

@@ -32,6 +32,8 @@ import java.util.regex.Pattern;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class DatabaseMigrator {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
@@ -260,6 +262,8 @@ public final class DatabaseMigrator {
         return 0;
     }
 
+    // schema_version contains one row; every migration replaces its version.
+    @SuppressWarnings("SqlWithoutWhere")
     private static void setVersion(Connection connection, int version) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
                 "UPDATE schema_version SET version = ?")) {
@@ -490,6 +494,7 @@ public final class DatabaseMigrator {
         }
     }
 
+    @SuppressWarnings("SameParameterValue") // Keep the JDBC helper independent of a particular column/table.
     private static boolean isCharacterColumn(Connection connection, String tableName, String columnName) throws SQLException {
         try (ResultSet rs = connection.getMetaData()
                 .getColumns(null, null, tableName, columnName)) {
@@ -1275,6 +1280,7 @@ public final class DatabaseMigrator {
 
     private record GuidUpdate(long scriptId, String guid) {}
 
+    @SuppressWarnings("SameParameterValue") // Keep the JDBC helper independent of a particular column/table.
     private static void dropPrimaryKeyIfPresent(Statement stmt, String tableName) throws SQLException {
         try {
             stmt.execute("ALTER TABLE " + tableName + " DROP PRIMARY KEY");

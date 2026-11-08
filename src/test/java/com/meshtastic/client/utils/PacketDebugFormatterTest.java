@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -147,8 +148,8 @@ class PacketDebugFormatterTest {
         assertTrue(preview.addressText().contains("0010"));
         assertTrue(selectedHex.contains("\n"));
         assertTrue(selectedAscii.contains("\n"));
-        assertTrue(!selectedHex.contains("0010"));
-        assertTrue(!selectedAscii.contains("0010"));
+        assertFalse(selectedHex.contains("0010"));
+        assertFalse(selectedAscii.contains("0010"));
     }
 
     @Test
@@ -197,9 +198,9 @@ class PacketDebugFormatterTest {
         assertTrue(root.has("decoded"));
         assertEquals("TEXT_MESSAGE_APP", root.getAsJsonObject("decoded").get("portnum").getAsString());
         assertEquals("aGVsbG8ganNvbg==", root.getAsJsonObject("decoded").get("payload").getAsString());
-        assertTrue(!root.has("capturedAtText"));
-        assertTrue(!root.has("tree"));
-        assertTrue(!root.has("packetHexView"));
+        assertFalse(root.has("capturedAtText"));
+        assertFalse(root.has("tree"));
+        assertFalse(root.has("packetHexView"));
     }
 
     @Test
@@ -235,7 +236,7 @@ class PacketDebugFormatterTest {
                         .getAsString()
         );
         assertEquals("MeshPacket", packet.getAsJsonObject("hierarchy").get("label").getAsString());
-        assertTrue(packet.getAsJsonObject("hierarchy").getAsJsonArray("children").size() > 0);
+        assertFalse(packet.getAsJsonObject("hierarchy").getAsJsonArray("children").isEmpty());
     }
 
     @Test
@@ -249,8 +250,8 @@ class PacketDebugFormatterTest {
         assertEquals(3, lines.length);
         assertTrue(lines[0].contains("decoded_payload_text"));
         assertTrue(lines[0].contains("decoded_position_latitude"));
-        assertTrue(!lines[0].contains("mesh_packet_json"));
-        assertTrue(!lines[0].contains("hierarchy_json"));
+        assertFalse(lines[0].contains("mesh_packet_json"));
+        assertFalse(lines[0].contains("hierarchy_json"));
 
         Map<String, String> textRow = csvRow(lines[0], lines[1]);
         Map<String, String> positionRow = csvRow(lines[0], lines[2]);
@@ -386,7 +387,7 @@ class PacketDebugFormatterTest {
         if (item == null || item.getValue() == null) {
             return;
         }
-        sb.append("  ".repeat(Math.max(0, depth))).append(item.getValue().getLabel()).append('\n');
+        sb.repeat("  ", Math.max(0, depth)).append(item.getValue().getLabel()).append('\n');
         for (TreeItem<PacketTreeNode> child : item.getChildren()) {
             appendLabels(sb, child, depth + 1);
         }

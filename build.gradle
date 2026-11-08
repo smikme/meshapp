@@ -1,10 +1,26 @@
 import groovy.io.FileType
 import groovy.json.JsonOutput
+import groovy.util.Node
+import groovy.util.NodeList
 import groovy.xml.XmlNodePrinter
 import groovy.xml.XmlParser
-
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
+import java.security.KeyFactory
+import java.security.spec.X509EncodedKeySpec
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarInputStream
+import java.util.regex.Pattern
+import java.util.zip.ZipFile
+import org.gradle.api.tasks.StopExecutionException
+import org.gradle.internal.os.OperatingSystem
 
 /*
  * MeshApp build layout
@@ -150,10 +166,10 @@ application {
 		'--add-opens', 'javafx.graphics/com.sun.javafx.tk.quantum=ALL-UNNAMED',
 		'--add-opens', 'javafx.graphics/com.sun.glass.ui=ALL-UNNAMED'
 	]
-	if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+	if (OperatingSystem.current().isWindows()) {
 		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.win=ALL-UNNAMED']
 	}
-	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+	if (OperatingSystem.current().isMacOsX()) {
 		jvmArgs += ['--add-opens', 'javafx.graphics/com.sun.glass.ui.mac=ALL-UNNAMED']
 	}
 	if (jmxDebugEnabled.get() || visualVmProfilerEnabled.get()) {
@@ -196,7 +212,7 @@ def parseReleaseVersionInfo = { rawTag ->
 	if (!matcher.matches()) {
 		return null
 	}
-	def packageVersion = "${matcher[0][1]}.${matcher[0][2]}.${matcher[0][3]}"
+	def packageVersion = "${matcher.group(1)}.${matcher.group(2)}.${matcher.group(3)}"
 	return [
 		tag: tag.startsWith('v') ? tag : "v${packageVersion}",
 		packageVersion: packageVersion
@@ -229,10 +245,10 @@ def resolveReleaseVersionInfo = {
 			}
 			.findAll { it != null }
 			.sort { a, b ->
-				def left = a.versionInfo.packageVersion.tokenize('.').collect { it.toInteger() }
-				def right = b.versionInfo.packageVersion.tokenize('.').collect { it.toInteger() }
+				List<Integer> left = a.versionInfo.packageVersion.toString().tokenize('.').collect { it.toInteger() }
+				List<Integer> right = b.versionInfo.packageVersion.toString().tokenize('.').collect { it.toInteger() }
 				for (int i = 0; i < 3; i++) {
-					def cmp = right[i] <=> left[i]
+					def cmp = right.get(i) <=> left.get(i)
 					if (cmp != 0) {
 						return cmp
 					}
@@ -451,7 +467,7 @@ tasks.named('processResources') {
 }
 
 def macOsJnaResourcePrefix = {
-	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	def arch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
 	switch (arch) {
 		case ['amd64', 'x86_64']:
 			return 'darwin-x86-64'
@@ -463,7 +479,7 @@ def macOsJnaResourcePrefix = {
 }
 
 def linuxJnaResourcePrefix = {
-	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	def arch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
 	switch (arch) {
 		case ['amd64', 'x86_64']:
 			return 'linux-x86-64'
@@ -481,7 +497,7 @@ def linuxJnaResourcePrefix = {
 // generated resources, so builds never modify tracked src/main/resources files.
 
 // macOS Serial: libmeshapp-serial.dylib is a safe C wrapper around ioctl.
-if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+if (OperatingSystem.current().isMacOsX()) {
 	tasks.register('buildSerialNative') {
 		group = 'build'
 		description = 'Build libmeshapp-serial.dylib for macOS serial modem-line control'
@@ -566,7 +582,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 }
 
 // Windows BLE: meshapp-ble.dll wraps WinRT BLE and requires the MSVC x64 generator.
-if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+if (OperatingSystem.current().isWindows()) {
 	tasks.register('buildBleNative') {
 		group = 'build'
 		description = 'Build meshapp-ble.dll (WinRT BLE) with CMake'
@@ -596,9 +612,9 @@ if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 			if (bld.exitValue() != 0) throw new GradleException("CMake build failed (exit ${bld.exitValue()})")
 			// Copy DLL to resources
 			dllDest.parentFile.mkdirs()
-			java.nio.file.Files.copy(
+			Files.copy(
 				dllOutput.toPath(), dllDest.toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+				StandardCopyOption.REPLACE_EXISTING
 			)
 			logger.lifecycle("buildBleNative: DLL copied to ${dllDest}")
 		}
@@ -608,7 +624,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
 
 // Linux BLE: libmeshapp-ble.so wraps the BlueZ sd-bus API.
 // Build dependency: libsystemd-dev (Debian/Ubuntu) or systemd-devel (Fedora/RHEL).
-if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
+if (OperatingSystem.current().isLinux()) {
 	tasks.register('buildBleNative') {
 		group = 'build'
 		description = 'Build libmeshapp-ble.so (BlueZ BLE) with CMake'
@@ -640,9 +656,9 @@ if (org.gradle.internal.os.OperatingSystem.current().isLinux()) {
 			if (bld.exitValue() != 0) throw new GradleException("CMake build failed (exit ${bld.exitValue()})")
 			// Copy SO to generated resources so builds do not dirty src/main/resources.
 			outputDir.mkdirs()
-			java.nio.file.Files.copy(
+			Files.copy(
 				soOutput.toPath(), soDest.toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+				StandardCopyOption.REPLACE_EXISTING
 			)
 			logger.lifecycle("buildBleNative: shared library copied to ${soDest}")
 		}
@@ -701,7 +717,7 @@ tasks.named('test') {
 		}
 		setJvmArgs(testJvmArgs.unique())
 	}
-	if (org.gradle.internal.os.OperatingSystem.current().isLinux()
+	if (OperatingSystem.current().isLinux()
 			&& !System.getenv('DISPLAY')?.trim()
 			&& !System.getenv('WAYLAND_DISPLAY')?.trim()) {
 		systemProperty 'java.awt.headless', 'true'
@@ -809,10 +825,10 @@ def relocateJavaFxJars = { File libDir ->
 	def fxDir = new File(libDir, "fx")
 	fxDir.mkdirs()
 	libDir.listFiles()?.findAll { it.name.startsWith('javafx-') }?.each { jar ->
-		java.nio.file.Files.move(
+		Files.move(
 			jar.toPath(),
 			new File(fxDir, jar.name).toPath(),
-			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			StandardCopyOption.REPLACE_EXISTING
 		)
 	}
 }
@@ -828,7 +844,7 @@ def patchUnixStartScriptForJavaFx = { File scriptFile ->
 	def patched = lines.collectMany { line ->
 		if (line.startsWith('CLASSPATH=')) {
 			def entries = line.substring('CLASSPATH='.length())
-				.split(java.util.regex.Pattern.quote(File.pathSeparator))
+				.split(Pattern.quote(File.pathSeparator))
 				.findAll { !it.contains('/javafx-') }
 			return ["CLASSPATH=${entries.join(File.pathSeparator)}"]
 		}
@@ -854,8 +870,8 @@ def patchWindowsStartScriptForJavaFx = { File scriptFile ->
 	def patched = lines.collect { line ->
 		if (line.startsWith('set CLASSPATH=')) {
 			def entries = line.substring('set CLASSPATH='.length())
-				.split(java.util.regex.Pattern.quote(';'))
-				.findAll { !it.toLowerCase(java.util.Locale.ROOT).contains('\\lib\\javafx-') }
+				.split(Pattern.quote(';'))
+				.findAll { !it.toLowerCase(Locale.ROOT).contains('\\lib\\javafx-') }
 			return "set CLASSPATH=${entries.join(';')}"
 		}
 		if (line.startsWith('"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %MESH_APP_OPTS%  -classpath "%CLASSPATH%" ')) {
@@ -894,24 +910,24 @@ def copyDirectory = { File sourceDir, File targetDir ->
 	}
 	def sourcePath = sourceDir.toPath()
 	def targetPath = targetDir.toPath()
-	def stream = java.nio.file.Files.walk(sourcePath)
+	def stream = Files.walk(sourcePath)
 	try {
 		stream.forEach { path ->
 			def relative = sourcePath.relativize(path)
 			def target = targetPath.resolve(relative)
-			if (java.nio.file.Files.isSymbolicLink(path)) {
-				java.nio.file.Files.createDirectories(target.parent)
-				java.nio.file.Files.deleteIfExists(target)
-				java.nio.file.Files.createSymbolicLink(target, java.nio.file.Files.readSymbolicLink(path))
-			} else if (java.nio.file.Files.isDirectory(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-				java.nio.file.Files.createDirectories(target)
+			if (Files.isSymbolicLink(path)) {
+				Files.createDirectories(target.parent)
+				Files.deleteIfExists(target)
+				Files.createSymbolicLink(target, Files.readSymbolicLink(path))
+			} else if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+				Files.createDirectories(target)
 			} else {
-				java.nio.file.Files.createDirectories(target.parent)
-				java.nio.file.Files.copy(
+				Files.createDirectories(target.parent)
+				Files.copy(
 					path,
 					target,
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-					java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
+					StandardCopyOption.REPLACE_EXISTING,
+					StandardCopyOption.COPY_ATTRIBUTES
 				)
 			}
 		}
@@ -945,15 +961,15 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 	if (os.isWindows()) {
 		def bleDll = file('src/main/resources/win32-x86-64/meshapp-ble.dll')
 		if (bleDll.exists()) {
-			java.nio.file.Files.copy(
+			Files.copy(
 				bleDll.toPath(),
 				new File(libDir, bleDll.name).toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+				StandardCopyOption.REPLACE_EXISTING
 			)
 			logger.lifecycle("packaging: meshapp-ble.dll copied to lib/")
 		}
 
-		def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+		def arch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
 		def jSerialCommArch
 		if (['amd64', 'x86_64'].contains(arch)) {
 			jSerialCommArch = 'x86_64'
@@ -972,16 +988,16 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 		}
 		def jSerialCommEntryName = "Windows/${jSerialCommArch}/jSerialComm.dll"
 		def jSerialCommDll = new File(libDir, 'jSerialComm.dll')
-		new java.util.jar.JarFile(jSerialCommJar).withCloseable { jarFile ->
+		new JarFile(jSerialCommJar).withCloseable { jarFile ->
 			def entry = jarFile.getEntry(jSerialCommEntryName)
 			if (entry == null) {
 				throw new GradleException("packaging: ${jSerialCommEntryName} not found in ${jSerialCommJar.name}")
 			}
 			jarFile.getInputStream(entry).withCloseable { input ->
-				java.nio.file.Files.copy(
+				Files.copy(
 					input,
 					jSerialCommDll.toPath(),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING
+					StandardCopyOption.REPLACE_EXISTING
 				)
 			}
 		}
@@ -992,10 +1008,10 @@ def preparePackagingLibDir = { os, installDir, stagingRoot ->
 	if (os.isLinux()) {
 		def bleSo = new File(generatedResourcesDir.get().asFile, "${linuxJnaResourcePrefix()}/libmeshapp-ble.so")
 		if (bleSo.exists()) {
-			java.nio.file.Files.copy(
+			Files.copy(
 				bleSo.toPath(),
 				new File(libDir, bleSo.name).toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+				StandardCopyOption.REPLACE_EXISTING
 			)
 			logger.lifecycle("packaging: libmeshapp-ble.so copied to lib/")
 		}
@@ -1012,10 +1028,10 @@ def prepareLinuxPackagingResources = {
 	linuxResourceDir.mkdirs()
 
 	def linuxLauncherIcon = new File(linuxResourceDir, 'MeshApp.png')
-	java.nio.file.Files.copy(
+	Files.copy(
 		file('src/main/resources/logo/icon_512.png').toPath(),
 		linuxLauncherIcon.toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		StandardCopyOption.REPLACE_EXISTING
 	)
 
 	def linuxScriptsDir = file('src/jpackage/linux')
@@ -1023,20 +1039,20 @@ def prepareLinuxPackagingResources = {
 	if (!desktopTemplate.isFile()) {
 		throw new GradleException("packaging: Linux desktop template not found: ${desktopTemplate}")
 	}
-	java.nio.file.Files.copy(
+	Files.copy(
 		desktopTemplate.toPath(),
 		new File(linuxResourceDir, desktopTemplate.name).toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		StandardCopyOption.REPLACE_EXISTING
 	)
 
 	['postinstall', 'postrm'].each { scriptName ->
 		def source = new File(linuxScriptsDir, scriptName)
 		if (source.exists()) {
 			def target = new File(linuxResourceDir, scriptName)
-			java.nio.file.Files.copy(
+			Files.copy(
 				source.toPath(),
 				target.toPath(),
-				java.nio.file.StandardCopyOption.REPLACE_EXISTING
+				StandardCopyOption.REPLACE_EXISTING
 			)
 			target.setExecutable(true, false)
 		}
@@ -1091,7 +1107,7 @@ def collectMacDependencyScanFiles = { File appDir ->
 	[new File(appDir, 'Contents/app'), new File(appDir, 'Contents/runtime/Contents/Home/lib')].each { dir ->
 		if (dir.isDirectory()) {
 			dir.eachFileRecurse(FileType.FILES) { f ->
-				def lowerName = f.name.toLowerCase(java.util.Locale.ROOT)
+				def lowerName = f.name.toLowerCase(Locale.ROOT)
 				if (lowerName.endsWith('.dylib') || lowerName.endsWith('.jnilib')) {
 					scanFiles << f
 				}
@@ -1150,7 +1166,7 @@ def isAllowedMacNativeDependency = { String dependency ->
 
 def normalizeMacBundleInstallNames = { File appDir, String taskName ->
 	collectMacDependencyScanFiles(appDir).each { binary ->
-		def lowerName = binary.name.toLowerCase(java.util.Locale.ROOT)
+		def lowerName = binary.name.toLowerCase(Locale.ROOT)
 		if (lowerName.endsWith('.dylib') || lowerName.endsWith('.jnilib')) {
 			def installName = readMacInstallName(binary, taskName)
 			if (installName != null && !isAllowedMacNativeDependency(installName)) {
@@ -1169,7 +1185,7 @@ def normalizeMacBundleInstallNames = { File appDir, String taskName ->
 
 def assertMacBundleSelfContained = { File appDir, String taskName ->
 	// Fail before signing/notarization; a signature cannot fix absolute Homebrew paths.
-	if (!org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+	if (!OperatingSystem.current().isMacOsX()) {
 		return
 	}
 
@@ -1282,27 +1298,27 @@ def notarizeMacArtifact = { File artifact, Map notarizationConfig ->
 		return
 	}
 
-	def submitArgs = ['xcrun', 'notarytool', 'submit', artifact.absolutePath, '--wait']
+	List<String> submitArgs = ['xcrun', 'notarytool', 'submit', artifact.absolutePath, '--wait']
 	switch (notarizationConfig.mode) {
 		case 'keychainProfile':
 			submitArgs << '--keychain-profile'
-			submitArgs << notarizationConfig.keychainProfile
+			submitArgs.add(notarizationConfig.keychainProfile.toString())
 			break
 		case 'appleId':
 			submitArgs << '--apple-id'
-			submitArgs << notarizationConfig.appleId
+			submitArgs.add(notarizationConfig.appleId.toString())
 			submitArgs << '--team-id'
-			submitArgs << notarizationConfig.teamId
+			submitArgs.add(notarizationConfig.teamId.toString())
 			submitArgs << '--password'
-			submitArgs << notarizationConfig.password
+			submitArgs.add(notarizationConfig.password.toString())
 			break
 		case 'apiKey':
 			submitArgs << '--key'
-			submitArgs << notarizationConfig.keyFile
+			submitArgs.add(notarizationConfig.keyFile.toString())
 			submitArgs << '--key-id'
-			submitArgs << notarizationConfig.keyId
+			submitArgs.add(notarizationConfig.keyId.toString())
 			submitArgs << '--issuer'
-			submitArgs << notarizationConfig.issuer
+			submitArgs.add(notarizationConfig.issuer.toString())
 			break
 		default:
 			throw new GradleException("Unsupported notarization mode: ${notarizationConfig.mode}")
@@ -1364,7 +1380,7 @@ def sanitizeArtifactVersion = { value ->
 }
 
 def normalizeArtifactArch = {
-	def arch = System.getProperty('os.arch').toLowerCase(java.util.Locale.ROOT)
+	def arch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
 	switch (arch) {
 		case ['amd64', 'x86_64']:
 			return 'x86_64'
@@ -1377,7 +1393,7 @@ def normalizeArtifactArch = {
 
 // Self-update artifact names must remain stable between the native package and manifest.
 def resolveSelfUpdatePlatform = {
-	def os = org.gradle.internal.os.OperatingSystem.current()
+	def os = OperatingSystem.current()
 	def osName = os.isWindows() ? 'windows' : (os.isMacOsX() ? 'macos' : (os.isLinux() ? 'linux' : 'unknown'))
 	return "${osName}-${normalizeArtifactArch()}"
 }
@@ -1418,7 +1434,7 @@ def resolveAppImageTool = {
 		"appimagetool-${resolveLinuxAppImageArch()}.AppImage"
 	]
 	def pathEntries = (System.getenv('PATH') ?: '')
-		.split(java.util.regex.Pattern.quote(File.pathSeparator))
+		.split(Pattern.quote(File.pathSeparator))
 		.findAll { it }
 	for (entry in pathEntries) {
 		for (name in candidateNames) {
@@ -1442,7 +1458,7 @@ def resolveCommandExecutable = { String propertyName, String envName, String bin
 	}
 
 	def pathEntries = (System.getenv('PATH') ?: '')
-		.split(java.util.regex.Pattern.quote(File.pathSeparator))
+		.split(Pattern.quote(File.pathSeparator))
 		.findAll { it }
 	for (entry in pathEntries) {
 		def candidate = new File(entry, binaryName)
@@ -1467,7 +1483,7 @@ def requirePackagingFile = { String relativePath, String taskName ->
 def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 	// jpackage first creates an app-image directory; appimagetool then converts it into a portable
 	// file. Both the regular AppImage and Flatpak pipelines reuse this helper.
-	def os = org.gradle.internal.os.OperatingSystem.current()
+	def os = OperatingSystem.current()
 	if (!os.isLinux()) {
 		throw new GradleException("${taskName} task is supported only on Linux")
 	}
@@ -1525,8 +1541,10 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 def writeFlatpakMetainfo = { File sourceFile, File targetFile, String appVersion ->
 	def parser = new XmlParser(false, false)
 	def component = parser.parse(sourceFile)
-	def releases = component.releases ? component.releases[0] : component.appendNode('releases')
-	def release = releases.release ? releases.release[0] : releases.appendNode('release')
+	NodeList releaseGroups = component.get('releases') as NodeList
+	Node releases = releaseGroups.isEmpty() ? component.appendNode('releases') : releaseGroups.getFirst() as Node
+	NodeList releaseEntries = releases.get('release') as NodeList
+	Node release = releaseEntries.isEmpty() ? releases.appendNode('release') : releaseEntries.getFirst() as Node
 	release.attributes()['version'] = appVersion
 	release.attributes()['date'] = resolveFlatpakReleaseDate()
 
@@ -1568,31 +1586,31 @@ def prepareFlatpakSources = { File workDir, File appImageDir, File iconSource, S
 	def metainfoSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakMetainfoFileName}", 'flatpak')
 	def launcherSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakLauncherFileName}", 'flatpak')
 
-	java.nio.file.Files.copy(
+	Files.copy(
 		desktopSource.toPath(),
 		new File(resourcesDir, flatpakDesktopFileName).toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		StandardCopyOption.REPLACE_EXISTING
 	)
 	writeFlatpakMetainfo(
 		metainfoSource,
 		new File(resourcesDir, flatpakMetainfoFileName),
 		appVersion
 	)
-	java.nio.file.Files.copy(
+	Files.copy(
 		launcherSource.toPath(),
 		new File(resourcesDir, flatpakLauncherFileName).toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		StandardCopyOption.REPLACE_EXISTING
 	)
-	java.nio.file.Files.copy(
+	Files.copy(
 		iconSource.toPath(),
 		new File(resourcesDir, "${flatpakAppId}.png").toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		StandardCopyOption.REPLACE_EXISTING
 	)
 	def trayIconSource = requirePackagingFile('src/main/resources/tray/linux/icon_32.png', 'flatpak')
-	java.nio.file.Files.copy(
+	Files.copy(
 		trayIconSource.toPath(),
 		new File(resourcesDir, "${flatpakTrayIconName}.png").toPath(),
-		java.nio.file.StandardCopyOption.REPLACE_EXISTING
+		StandardCopyOption.REPLACE_EXISTING
 	)
 
 	return sourceDir
@@ -1754,7 +1772,7 @@ tasks.named("run") {
 	// identity, so this task delegates to the temporary .app launcher defined below.
 	outputs.upToDateWhen { false }
 	// macOS: redirect to runMac so the app appears in Dock and Cmd+Tab.
-	if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+	if (OperatingSystem.current().isMacOsX()) {
 		dependsOn 'runMac'
 		// Disable JavaExec itself; the application is launched through runMac.
 		enabled = false
@@ -1771,7 +1789,9 @@ tasks.register('runTerminal', JavaExec) {
 	standardInput = System.in
 	doFirst {
 		if (!args.contains('--terminal')) {
-			args = ['--terminal'] + args
+			List<String> launchArgs = new ArrayList<>(getArgs())
+			launchArgs.add(0, '--terminal')
+			setArgs(launchArgs)
 		}
 	}
 }
@@ -1786,7 +1806,9 @@ tasks.register('runRpcServer', JavaExec) {
 	standardInput = System.in
 	doFirst {
 		if (!args.contains('--rpc-server')) {
-			args = ['--rpc-server'] + args
+			List<String> launchArgs = new ArrayList<>(getArgs())
+			launchArgs.add(0, '--rpc-server')
+			setArgs(launchArgs)
 		}
 	}
 }
@@ -1857,7 +1879,7 @@ call "%APP_HOME%\\versions\\%CURRENT%\\bin\\MeshApp.bat" %*
 }
 
 tasks.register('selfUpdateArchive') {
-	def os = org.gradle.internal.os.OperatingSystem.current()
+	def os = OperatingSystem.current()
 	def artifactName = "MeshApp-${sanitizeArtifactVersion(applicationVersion)}-${resolveSelfUpdatePlatform()}-selfupdate.zip"
 	dependsOn installDist
 	mustRunAfter tasks.named('jpackage')
@@ -1918,9 +1940,9 @@ def isValidEd25519PublicKey = { String keyText ->
 			.replace('-----BEGIN PUBLIC KEY-----', '')
 			.replace('-----END PUBLIC KEY-----', '')
 			.replaceAll('\\s+', '')
-		def encoded = java.util.Base64.decoder.decode(normalized)
-		java.security.KeyFactory.getInstance('Ed25519')
-			.generatePublic(new java.security.spec.X509EncodedKeySpec(encoded))
+		def encoded = Base64.decoder.decode(normalized)
+		KeyFactory.getInstance('Ed25519')
+			.generatePublic(new X509EncodedKeySpec(encoded))
 		return true
 	} catch (Exception ignored) {
 		return false
@@ -1929,7 +1951,7 @@ def isValidEd25519PublicKey = { String keyText ->
 
 def zipEntryNames = { File zipFile ->
 	def names = []
-	new java.util.zip.ZipFile(zipFile).withCloseable { zip ->
+	new ZipFile(zipFile).withCloseable { zip ->
 		names = zip.entries().collect { it.name }
 	}
 	return names
@@ -1937,7 +1959,7 @@ def zipEntryNames = { File zipFile ->
 
 def jarContainsEntry = { File jarFile, String entryName ->
 	def found = false
-	new java.util.jar.JarFile(jarFile).withCloseable { jar ->
+	new JarFile(jarFile).withCloseable { jar ->
 		found = jar.getEntry(entryName) != null
 	}
 	return found
@@ -1945,21 +1967,23 @@ def jarContainsEntry = { File jarFile, String entryName ->
 
 def zipJarContainsEntry = { File zipFile, String zipJarEntryName, String jarEntryName ->
 	def found = false
-	new java.util.zip.ZipFile(zipFile).withCloseable { zip ->
+	new ZipFile(zipFile).withCloseable { zip ->
 		def zipEntry = zip.getEntry(zipJarEntryName)
 		if (zipEntry == null) {
-			return
+			return null
 		}
 		zip.getInputStream(zipEntry).withCloseable { input ->
-			new java.util.jar.JarInputStream(input).withCloseable { jar ->
-				java.util.jar.JarEntry entry
-				while (!found && (entry = jar.nextJarEntry) != null) {
+			new JarInputStream(input).withCloseable { jar ->
+				for (JarEntry entry = jar.nextJarEntry; entry != null; entry = jar.nextJarEntry) {
 					if (entry.name == jarEntryName) {
 						found = true
+						break
 					}
 				}
+				return null
 			}
 		}
+		return null
 	}
 	return found
 }
@@ -2002,7 +2026,7 @@ tasks.register('verifySelfUpdatePackage') {
 	description = 'Verify the native package and self-update payload before release publication'
 
 	doLast {
-		def os = org.gradle.internal.os.OperatingSystem.current()
+		def os = OperatingSystem.current()
 		def outputDir = layout.buildDirectory.dir('jpackage').get().asFile
 		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		def installLibDir = new File(installDir, 'lib')
@@ -2120,7 +2144,7 @@ tasks.register('jpackage') {
 	description = 'Create the native installer with jpackage'
 
 	doLast {
-		def os = org.gradle.internal.os.OperatingSystem.current()
+		def os = OperatingSystem.current()
 		def installDir = layout.buildDirectory.dir("install/${applicationName}").get().asFile
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		if (outputDir.exists()) outputDir.deleteDir()
@@ -2264,7 +2288,7 @@ tasks.register('jpackage') {
 			// Assets.car contains the Icon Composer icon with style variants.
 			def assetsCar = file('src/main/resources/macos/Assets.car')
 			if (assetsCar.exists()) {
-				java.nio.file.Files.copy(assetsCar.toPath(), new File(resourcesDir, assetsCar.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+				Files.copy(assetsCar.toPath(), new File(resourcesDir, assetsCar.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
 				logger.lifecycle("jpackage: copied Assets.car into the bundle")
 			}
 
@@ -2341,7 +2365,7 @@ tasks.register('appImage') {
 	description = 'Build the portable Linux AppImage'
 
 	doLast {
-		def os = org.gradle.internal.os.OperatingSystem.current()
+		def os = OperatingSystem.current()
 		if (!os.isLinux()) {
 			throw new GradleException('appImage task is supported only on Linux')
 		}
@@ -2365,38 +2389,38 @@ tasks.register('appImage') {
 
 		def desktopSource = requirePackagingFile("${flatpakMetadataDir.path}/${flatpakDesktopFileName}", 'appImage')
 		def desktopFile = new File(appDir, flatpakDesktopFileName)
-		java.nio.file.Files.copy(
+		Files.copy(
 			desktopSource.toPath(),
 			desktopFile.toPath(),
-			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			StandardCopyOption.REPLACE_EXISTING
 		)
 
 		def shareApplicationsDir = new File(appDir, 'usr/share/applications')
 		shareApplicationsDir.mkdirs()
-		java.nio.file.Files.copy(
+		Files.copy(
 			desktopSource.toPath(),
 			new File(shareApplicationsDir, flatpakDesktopFileName).toPath(),
-			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			StandardCopyOption.REPLACE_EXISTING
 		)
 
 		def rootIcon = new File(appDir, "${flatpakAppId}.png")
-		java.nio.file.Files.copy(
+		Files.copy(
 			iconSource.toPath(),
 			rootIcon.toPath(),
-			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			StandardCopyOption.REPLACE_EXISTING
 		)
-		java.nio.file.Files.copy(
+		Files.copy(
 			iconSource.toPath(),
 			new File(appDir, '.DirIcon').toPath(),
-			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			StandardCopyOption.REPLACE_EXISTING
 		)
 
 		def shareIconsDir = new File(appDir, 'usr/share/icons/hicolor/512x512/apps')
 		shareIconsDir.mkdirs()
-		java.nio.file.Files.copy(
+		Files.copy(
 			iconSource.toPath(),
 			new File(shareIconsDir, "${flatpakAppId}.png").toPath(),
-			java.nio.file.StandardCopyOption.REPLACE_EXISTING
+			StandardCopyOption.REPLACE_EXISTING
 		)
 
 		def appRun = new File(appDir, 'AppRun')
@@ -2426,7 +2450,7 @@ exec "$HERE/usr/bin/MeshApp" "$@"
 		).redirectErrorStream(true)
 		def env = appImageProc.environment()
 		env.put('ARCH', resolveLinuxAppImageArch())
-		env.put('VERSION', applicationVersion)
+		env.put('VERSION', applicationVersion.toString())
 		if (appImageTool.name.endsWith('.AppImage') && !env.containsKey('APPIMAGE_EXTRACT_AND_RUN')) {
 			env.put('APPIMAGE_EXTRACT_AND_RUN', '1')
 		}
@@ -2454,7 +2478,7 @@ tasks.register('flatpak') {
 	description = 'Build the Linux Flatpak bundle'
 
 	doLast {
-		def os = org.gradle.internal.os.OperatingSystem.current()
+		def os = OperatingSystem.current()
 		if (!os.isLinux()) {
 			throw new GradleException('flatpak task is supported only on Linux')
 		}
@@ -2477,7 +2501,7 @@ tasks.register('flatpak') {
 		def flatpakBin = resolveCommandExecutable('flatpakBin', 'FLATPAK_BIN', 'flatpak', 'flatpak')
 
 		def appImage = buildLinuxAppImage(installDir, new File(workDir, 'app-image'), 'flatpak')
-		def sourceDir = prepareFlatpakSources(workDir, appImage.imageDir, appImage.iconFile, appImage.appVersion)
+		def sourceDir = prepareFlatpakSources(workDir, appImage.imageDir, appImage.iconFile, appImage.appVersion.toString())
 		def manifestFile = new File(workDir, "${flatpakAppId}.json")
 		writeFlatpakManifest(manifestFile, sourceDir, flatpakRuntime, flatpakRuntimeVersion, flatpakSdk)
 
@@ -2544,7 +2568,7 @@ def prepareMacDebugAppBundle = { File appDir, boolean agentApp = false ->
 	// Copy the icon into the .app bundle.
 	def icnsSource = file('src/main/resources/logo/MeshApp.icns')
 	if (icnsSource.exists()) {
-		java.nio.file.Files.copy(icnsSource.toPath(), new File(resourcesDir, icnsSource.name).toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+		Files.copy(icnsSource.toPath(), new File(resourcesDir, icnsSource.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
 	}
 
 	def agentPlist = agentApp ? """\
@@ -2642,7 +2666,7 @@ ${jvmArgsStr} \\
 }
 
 // macOS: launch through the .app bundle so the app appears in Dock and Cmd+Tab.
-if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
+if (OperatingSystem.current().isMacOsX()) {
 	tasks.register('runMac') {
 		dependsOn classes
 		group = 'application'
@@ -2652,10 +2676,8 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 			def appDir = layout.buildDirectory.dir("tmp/MeshApp.app").get().asFile
 			prepareMacDebugAppBundle(appDir, false)
 			def appArgsList = []
-			def gradleRunTask = tasks.findByName('run')
-			if (gradleRunTask != null && gradleRunTask.hasProperty('args')) {
-				appArgsList.addAll(gradleRunTask.args.collect { it.toString() })
-			}
+			def gradleRunTask = tasks.named('run', JavaExec).get()
+			appArgsList.addAll(gradleRunTask.args.collect { it.toString() })
 
 			// Launch through 'open -W' and wait for completion. Debug multi-instance mode needs
 			// '-n'; otherwise macOS activates an existing bundle and drops the new process args.
@@ -2684,12 +2706,12 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 				appArgsList.add(0, '--rpc-server')
 			}
 			def helpOnly = appArgsList.any { it == '--help' || it == '-h' }
-			def runId = java.util.UUID.randomUUID().toString()
+			def runId = UUID.randomUUID().toString()
 			if (!helpOnly) {
 				appArgsList.addAll(['--rpc-run-id', runId])
 			}
 			def logFile = null
-			def tailRunning = new java.util.concurrent.atomic.AtomicBoolean(false)
+			def tailRunning = new AtomicBoolean(false)
 			def tailThread = null
 
 			def command = helpOnly
@@ -2704,7 +2726,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 					long position = 0L
 					while (tailRunning.get()) {
 						if (logFile.isFile()) {
-							def raf = new java.io.RandomAccessFile(logFile, 'r')
+							def raf = new RandomAccessFile(logFile, 'r')
 							try {
 								if (raf.length() < position) {
 									position = 0L
@@ -2713,8 +2735,8 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 								String line
 								while ((line = raf.readLine()) != null) {
 									System.out.println(new String(
-										line.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1),
-										java.nio.charset.StandardCharsets.UTF_8))
+										line.getBytes(StandardCharsets.ISO_8859_1),
+										StandardCharsets.UTF_8))
 								}
 								position = raf.filePointer
 							} finally {
@@ -2738,9 +2760,9 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 				if (runId == null || runId.isBlank()) {
 					return
 				}
-				def matches = java.lang.ProcessHandle.allProcesses()
+				def matches = ProcessHandle.allProcesses()
 					.filter { handle ->
-						handle.pid() != java.lang.ProcessHandle.current().pid()
+						handle.pid() != ProcessHandle.current().pid()
 							&& handle.info().commandLine().orElse('').contains(runId)
 					}
 					.toList()
@@ -2750,7 +2772,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 				}
 				matches.each { handle ->
 					try {
-						handle.onExit().get(5, java.util.concurrent.TimeUnit.SECONDS)
+						handle.onExit().get(5, TimeUnit.SECONDS)
 					} catch (Exception ignored) {
 						if (handle.isAlive()) {
 							handle.destroyForcibly()
@@ -2762,7 +2784,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 				stopRpcServerProcess()
 				if (proc.isAlive()) {
 					proc.destroy()
-					if (!proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)) {
+					if (!proc.waitFor(5, TimeUnit.SECONDS)) {
 						proc.destroyForcibly()
 					}
 				}
@@ -2788,7 +2810,7 @@ if (org.gradle.internal.os.OperatingSystem.current().isMacOsX()) {
 					proc.destroy()
 				}
 			}
-			throw new org.gradle.api.tasks.StopExecutionException()
+			throw new StopExecutionException()
 		}
 	}
 }

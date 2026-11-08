@@ -4,10 +4,10 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.logging.UiLogAppender;
+import com.meshtastic.client.model.LogEntry;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
@@ -34,6 +34,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -325,7 +326,7 @@ class MessageListenerServiceTest {
             service.onMeshPacket(packet);
 
             List<String> loggedMessages = UiLogAppender.getBuffer().stream()
-                    .map(entry -> entry.getFullMessage())
+                    .map(LogEntry::getFullMessage)
                     .toList();
             assertTrue(loggedMessages.stream().anyMatch(message ->
                     message.contains("Received channel 2 message from !11111111")));
@@ -447,6 +448,7 @@ class MessageListenerServiceTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation") // Verify compatibility with legacy firmware telemetry.
     void onMeshPacketPersistsExtendedTelemetryVariants() {
         service.onMeshPacket(telemetryPacket(7100, 1_700_000_100, TelemetryProtos.Telemetry.newBuilder()
                 .setEnvironmentMetrics(TelemetryProtos.EnvironmentMetrics.newBuilder()
@@ -505,7 +507,7 @@ class MessageListenerServiceTest {
         List<TelemetryEntry> persistedEntries = NodeCacheService.getInstance().loadTelemetrySince(0, "!12345678");
         assertEquals(6, persistedEntries.size());
 
-        TelemetryEntry environment = persistedEntries.get(0);
+        TelemetryEntry environment = persistedEntries.getFirst();
         assertEquals("ENVIRONMENT_METRICS", environment.getTelemetryVariant());
         assertEquals(21.5f, environment.getTemperature(), 0.001f);
         assertEquals(0.8f, environment.getGasResistance(), 0.001f);
@@ -624,8 +626,7 @@ class MessageListenerServiceTest {
         service.onConfigComplete(1);
 
         assertTrue(waitUntil(() ->
-                        MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount,
-                5_000));
+                        MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount));
 
         List<MeshMessage> persisted = MessageDbService.getInstance()
                 .loadLast("channel", "2", packetCount + 10, "!12345678");
@@ -820,7 +821,7 @@ class MessageListenerServiceTest {
     @Test
     void onMeshPacketIgnoresTraceroutePayloadWithoutRequestIdWhenNotAddressedToLocalNode() {
         List<MeshProtos.RouteDiscovery> routes = new ArrayList<>();
-        state.addTracerouteListener((nodeNum, route) -> routes.add(route));
+        state.addTracerouteListener((_, route) -> routes.add(route));
 
         MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
                 .setFrom(0x11111111)
@@ -1072,7 +1073,7 @@ class MessageListenerServiceTest {
             service.onMeshPacket(packet);
 
             assertTrue(state.getAllDirectMessages().containsKey("!cafed00d"));
-            assertFalse(connection.awaitSentFrameCount(1, 200),
+            assertFalse(connection.awaitSentFrame(),
                     "Directed NODEINFO_APP must not send AdminMessage.add_contact");
         } finally {
             handler.shutdown();
@@ -1102,8 +1103,10 @@ class MessageListenerServiceTest {
                 .build();
     }
 
-    private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {
-        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+    // Deferred packet persistence has no completion callback; bounded polling observes the database.
+    @SuppressWarnings("BusyWait")
+    private static boolean waitUntil(BooleanSupplier condition) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (System.nanoTime() < deadlineNanos) {
             if (condition.getAsBoolean()) {
                 return true;
@@ -1115,10 +1118,11 @@ class MessageListenerServiceTest {
 
     private static final class RecordingConnection implements MeshtasticConnection {
 
+        private final CountDownLatch firstSentFrame = new CountDownLatch(1);
         private final List<byte[]> sentFrames = Collections.synchronizedList(new ArrayList<>());
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             // no-op for tests
         }
 
@@ -1135,6 +1139,7 @@ class MessageListenerServiceTest {
         @Override
         public void sendBytes(byte[] data) {
             sentFrames.add(Arrays.copyOf(data, data.length));
+            firstSentFrame.countDown();
         }
 
         @Override
@@ -1152,14 +1157,8 @@ class MessageListenerServiceTest {
             // no-op for tests
         }
 
-        boolean awaitSentFrameCount(int expectedCount, long timeoutMs) throws InterruptedException {
-            long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-            List<byte[]> snapshot = snapshotSentFrames();
-            while (snapshot.size() < expectedCount && System.nanoTime() < deadlineNanos) {
-                Thread.sleep(10);
-                snapshot = snapshotSentFrames();
-            }
-            return snapshot.size() >= expectedCount;
+        boolean awaitSentFrame() throws InterruptedException {
+            return firstSentFrame.await(200, TimeUnit.MILLISECONDS);
         }
 
         List<byte[]> snapshotSentFrames() {
@@ -1185,7 +1184,7 @@ class MessageListenerServiceTest {
         assertEquals(3, stored.size());
         var wire = com.meshtastic.client.protocol.rpc.RemoteTelemetryJson.dashboardResult("!12345678", "!cafebabe", stored, List.of());
         var restored = com.meshtastic.client.protocol.rpc.RemoteTelemetryJson.parseEntries(wire);
-        TelemetryEntry env = restored.get(0);
+        TelemetryEntry env = restored.getFirst();
         assertEquals(0f, env.getAdcVoltageCh0());
         assertNull(env.getAdcVoltageCh1());
         assertEquals(3.3f, env.getAdcVoltageCh7());
@@ -1227,7 +1226,9 @@ class MessageListenerServiceTest {
         service.onMeshPacket(ack.toBuilder().setAckProofStatus(MeshProtos.MeshPacket.AckProofStatus.ACK_PROOF_VALID).build());
         assertEquals(MeshMessage.DeliveryStatus.VERIFIED, pending.getStatus());
         assertFalse(state.getMessageStore().getPendingAcks().containsKey(99));
-        assertEquals(MeshMessage.DeliveryStatus.VERIFIED, MessageDbService.getInstance().findByPacketId(99).getStatus());
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(99);
+        assertNotNull(persisted);
+        assertEquals(MeshMessage.DeliveryStatus.VERIFIED, persisted.getStatus());
     }
 
     @Test
@@ -1239,7 +1240,9 @@ class MessageListenerServiceTest {
                 .setDecoded(MeshProtos.Data.newBuilder().setPortnum(Portnums.PortNum.MESH_BEACON_APP)
                         .setPayload(beacon.toByteString())).build();
         service.onMeshPacket(packet);
-        assertTrue(MessageDbService.getInstance().findByPacketId(7203).getText().contains("Join us"));
+        MeshMessage persisted = MessageDbService.getInstance().findByPacketId(7203);
+        assertNotNull(persisted);
+        assertTrue(persisted.getText().contains("Join us"));
         assertEquals(2, state.getChannels().size());
         assertTrue(state.getChannels().stream().noneMatch(c -> c.getSettings().getName().equals("Advertised")));
     }

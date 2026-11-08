@@ -554,21 +554,14 @@ public final class RemoteLuaScriptJson {
     }
 
     public static boolean booleanField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive() && element.getAsBoolean();
+        return RpcJsonFields.booleanField(object, field);
     }
 
     public static int intField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                ? element.getAsInt()
-                : 0;
+        return RpcJsonFields.intField(object, field);
     }
 
     public static long longField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                ? element.getAsLong()
-                : 0L;
+        return RpcJsonFields.longField(object, field);
     }
 }

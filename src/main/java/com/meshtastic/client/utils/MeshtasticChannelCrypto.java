@@ -126,12 +126,9 @@ public final class MeshtasticChannelCrypto {
             if (shorthand == 0) {
                 return null;
             }
-            if (shorthand >= 1) {
-                byte[] key = DEFAULT_CHANNEL_KEY.clone();
-                key[key.length - 1] = (byte) ((key[key.length - 1] & 0xFF) + shorthand - 1);
-                return key;
-            }
-            return null;
+            byte[] key = DEFAULT_CHANNEL_KEY.clone();
+            key[key.length - 1] = (byte) ((key[key.length - 1] & 0xFF) + shorthand - 1);
+            return key;
         }
 
         if (raw.length > AES_256_BYTES) {
@@ -262,8 +259,7 @@ public final class MeshtasticChannelCrypto {
             return false;
         }
         Portnums.PortNum portNum = decoded.getPortnum();
-        return portNum != null
-                && portNum != Portnums.PortNum.UNKNOWN_APP
+        return portNum != Portnums.PortNum.UNKNOWN_APP
                 && portNum != Portnums.PortNum.UNRECOGNIZED;
     }
 

@@ -23,7 +23,7 @@ class ConfigCompatibilityValidatorTest {
 
         assertTrue(ConfigCompatibilityValidator.validate(
                 state,
-                changes(false, List.of(), List.of(meshBeacon)),
+                changes(List.of(), List.of(meshBeacon)),
                 List.of()).isPresent());
     }
 
@@ -70,19 +70,17 @@ class ConfigCompatibilityValidatorTest {
                                 .build())
                         .build());
         ConfigProtos.Config illegalPreset = lora(
-                ConfigProtos.Config.LoRaConfig.RegionCode.US,
                 ConfigProtos.Config.LoRaConfig.ModemPreset.SHORT_FAST);
         ConfigProtos.Config legalPreset = lora(
-                ConfigProtos.Config.LoRaConfig.RegionCode.US,
                 ConfigProtos.Config.LoRaConfig.ModemPreset.LONG_FAST);
 
         assertTrue(ConfigCompatibilityValidator.validate(
                 state,
-                changes(false, List.of(illegalPreset), List.of()),
+                changes(List.of(illegalPreset), List.of()),
                 List.of()).isPresent());
         assertTrue(ConfigCompatibilityValidator.validate(
                 state,
-                changes(false, List.of(legalPreset), List.of()),
+                changes(List.of(legalPreset), List.of()),
                 List.of()).isPresent());
     }
 
@@ -96,14 +94,13 @@ class ConfigCompatibilityValidatorTest {
     }
 
     private static ConfigChangeSet changes(
-            boolean licensed,
             List<ConfigProtos.Config> configs,
             List<ModuleConfigProtos.ModuleConfig> moduleConfigs) {
         return new ConfigChangeSet(
                 false,
                 null,
                 null,
-                licensed,
+                false,
                 false,
                 0,
                 0,
@@ -116,11 +113,10 @@ class ConfigCompatibilityValidatorTest {
     }
 
     private static ConfigProtos.Config lora(
-            ConfigProtos.Config.LoRaConfig.RegionCode region,
             ConfigProtos.Config.LoRaConfig.ModemPreset preset) {
         return ConfigProtos.Config.newBuilder()
                 .setLora(ConfigProtos.Config.LoRaConfig.newBuilder()
-                        .setRegion(region)
+                        .setRegion(ConfigProtos.Config.LoRaConfig.RegionCode.US)
                         .setUsePreset(true)
                         .setModemPreset(preset)
                         .build())
@@ -132,13 +128,13 @@ class ConfigCompatibilityValidatorTest {
         try {
             var beacon = ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.newBuilder()
                     .setBroadcastMessage("я".repeat(30)).setBroadcastOfferFrequencySlot(1);
-            assertTrue(ConfigCompatibilityValidator.validate(state, changes(false, List.of(), List.of(
+            assertTrue(ConfigCompatibilityValidator.validate(state, changes(List.of(), List.of(
                     ModuleConfigProtos.ModuleConfig.newBuilder().setMeshBeacon(beacon).build())), List.of()).isEmpty());
             beacon.setBroadcastMessage("я".repeat(31));
-            assertTrue(ConfigCompatibilityValidator.validate(state, changes(false, List.of(), List.of(
+            assertTrue(ConfigCompatibilityValidator.validate(state, changes(List.of(), List.of(
                     ModuleConfigProtos.ModuleConfig.newBuilder().setMeshBeacon(beacon).build())), List.of()).isPresent());
             beacon.setBroadcastMessage("").setBroadcastOfferFrequencySlot(0);
-            assertTrue(ConfigCompatibilityValidator.validate(state, changes(false, List.of(), List.of(
+            assertTrue(ConfigCompatibilityValidator.validate(state, changes(List.of(), List.of(
                     ModuleConfigProtos.ModuleConfig.newBuilder().setMeshBeacon(beacon).build())), List.of()).isPresent());
         } finally { state.shutdown(); }
     }

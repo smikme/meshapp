@@ -431,7 +431,7 @@ public class MessageBubbleFactory {
         HBox reactionSlot = createReactionSlot(reactionBar);
         HBox routingMetaSlot = createRoutingMetaSlot(createRoutingMetaNode(msg).orElse(null));
         HBox meta = buildIncomingMeta(msg, routingMetaSlot);
-        VBox content = createMessageContent("chat-bubble-incoming", reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
+        VBox content = createMessageContent("chat-bubble-incoming", reactionBar != null);
         applyMentionStyle(content, msg);
         content.getChildren().addAll(nodes(
                 createSenderNameLabel(senderPresentation.senderName()),
@@ -472,12 +472,12 @@ public class MessageBubbleFactory {
         HBox reactionSlot = createReactionSlot(reactionBar);
         Label statusLabel = createStatusLabel(msg).orElse(null);
         HBox meta = buildOutgoingMeta(msg, statusLabel);
-        VBox content = createMessageContent("chat-bubble-outgoing", reactionBar != null, DEFAULT_BUBBLE_WIDTH_RATIO);
+        VBox content = createMessageContent("chat-bubble-outgoing", reactionBar != null);
         content.getChildren().addAll(nodes(
                 quoteSlot,
                 createTextNode(msg),
                 createMeshFilesPreviewNode(msg).orElse(null),
-                buildOutgoingFooter(msg, reactionSlot, meta)
+                buildOutgoingFooter(reactionSlot, meta)
         ));
 
         StackPane avatar = buildAvatar(ChatNodeDisplayHelper.resolveOutgoingAvatar(state));
@@ -690,15 +690,13 @@ public class MessageBubbleFactory {
      *
      * @param styleClass CSS class for the concrete bubble type
      * @param hasReactions whether the bubble has a reaction bar
-     * @param defaultWidthRatio default fraction of the container width
      * @return VBox bubble content
      */
     private VBox createMessageContent(String styleClass,
-                                      boolean hasReactions,
-                                      double defaultWidthRatio) {
+                                      boolean hasReactions) {
         VBox content = new VBox(BASE_VERTICAL_SPACING);
         content.getStyleClass().add(styleClass);
-        bindBubbleWidth(content, hasReactions, defaultWidthRatio);
+        bindBubbleWidth(content, hasReactions, DEFAULT_BUBBLE_WIDTH_RATIO);
         content.setMinHeight(Region.USE_PREF_SIZE);
         return content;
     }
@@ -834,7 +832,8 @@ public class MessageBubbleFactory {
      * Builds the incoming-message footer: reaction button, reaction bar, and meta data.
      *
      * @param msg incoming message
-     * @param reactionBar prepared reaction bar, or {@code null}
+     * @param reactionSlot container for the prepared reaction bar
+     * @param meta timestamp and delivery-status controls
      * @return incoming bubble footer
      */
     private HBox buildIncomingFooter(MeshMessage msg, HBox reactionSlot, HBox meta) {
@@ -851,11 +850,11 @@ public class MessageBubbleFactory {
     /**
      * Builds the outgoing-message footer: reactions on the left, status/time on the right.
      *
-     * @param msg outgoing message
-     * @param reactionBar prepared reaction bar, or {@code null}
+     * @param reactionSlot container for the prepared reaction bar
+     * @param meta timestamp and delivery-status controls
      * @return outgoing bubble footer
      */
-    private HBox buildOutgoingFooter(MeshMessage msg, HBox reactionSlot, HBox meta) {
+    private HBox buildOutgoingFooter(HBox reactionSlot, HBox meta) {
         HBox footer = createFooter(Pos.CENTER_RIGHT);
         footer.getChildren().addAll(nodes(
                 createFlexibleSpacer(),
@@ -1058,7 +1057,7 @@ public class MessageBubbleFactory {
         failedLabel.setVisible(false);
         failedLabel.setManaged(false);
 
-        previewImage.errorProperty().addListener((obs, wasError, isError) -> {
+        previewImage.errorProperty().addListener((_, _, isError) -> {
             if (!isError) {
                 return;
             }
@@ -1230,7 +1229,7 @@ public class MessageBubbleFactory {
                 .map(Label::new)
                 .map(label -> {
                     label.getStyleClass().add("chat-reaction-chip-count");
-                    return (Node) label;
+                    return label;
                 });
     }
 
@@ -1391,7 +1390,7 @@ public class MessageBubbleFactory {
     private Button createDisabledReactionButton() {
         Button reactionButton = createReactionButton();
         disableReactionButton(reactionButton);
-        reactionButton.setOnAction(e -> e.consume());
+        reactionButton.setOnAction(javafx.event.Event::consume);
         return reactionButton;
     }
 
@@ -1459,7 +1458,7 @@ public class MessageBubbleFactory {
         popup.setAutoHide(true);
         popup.setHideOnEscape(true);
         popup.getContent().add(popupRoot);
-        popup.setOnHidden(e -> clearOpenReactionPopup(popup));
+        popup.setOnHidden(_ -> clearOpenReactionPopup(popup));
 
         REACTION_EMOJI_ROWS.stream()
                 .map(emojiRow -> buildReactionPopupRow(msg, popup, emojiRow))
@@ -1545,7 +1544,6 @@ public class MessageBubbleFactory {
                         LIGHT_THEME_STYLE_CLASS,
                         Optional.ofNullable(anchor.getScene())
                                 .map(javafx.scene.Scene::getRoot)
-                                .filter(Objects::nonNull)
                                 .map(sceneRoot -> sceneRoot.getStyleClass().contains(LIGHT_THEME_STYLE_CLASS))
                                 .orElse(false)
                 ));
@@ -1603,7 +1601,7 @@ public class MessageBubbleFactory {
      */
     private Optional<Label> createStatusLabel(MeshMessage msg) {
         return Optional.ofNullable(msg.getStatus())
-                .map(status -> {
+                .map(_ -> {
                     Label statusLabel = new Label();
                     statusLabel.getStyleClass().add("chat-bubble-status");
                     statusLabel.setGraphicTextGap(ZERO_VALUE);
@@ -1710,7 +1708,7 @@ public class MessageBubbleFactory {
      */
     private static MenuItem createMenuItem(String title, Runnable action) {
         MenuItem menuItem = new MenuItem(title);
-        menuItem.setOnAction(ev -> action.run());
+        menuItem.setOnAction(_ -> action.run());
         return menuItem;
     }
 

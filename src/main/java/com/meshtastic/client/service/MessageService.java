@@ -158,7 +158,7 @@ public final class MessageService {
                     replyId, Integer.toHexString(replyId), data.getPayload().size());
         }
 
-        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(peerNodeId, peerNode);
         int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
@@ -177,9 +177,8 @@ public final class MessageService {
 
         String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
         String chatType = "dm";
-        String chatKey = peerNodeId;
-        hydrateReplyText(state, msg, ownerNodeId, chatType, chatKey);
-        MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
+        hydrateReplyText(state, msg, ownerNodeId, chatType, peerNodeId);
+        MessageDbService.getInstance().save(msg, chatType, peerNodeId, ownerNodeId);
         state.addDirectMessage(msg, peerNodeId);
         if (usePkiTransport) {
             preparePeerForPkiDirectMessage(handler, state, peerNode)
@@ -339,7 +338,7 @@ public final class MessageService {
                 .setEmoji(1)
                 .build();
 
-        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(peerNodeId, peerNode);
         int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
         if (usePkiTransport) {
             preparePeerForPkiDirectMessage(handler, state, peerNode);
@@ -408,7 +407,7 @@ public final class MessageService {
         MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId());
         logRetryReplyDebug("DM", message.getReplyId(), data);
 
-        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(peerNodeId, peerNode);
         int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
         if (!prepareMessageForRetry(message, packetId)) {
             return false;
@@ -963,11 +962,6 @@ public final class MessageService {
     }
 
     /**
-     * Helper for sending AdminMessage to the local device.
-     *
-     * @return future with routing ACK/NAK for the sent admin packet
-     */
-    /**
      * Sends a mutating admin command to the local device.
      * <p>
      * For begin/set/commit and other write operations, only routing ACK is needed.
@@ -1082,7 +1076,7 @@ public final class MessageService {
             return CompletableFuture.completedFuture(MeshProtos.Routing.Error.NONE);
         }
         log.debug("Sharing local user info with {} before PKI DM", peerNode.getNodeId());
-        return sendNodeInfoPacketAwaitRoutingAck(handler, state, peerNode.getNodeNum(), localUser.toByteString(), false);
+        return sendNodeInfoPacketAwaitRoutingAck(handler, state, peerNode.getNodeNum(), localUser.toByteString());
     }
 
     static void seedPeerContactForPki(ProtocolHandler handler, DeviceState state, NodeData peerNode) {
@@ -1253,7 +1247,7 @@ public final class MessageService {
         return normalizeDirectMessageChannel(state, peerNode != null ? peerNode.getChannel() : 0);
     }
 
-    private static boolean shouldUsePkiDirectMessage(DeviceState state, String peerNodeId, NodeData peerNode) {
+    private static boolean shouldUsePkiDirectMessage(String peerNodeId, NodeData peerNode) {
         byte[] publicKey = peerNode != null ? peerNode.getPublicKey() : null;
         if (publicKey == null || publicKey.length == 0) {
             log.debug("DM transport for {} stays legacy: peer public key is unavailable", peerNodeId);
@@ -1357,15 +1351,14 @@ public final class MessageService {
     private static CompletableFuture<MeshProtos.Routing.Error> sendNodeInfoPacketAwaitRoutingAck(ProtocolHandler handler,
                                                                                                   DeviceState state,
                                                                                                   int targetNodeNum,
-                                                                                                  ByteString payload,
-                                                                                                  boolean wantResponse) {
+                                                                                                  ByteString payload) {
         if (handler == null || state == null || targetNodeNum == 0) {
             return CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
         }
 
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.NODEINFO_APP)
-                .setWantResponse(wantResponse);
+                .setWantResponse(false);
         if (payload != null && !payload.isEmpty()) {
             dataBuilder.setPayload(payload);
         }
@@ -1414,6 +1407,8 @@ public final class MessageService {
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packetBuilder.build()).build());
     }
 
+    // Returns success for this action, consistently with the persistence API.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private static boolean prepareMessageForRetry(MeshMessage message, int newPacketId) {
         if (message == null || newPacketId == 0) {
             return false;
@@ -1639,6 +1634,8 @@ public final class MessageService {
         return null;
     }
 
+    // Returns success for this action, consistently with the persistence API.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private static boolean saveOutgoingReaction(DeviceState state,
                                                 String chatType,
                                                 String chatKey,

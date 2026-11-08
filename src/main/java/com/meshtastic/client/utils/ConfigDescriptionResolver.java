@@ -98,14 +98,6 @@ public final class ConfigDescriptionResolver {
         return protoValueDescriptions().getOrDefault(fullName, "");
     }
 
-    static Map<String, String> protoDescriptionsForTests() {
-        return protoDescriptions();
-    }
-
-    static Map<String, String> protoValueDescriptionsForTests() {
-        return protoValueDescriptions();
-    }
-
     private static Map<String, String> protoDescriptions() {
         Map<String, String> current = protoDescriptions;
         if (current == null) {

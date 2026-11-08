@@ -240,7 +240,7 @@ public final class NodeUtils {
         rows.add(new String[]{"\uD83D\uDC64", I18n.t("node.detail.name"), node.getLongName()});
         rows.add(new String[]{"\uD83C\uDFF7", I18n.t("node.detail.shortName"), node.getShortName()});
         rows.add(new String[]{"\uD83D\uDD11", I18n.t("node.detail.nodeId"), node.getNodeId()});
-        rows.add(new String[]{"\u2699", I18n.t("node.detail.role"),
+        rows.add(new String[]{"⚙", I18n.t("node.detail.role"),
                 node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
         rows.add(new String[]{"\uD83D\uDCDF", I18n.t("node.detail.model"), node.getHwModel()});
         rows.add(new String[]{"\uD83D\uDCAC", I18n.t("node.detail.directMessages"),
@@ -270,7 +270,7 @@ public final class NodeUtils {
         }
         rows.add(new String[]{"\uD83D\uDD0B", I18n.t("node.detail.battery"), battery});
 
-        rows.add(new String[]{"\u26A1", I18n.t("node.detail.voltage"),
+        rows.add(new String[]{"⚡", I18n.t("node.detail.voltage"),
                 node.getVoltage() > 0 ? I18n.t("node.detail.voltageValue", node.getVoltage()) : null});
         rows.add(new String[]{"\uD83D\uDD50", I18n.t("node.detail.last"),
                 node.getLastHeard() > 0 ? NodeData.formatTime(node.getLastHeard()) : null});
@@ -296,7 +296,7 @@ public final class NodeUtils {
         keyCol.setCellValueFactory(cd -> new SimpleStringProperty(cd.getValue()[1]));
         keyCol.setPrefWidth(180);
         keyCol.setSortable(false);
-        keyCol.setCellFactory(col -> new TableCell<>() {
+        keyCol.setCellFactory(_ -> new TableCell<>() {
             @Override
             protected void updateItem(String label, boolean empty) {
                 super.updateItem(label, empty);
@@ -330,23 +330,23 @@ public final class NodeUtils {
         TableColumn<String[], String> valCol = new TableColumn<>();
         valCol.setCellValueFactory(cd -> {
             String v = cd.getValue()[2];
-            return new SimpleStringProperty(v != null && !v.isEmpty() ? v : "\u2014");
+            return new SimpleStringProperty(v != null && !v.isEmpty() ? v : "—");
         });
         valCol.setSortable(false);
         valCol.setStyle("-fx-font-weight: bold;");
-        valCol.setCellFactory(col -> new TableCell<>() {
+        valCol.setCellFactory(_ -> new TableCell<>() {
             @Override
             protected void updateItem(String value, boolean empty) {
                 super.updateItem(value, empty);
-                if (empty || value == null || "\u2014".equals(value)) {
-                    setText(empty ? null : "\u2014");
+                if (empty || value == null || "—".equals(value)) {
+                    setText(empty ? null : "—");
                     setStyle("-fx-font-weight: bold;");
                     setContextMenu(null);
                 } else {
                     setText(value);
                     setStyle("-fx-font-weight: bold;");
                     MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
-                    copyItem.setOnAction(e -> {
+                    copyItem.setOnAction(_ -> {
                         ClipboardContent cc = new ClipboardContent();
                         cc.putString(value);
                         Clipboard.getSystemClipboard().setContent(cc);

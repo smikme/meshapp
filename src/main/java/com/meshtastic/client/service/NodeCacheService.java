@@ -34,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class NodeCacheService {
 
     private static final Logger log = LoggerFactory.getLogger(NodeCacheService.class);
@@ -345,7 +347,7 @@ public final class NodeCacheService {
     private static Set<String> newBoundedMissingNodeSet() {
         int capacity = (int) (MAX_MISSING_NODE_IDS / 0.75f) + 1;
         return Collections.synchronizedSet(Collections.newSetFromMap(
-                new LinkedHashMap<String, Boolean>(capacity, 0.75f) {
+                new LinkedHashMap<>(capacity, 0.75f) {
                     @Override
                     protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
                         return size() > MAX_MISSING_NODE_IDS;
@@ -727,7 +729,7 @@ public final class NodeCacheService {
         String nodeId = fresh.getNodeId();
         if (nodeId == null || nodeId.isEmpty()) { return; }
         missingNodeIds.remove(nodeId);
-        cache.compute(nodeId, (key, existing) -> {
+        cache.compute(nodeId, (_, existing) -> {
             if (existing == null) {
                 existing = loadFromDb(nodeId);
             }
@@ -753,7 +755,7 @@ public final class NodeCacheService {
             String nodeId = fresh.getNodeId();
             if (nodeId == null || nodeId.isEmpty()) { continue; }
             missingNodeIds.remove(nodeId);
-            cache.compute(nodeId, (key, existing) -> {
+            cache.compute(nodeId, (_, existing) -> {
                 if (existing == null) {
                     existing = loadFromDb(nodeId);
                 }
@@ -822,6 +824,8 @@ public final class NodeCacheService {
     /**
      * Fully clears the cache: removes all rows from H2 and the in-memory cache.
      */
+    // This explicit cache reset intentionally deletes every row.
+    @SuppressWarnings("SqlWithoutWhere")
     public synchronized void clearAll() {
         cache.clear();
         missingNodeIds.clear();
@@ -870,6 +874,7 @@ public final class NodeCacheService {
      * Sets the favorite flag for a node.
      * Legacy overload for callers that do not know the owner device yet.
      */
+    @SuppressWarnings("unused") // Retained legacy overload for callers without an owner-device scope.
     public synchronized void setFavorite(String nodeId, boolean favorite) {
         setFavorite(nodeId, "", favorite);
     }
@@ -928,6 +933,7 @@ public final class NodeCacheService {
      * Loads all favorite nodes from the database.
      * Legacy overload for callers that do not know the owner device yet.
      */
+    @SuppressWarnings("unused") // Retained legacy overload for callers without an owner-device scope.
     public List<NodeData> loadFavoriteNodes() {
         return loadFavoriteNodes("");
     }
@@ -1021,6 +1027,7 @@ public final class NodeCacheService {
      * Loads all ignored nodes from the database.
      * Legacy overload for callers that do not know the owner device yet.
      */
+    @SuppressWarnings("unused") // Retained legacy overload for callers without an owner-device scope.
     public List<NodeData> loadIgnoredNodes() {
         return loadIgnoredNodes("");
     }
@@ -1210,7 +1217,7 @@ public final class NodeCacheService {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
             // Inner query takes the latest N rows (DESC); the outer query sorts them ASC.
-        String sql = "SELECT * FROM (SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC";
+        String sql = "SELECT * FROM (SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setInt(2, limit);
@@ -1236,8 +1243,8 @@ public final class NodeCacheService {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = sinceEpoch > 0
-                ? "SELECT * FROM telemetry_history WHERE owner_node_id = ? AND ts >= ? ORDER BY ts ASC"
-                : "SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts ASC";
+                ? "SELECT * FROM telemetry_history WHERE owner_node_id = ? AND ts >= ? ORDER BY ts"
+                : "SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             if (sinceEpoch > 0) { ps.setLong(2, sinceEpoch); }
@@ -1273,7 +1280,7 @@ public final class NodeCacheService {
               AND ts <= ?
               AND (telemetry_variant IS NOT NULL OR battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
-            ORDER BY ts ASC
+            ORDER BY ts
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
@@ -1374,7 +1381,7 @@ public final class NodeCacheService {
               AND ts <= ?
               AND (rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
-            ORDER BY ts ASC
+            ORDER BY ts
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
@@ -1566,6 +1573,7 @@ public final class NodeCacheService {
      * @param days number of days; older entries are removed
      * @return number of deleted rows
      */
+    @SuppressWarnings("UnusedReturnValue") // The deletion count remains available to callers.
     public int pruneTelemetryHistory(int days, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
         long cutoff = System.currentTimeMillis() / 1000 - (long) days * 86400;
@@ -2172,7 +2180,7 @@ public final class NodeCacheService {
                 SELECT temperature
                 FROM telemetry_one_wire_temperature
                 WHERE telemetry_id = ?
-                ORDER BY sensor_index ASC
+                ORDER BY sensor_index
                 """)) {
             ps.setLong(1, telemetryId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -2225,6 +2233,7 @@ public final class NodeCacheService {
         return rs.wasNull() ? null : value;
     }
 
+    @SuppressWarnings("SameParameterValue") // Keep the JDBC helper independent of a particular column/table.
     private static Integer nullableInteger(ResultSet rs, String columnName) throws SQLException {
         int value = rs.getInt(columnName);
         return rs.wasNull() ? null : value;

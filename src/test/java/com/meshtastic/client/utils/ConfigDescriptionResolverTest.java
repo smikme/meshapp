@@ -33,6 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 class ConfigDescriptionResolverTest {
 
     @TempDir
@@ -369,11 +371,7 @@ class ConfigDescriptionResolverTest {
         Connection connection = DatabaseProvider.getConnection();
         assertEquals(
             296,
-            countRows(
-                connection,
-                "config_help_articles",
-                "language_tag = 'en' AND article_type = 'field'"
-            )
+            countEnglishFieldArticles(connection)
         );
     }
 
@@ -573,13 +571,9 @@ class ConfigDescriptionResolverTest {
         return true;
     }
 
-    private static int countRows(
-        Connection connection,
-        String tableName,
-        String where
-    ) throws Exception {
+    private static int countEnglishFieldArticles(Connection connection) throws Exception {
         try (PreparedStatement ps = connection.prepareStatement(
-                "SELECT COUNT(*) FROM " + tableName + " WHERE " + where);
+                "SELECT COUNT(*) FROM config_help_articles WHERE language_tag = 'en' AND article_type = 'field'");
              ResultSet rs = ps.executeQuery()) {
             rs.next();
             return rs.getInt(1);

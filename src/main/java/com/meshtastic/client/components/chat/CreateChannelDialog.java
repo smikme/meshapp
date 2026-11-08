@@ -90,7 +90,7 @@ public final class CreateChannelDialog {
         TextField nameField = new TextField();
         nameField.setPromptText(I18n.t("chat.channel.namePrompt"));
         nameField.setMaxWidth(280);
-        nameField.textProperty().addListener((obs, oldVal, newVal) -> {
+        nameField.textProperty().addListener((_, oldVal, newVal) -> {
             if (newVal != null
                     && newVal.getBytes(StandardCharsets.UTF_8).length > 11) {
                 nameField.setText(oldVal);
@@ -104,7 +104,7 @@ public final class CreateChannelDialog {
         pskField.setMaxWidth(280);
 
         Button generateKeyBtn = new Button(I18n.t("common.generate"));
-        generateKeyBtn.setOnAction(ev -> {
+        generateKeyBtn.setOnAction(_ -> {
             byte[] key = new byte[32];
             new SecureRandom().nextBytes(key);
             pskField.setText(Base64.getEncoder().encodeToString(key));
@@ -132,14 +132,14 @@ public final class CreateChannelDialog {
         precisionSlider.setMinorTickCount(0);
         precisionSlider.setSnapToTicks(true);
         precisionSlider.setMaxWidth(280);
-        precisionSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+        precisionSlider.valueProperty().addListener((_, _, newVal) ->
                 precisionLabel.setText(precisionLabel(newVal.intValue())));
 
         VBox precisionBox = new VBox(4, precisionSlider, precisionLabel);
         precisionBox.setPadding(new Insets(0, 0, 0, 24));
         precisionBox.setVisible(false);
         precisionBox.setManaged(false);
-        positionCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+        positionCheck.selectedProperty().addListener((_, _, newVal) -> {
             precisionBox.setVisible(newVal);
             precisionBox.setManaged(newVal);
         });
@@ -154,7 +154,7 @@ public final class CreateChannelDialog {
         createBtn.getStyleClass().add("accent");
 
         Button cancelBtn = new Button(I18n.t("common.cancel"));
-        cancelBtn.setOnAction(e -> modalPane.hide());
+        cancelBtn.setOnAction(_ -> modalPane.hide());
 
         HBox btnRow = new HBox(10, cancelBtn, createBtn);
         btnRow.setAlignment(Pos.CENTER_RIGHT);
@@ -164,7 +164,7 @@ public final class CreateChannelDialog {
                 aeadCheck, uplinkCheck, downlinkCheck, positionCheck, precisionBox, statusLabel, btnRow);
 
         // Create handling.
-        createBtn.setOnAction(e -> {
+        createBtn.setOnAction(_ -> {
             String channelName = nameField.getText() != null
                     ? nameField.getText().trim() : "";
             if (channelName.isEmpty()) {

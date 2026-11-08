@@ -166,7 +166,7 @@ abstract class FormChatMessages extends FormChatUi {
         }
         positionInitialMessages(openingChatUnreadCount);
         openingChatUnreadCount = 0;
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
     }
 
     protected void jumpToLatestMessages() {
@@ -292,7 +292,7 @@ abstract class FormChatMessages extends FormChatUi {
         }
 
         handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         if (formVisible) {
             refreshLoadedMessageRows(metadataChangedDbIds);
         }
@@ -387,7 +387,7 @@ abstract class FormChatMessages extends FormChatUi {
         boolean wasAtLiveTail = formVisible && isAtLiveTail();
         ChatScrollState preservedScrollState = formVisible && !wasAtLiveTail ? captureViewportAnchor() : null;
         handleNewMessages(List.of(message), preservedScrollState, wasAtLiveTail);
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         return true;
     }
 
@@ -515,7 +515,7 @@ abstract class FormChatMessages extends FormChatUi {
                         return;
                     }
                     handleNewMessages(newMsgs, preservedScrollState, wasAtLiveTail);
-                    refreshMessageSearchResults(false);
+                    refreshMessageSearchResults();
                     if (formVisible) {
                         refreshLoadedMessageRows(false);
                     }
@@ -1728,7 +1728,7 @@ abstract class FormChatMessages extends FormChatUi {
         appendLoadedMessageRow(systemMessage);
         trimLoadedWindowFromTopIfNeeded();
         allNewerHistoryLoaded = true;
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         requestMessageViewportLayout();
         scrollToBottom();
         markAsRead(selectedChat);

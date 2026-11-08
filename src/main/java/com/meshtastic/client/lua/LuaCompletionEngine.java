@@ -40,7 +40,7 @@ public final class LuaCompletionEngine {
     private static final Pattern IPAIRS_FOR_PATTERN =
             Pattern.compile("\\bfor\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s*,\\s*)?([A-Za-z_][A-Za-z0-9_]*)\\s+in\\s+ipairs\\s*\\(([^)]*\\)[^)]*|[^)]*)\\)");
     private static final Pattern TABLE_ASSIGN_PATTERN =
-            Pattern.compile("\\blocal\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\{([\\s\\S]*?)\\}", Pattern.MULTILINE);
+            Pattern.compile("\\blocal\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*\\{([\\s\\S]*?)}", Pattern.MULTILINE);
     private static final Pattern TABLE_FIELD_PATTERN =
             Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(function\\s*\\(|[^,}\\n]+)");
     private static final Pattern TABLE_MEMBER_ASSIGN_PATTERN =
@@ -450,7 +450,7 @@ public final class LuaCompletionEngine {
 
     public CompletionResult complete(String code, int caret, boolean forced) {
         String safeCode = code != null ? code : "";
-        int safeCaret = Math.max(0, Math.min(caret, safeCode.length()));
+        int safeCaret = Math.clamp(caret, 0, safeCode.length());
         Prefix prefix = prefixAt(safeCode, safeCaret);
         if (!forced && prefix.text().length() < 2 && !prefix.text().contains(".") && !prefix.text().contains(":")) {
             return CompletionResult.empty(safeCaret);
@@ -488,7 +488,7 @@ public final class LuaCompletionEngine {
 
     private List<CompletionItem> rootCandidates(Analysis analysis) {
         List<CompletionItem> items = new ArrayList<>(rootItems);
-        analysis.symbols().forEach((name, type) -> items.add(new CompletionItem(name, name, "variable")));
+        analysis.symbols().forEach((name, _) -> items.add(new CompletionItem(name, name, "variable")));
         analysis.functions().forEach(name -> items.add(new CompletionItem(name + "(...)", name + "(", "function")));
         return deduplicate(items);
     }
@@ -511,7 +511,7 @@ public final class LuaCompletionEngine {
     }
 
     private Analysis analyze(String code, int caret) {
-        String beforeCaret = stripCommentsAndStrings(code.substring(0, Math.max(0, Math.min(caret, code.length()))));
+        String beforeCaret = stripCommentsAndStrings(code.substring(0, Math.clamp(caret, 0, code.length())));
         Map<String, String> symbols = new LinkedHashMap<>();
         Set<String> functions = new LinkedHashSet<>();
         Map<String, List<CompletionItem>> tableFields = new LinkedHashMap<>();
@@ -533,50 +533,22 @@ public final class LuaCompletionEngine {
             for (String param : splitNames(functionMatcher.group(2))) {
                 symbols.putIfAbsent(param, "unknown");
             }
-            if ("on_message".equals(name)) {
+            String parameterType = switch (name) {
+                case "on_message" -> "message";
+                case "on_reaction" -> "reaction";
+                case "on_command" -> "command";
+                case "on_node_selected" -> "node.selection";
+                case "on_traceroute" -> "traceroute.event";
+                case "on_node_info" -> "nodeinfo.event";
+                case "on_admin" -> "admin.event";
+                case "on_timer" -> "timer.event";
+                case "on_canvas_event", "on_canvas_frame" -> "canvas.event";
+                default -> null;
+            };
+            if (parameterType != null) {
                 List<String> params = splitNames(functionMatcher.group(2));
                 if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "message");
-                }
-            } else if ("on_reaction".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "reaction");
-                }
-            } else if ("on_command".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "command");
-                }
-            } else if ("on_node_selected".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "node.selection");
-                }
-            } else if ("on_traceroute".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "traceroute.event");
-                }
-            } else if ("on_node_info".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "nodeinfo.event");
-                }
-            } else if ("on_admin".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "admin.event");
-                }
-            } else if ("on_timer".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "timer.event");
-                }
-            } else if ("on_canvas_event".equals(name) || "on_canvas_frame".equals(name)) {
-                List<String> params = splitNames(functionMatcher.group(2));
-                if (!params.isEmpty()) {
-                    symbols.put(params.getFirst(), "canvas.event");
+                    symbols.put(params.getFirst(), parameterType);
                 }
             }
         }

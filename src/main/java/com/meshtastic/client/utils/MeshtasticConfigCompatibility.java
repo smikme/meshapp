@@ -5,7 +5,6 @@ import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.meshtastic.client.model.FirmwareCapabilities;
 import com.meshtastic.client.model.FirmwareVersion;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.meshtastic.proto.ConfigProtos;
@@ -46,6 +45,8 @@ public final class MeshtasticConfigCompatibility {
         }
     }
 
+    // Keep the filtering API consistent with includeField.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public static boolean includeSection(String sectionName, Context context) {
         return !"mesh_beacon".equals(sectionName)
                 || context.capabilities().firmware28OrNewer();
@@ -55,7 +56,7 @@ public final class MeshtasticConfigCompatibility {
         if (field == null) {
             return false;
         }
-        if (!availableOnFirmware(field.getOptions().getExtension(FieldMetadataProtos.fieldMetadata), context)) {
+        if (unavailableOnFirmware(field.getOptions().getExtension(FieldMetadataProtos.fieldMetadata), context)) {
             return false;
         }
         String fullName = field.getFullName();
@@ -66,9 +67,7 @@ public final class MeshtasticConfigCompatibility {
         if (fullName.startsWith(
                 "meshtastic.ModuleConfig.TrafficManagementConfig.")) {
             boolean legacyField = LEGACY_TRAFFIC_FIELDS.contains(field.getName());
-            return context.capabilities().firmware28OrNewer()
-                    ? !legacyField
-                    : true;
+            return !context.capabilities().firmware28OrNewer() || !legacyField;
         }
         if (fullName.startsWith(
                 "meshtastic.ModuleConfig.MeshBeaconConfig.")) {
@@ -88,7 +87,7 @@ public final class MeshtasticConfigCompatibility {
                 ? descriptor.getNumber()
                 : Integer.MIN_VALUE;
         values.removeIf(value -> value.getNumber() != currentNumber
-                && !availableOnFirmware(value.getOptions().getExtension(FieldMetadataProtos.enumValueMetadata), context));
+                && unavailableOnFirmware(value.getOptions().getExtension(FieldMetadataProtos.enumValueMetadata), context));
 
         if ("meshtastic.Config.LoRaConfig.RegionCode".equals(enumName)) {
             values.removeIf(value -> !allowedRegion(
@@ -115,12 +114,12 @@ public final class MeshtasticConfigCompatibility {
         return values;
     }
 
-    private static boolean availableOnFirmware(FieldMetadataProtos.FieldMetadata metadata, Context context) {
+    private static boolean unavailableOnFirmware(FieldMetadataProtos.FieldMetadata metadata, Context context) {
         // Unknown versions retain the legacy editor behavior until metadata arrives.
         return context.capabilities().version().map(version ->
-                FirmwareVersion.parse(metadata.getSinceFirmware()).map(version::isAtLeast).orElse(true)
-                        && !FirmwareVersion.parse(metadata.getDeprecatedSince()).map(version::isAtLeast).orElse(false)
-        ).orElse(true);
+                FirmwareVersion.parse(metadata.getSinceFirmware()).map(minimum -> !version.isAtLeast(minimum)).orElse(false)
+                        || FirmwareVersion.parse(metadata.getDeprecatedSince()).map(version::isAtLeast).orElse(false)
+        ).orElse(false);
     }
 
     private static boolean allowedRegion(
@@ -134,11 +133,7 @@ public final class MeshtasticConfigCompatibility {
         if ("ITU23_2M".equals(value.getName())) {
             return false;
         }
-        if ("UA_868".equals(value.getName())
-                && value.getNumber() != currentNumber) {
-            return false;
-        }
-        return true;
+        return !"UA_868".equals(value.getName()) || value.getNumber() == currentNumber;
     }
 
     public static Set<Integer> legalPresetNumbers(
@@ -156,12 +151,7 @@ public final class MeshtasticConfigCompatibility {
             if (groupIndex < 0 || groupIndex >= presetMap.getGroupsCount()) {
                 return Set.of();
             }
-            Set<Integer> result = new HashSet<>();
-            for (int preset :
-                    presetMap.getGroups(groupIndex).getPresetsValueList()) {
-                result.add(preset);
-            }
-            return Set.copyOf(result);
+            return Set.copyOf(presetMap.getGroups(groupIndex).getPresetsValueList());
         }
         return Set.of();
     }

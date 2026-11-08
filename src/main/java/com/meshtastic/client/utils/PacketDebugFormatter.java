@@ -194,6 +194,8 @@ public final class PacketDebugFormatter {
         /**
          * @return {@code true} when the preview contains at least one packet byte
          */
+        // This public preview capability is expressed positively, like isEmpty/isPresent APIs.
+        @SuppressWarnings("BooleanMethodIsAlwaysInverted")
         public boolean hasBytes() {
             return hexByteStartChars != null && hexByteStartChars.length > 0;
         }
@@ -518,6 +520,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionJsonExportState(jsonWriter, 0);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static PacketCollectionJsonExportState writePacketCollectionJsonEntry(
             PacketCollectionJsonExportState state,
             PacketLogEntry entry,
@@ -529,6 +533,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionJsonExportState(state.writer(), state.packetCount() + 1);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static void finishPacketCollectionJsonExport(
             PacketCollectionJsonExportState state,
             long packetCount) throws IOException {
@@ -551,6 +557,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionCsvExportState(writer, 0);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static PacketCollectionCsvExportState writePacketCollectionCsvEntry(
             PacketCollectionCsvExportState state,
             PacketLogEntry entry,
@@ -770,6 +778,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionCsvExportState(state.writer(), state.packetCount() + 1);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static void finishPacketCollectionCsvExport(PacketCollectionCsvExportState state) throws IOException {
         if (state == null || state.writer() == null) {
             return;
@@ -830,6 +840,7 @@ public final class PacketDebugFormatter {
      * @param packet protobuf packet
      * @return tree root
      */
+    @SuppressWarnings("unused") // Convenience overload for callers with an already decoded packet.
     public static TreeItem<PacketTreeNode> buildPacketTree(MeshProtos.MeshPacket packet) {
         return buildPacketTree(packet, packet != null ? packet.toByteArray() : new byte[0]);
     }
@@ -1204,7 +1215,7 @@ public final class PacketDebugFormatter {
         if (item == null || item.getValue() == null) {
             return;
         }
-        sb.append("  ".repeat(Math.max(0, depth))).append(item.getValue().getLabel());
+        sb.repeat("  ", Math.max(0, depth)).append(item.getValue().getLabel());
         if (item.getValue().hasByteRange()) {
             sb.append(" [").append(item.getValue().getStartByte())
                     .append("..").append(item.getValue().getEndByte()).append(')');

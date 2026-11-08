@@ -535,10 +535,10 @@ abstract class FormChatData extends FormChatRequests {
         preserveChatListItemAfterHistoryClear(db, key, ownerId, item);
 
         if (isChatDetailOpenFor(item)) {
-            closeMessageSearch(false);
+            closeMessageSearch();
             openingChatUnreadCount = 0;
             loadInitialMessages(false);
-            refreshMessageSearchResults(false);
+            refreshMessageSearchResults();
         }
 
         reloadChatList();
@@ -642,7 +642,7 @@ abstract class FormChatData extends FormChatRequests {
         recalcLoadedBounds();
         messageContainer.getChildren().remove(bubbleRow);
         updateMessageSelectionBar();
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         reloadChatList();
     }
 
@@ -735,7 +735,7 @@ abstract class FormChatData extends FormChatRequests {
 
         recalcLoadedBounds();
         updateMessageSelectionBar();
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         reloadChatList();
     }
 

@@ -102,52 +102,52 @@ public final class TestEnvironmentSupport {
             // Tests start real singleton services backed by H2 and background threads, so
             // every case must begin from a clean runtime state.
             Class<?> luaRuntimeService = Class.forName("com.meshtastic.client.lua.LuaScriptRuntimeService");
-            Object luaRuntimeInstance = readStaticField(luaRuntimeService, "instance");
+            Object luaRuntimeInstance = readSingleton(luaRuntimeService);
             if (luaRuntimeInstance != null) {
                 luaRuntimeService.getMethod("stopAll").invoke(luaRuntimeInstance);
             }
-            writeStaticField(luaRuntimeService, "instance", null);
+            clearStaticField(luaRuntimeService, "instance");
 
             Class<?> luaScriptService = Class.forName("com.meshtastic.client.lua.LuaScriptService");
-            writeStaticField(luaScriptService, "instance", null);
+            clearStaticField(luaScriptService, "instance");
 
             Class<?> messageDbService = Class.forName("com.meshtastic.client.service.MessageDbService");
-            Object messageDbInstance = readStaticField(messageDbService, "instance");
+            Object messageDbInstance = readSingleton(messageDbService);
             if (messageDbInstance != null) {
                 messageDbService.getMethod("close").invoke(messageDbInstance);
             }
-            writeStaticField(messageDbService, "instance", null);
+            clearStaticField(messageDbService, "instance");
 
             Class<?> nodeCacheService = Class.forName("com.meshtastic.client.service.NodeCacheService");
-            Object nodeCacheInstance = readStaticField(nodeCacheService, "instance");
+            Object nodeCacheInstance = readSingleton(nodeCacheService);
             if (nodeCacheInstance != null) {
                 nodeCacheService.getMethod("close").invoke(nodeCacheInstance);
             }
-            writeStaticField(nodeCacheService, "instance", null);
+            clearStaticField(nodeCacheService, "instance");
 
             Class<?> favoriteNodeService = Class.forName("com.meshtastic.client.service.FavoriteNodeService");
-            writeStaticField(favoriteNodeService, "instance", null);
+            clearStaticField(favoriteNodeService, "instance");
 
             Class<?> ignoredNodeService = Class.forName("com.meshtastic.client.service.IgnoredNodeService");
-            writeStaticField(ignoredNodeService, "instance", null);
+            clearStaticField(ignoredNodeService, "instance");
 
             Class<?> packetMonitorService = Class.forName("com.meshtastic.client.service.PacketMonitorService");
-            Object packetMonitorInstance = readStaticField(packetMonitorService, "instance");
+            Object packetMonitorInstance = readSingleton(packetMonitorService);
             if (packetMonitorInstance != null) {
                 packetMonitorService.getMethod("close").invoke(packetMonitorInstance);
             }
-            writeStaticField(packetMonitorService, "instance", null);
+            clearStaticField(packetMonitorService, "instance");
 
             Class<?> remoteRpcHostService = Class.forName("com.meshtastic.client.service.RemoteRpcHostService");
-            Object remoteRpcHostInstance = readStaticField(remoteRpcHostService, "instance");
+            Object remoteRpcHostInstance = readSingleton(remoteRpcHostService);
             if (remoteRpcHostInstance != null) {
                 remoteRpcHostService.getMethod("stop").invoke(remoteRpcHostInstance);
             }
-            writeStaticField(remoteRpcHostService, "instance", null);
+            clearStaticField(remoteRpcHostService, "instance");
 
             Class<?> databaseProvider = Class.forName("com.meshtastic.client.service.DatabaseProvider");
             databaseProvider.getMethod("close").invoke(null);
-            writeStaticField(databaseProvider, "connection", null);
+            clearStaticField(databaseProvider, "connection");
             Class<?> recoveryExecutor = Class.forName(
                     "com.meshtastic.client.service.DatabaseProvider$RecoveryExecutor");
             databaseProvider.getMethod("setRecoveryExecutor", recoveryExecutor)
@@ -158,26 +158,26 @@ public final class TestEnvironmentSupport {
             configHelpRepository.getMethod("invalidateLoadedState").invoke(configHelpInstance);
 
             Class<?> reconnectService = Class.forName("com.meshtastic.client.service.ReconnectService");
-            Object reconnectInstance = readStaticField(reconnectService, "instance");
+            Object reconnectInstance = readSingleton(reconnectService);
             if (reconnectInstance != null) {
-                ExecutorService scheduler = (ExecutorService) readField(reconnectInstance, "scheduler");
+                ExecutorService scheduler = (ExecutorService) readScheduler(reconnectInstance);
                 scheduler.shutdownNow();
             }
-            writeStaticField(reconnectService, "instance", null);
+            clearStaticField(reconnectService, "instance");
 
             Class<?> connectionManager = Class.forName("com.meshtastic.client.service.ConnectionManager");
-            Object connectionManagerInstance = readStaticField(connectionManager, "instance");
+            Object connectionManagerInstance = readSingleton(connectionManager);
             if (connectionManagerInstance != null) {
                 connectionManager.getMethod("shutdownAll").invoke(connectionManagerInstance);
             }
-            writeStaticField(connectionManager, "instance", null);
+            clearStaticField(connectionManager, "instance");
 
             Class<?> bleDiscoveryService = Class.forName("com.meshtastic.client.service.BleDeviceDiscoveryService");
-            Object bleDiscoveryInstance = readStaticField(bleDiscoveryService, "instance");
+            Object bleDiscoveryInstance = readSingleton(bleDiscoveryService);
             if (bleDiscoveryInstance != null) {
                 bleDiscoveryService.getMethod("dispose").invoke(bleDiscoveryInstance);
             }
-            writeStaticField(bleDiscoveryService, "instance", null);
+            clearStaticField(bleDiscoveryService, "instance");
 
             resetAppPreferencesState();
             resetDiagnostics();
@@ -194,7 +194,7 @@ public final class TestEnvironmentSupport {
 
     private static void resetAppPreferencesState() {
         try {
-            writeStaticField(AppPreferences.class, "state", null);
+            clearStaticField(AppPreferences.class, "state");
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException("Failed to reset AppPreferences state", e);
         }
@@ -210,20 +210,20 @@ public final class TestEnvironmentSupport {
         suspendForTests.invoke(null);
     }
 
-    private static Object readStaticField(Class<?> type, String fieldName) throws ReflectiveOperationException {
-        Field field = type.getDeclaredField(fieldName);
+    private static Object readSingleton(Class<?> type) throws ReflectiveOperationException {
+        Field field = type.getDeclaredField("instance");
         field.setAccessible(true);
         return field.get(null);
     }
 
-    private static void writeStaticField(Class<?> type, String fieldName, Object value) throws ReflectiveOperationException {
+    private static void clearStaticField(Class<?> type, String fieldName) throws ReflectiveOperationException {
         Field field = type.getDeclaredField(fieldName);
         field.setAccessible(true);
-        field.set(null, value);
+        field.set(null, null);
     }
 
-    private static Object readField(Object target, String fieldName) throws ReflectiveOperationException {
-        Field field = target.getClass().getDeclaredField(fieldName);
+    private static Object readScheduler(Object target) throws ReflectiveOperationException {
+        Field field = target.getClass().getDeclaredField("scheduler");
         field.setAccessible(true);
         return field.get(target);
     }

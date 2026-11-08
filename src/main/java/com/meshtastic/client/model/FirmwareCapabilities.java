@@ -15,7 +15,7 @@ public record FirmwareCapabilities(
             new FirmwareVersion(2, 8, 0);
 
     public FirmwareCapabilities {
-        version = version != null ? version : Optional.empty();
+        version = java.util.Objects.requireNonNullElse(version, Optional.empty());
     }
 
     public static FirmwareCapabilities legacy() {
@@ -26,6 +26,8 @@ public record FirmwareCapabilities(
         return version.map(value -> value.isAtLeast(new FirmwareVersion(2, 8, 1))).orElse(false);
     }
 
+    // Capability queries stay positive even when UI callers use them to disable controls.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean authenticatedChannels() {
         return version.map(value -> value.isAtLeast(new FirmwareVersion(2, 8, 1))).orElse(false);
     }
