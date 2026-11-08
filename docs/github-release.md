@@ -42,6 +42,10 @@ JUnit-отчёты сохраняются как Actions artifacts, в том ч
 
 Используются Temurin 25.0.5+8, Gradle Wrapper 9.8.2 с проверкой SHA-256,
 appimagetool 1.9.1 с проверкой SHA-256 и Freedesktop runtime/SDK 25.08 для Flatpak.
+Flatpak Builder берётся из официального `org.flatpak.Builder` с закреплённым
+коммитом в `scripts/ci/setup-linux.sh`: системная версия Ubuntu 22.04 несовместима
+с AppStream современных SDK. Само приложение по-прежнему собирается на Ubuntu
+22.04 и упаковывается для runtime 25.08.
 Обновление инструментов делается отдельным изменением с проверкой всех платформ.
 
 ## Собрать выпуск
