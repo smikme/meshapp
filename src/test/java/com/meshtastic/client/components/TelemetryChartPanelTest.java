@@ -115,12 +115,24 @@ class TelemetryChartPanelTest {
 
     @BeforeEach
     void clearTelemetryDockLayout() {
-        AppPreferences.saveTelemetryDockLayout(null);
+        // Layout persistence uses two nested runLater calls. Drain the previous test's
+        // saves before clearing preferences, so a new panel cannot restore stale state.
+        onFxThread(() -> null);
+        onFxThread(() -> null);
+        onFxThread(() -> {
+            AppPreferences.saveTelemetryDockLayout(null);
+            return null;
+        });
     }
 
     @AfterAll
     static void restoreTelemetryDockLayout() {
-        AppPreferences.saveTelemetryDockLayout(originalTelemetryDockLayout);
+        onFxThread(() -> null);
+        onFxThread(() -> null);
+        onFxThread(() -> {
+            AppPreferences.saveTelemetryDockLayout(originalTelemetryDockLayout);
+            return null;
+        });
     }
 
     @Test

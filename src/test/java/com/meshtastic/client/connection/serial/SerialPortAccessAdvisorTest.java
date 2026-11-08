@@ -3,6 +3,8 @@ package com.meshtastic.client.connection.serial;
 import com.meshtastic.client.i18n.I18n;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,7 +20,7 @@ class SerialPortAccessAdvisorTest {
                 true
         );
 
-        assertTrue(message.contains(I18n.t("connection.serial.permission", "/dev/ttyUSB0")));
+        assertTrue(message.contains(I18n.t("connection.serial.permission", Path.of("/dev/ttyUSB0"))));
         assertTrue(message.contains("sudo usermod -aG"));
         assertTrue(message.contains("$USER"));
     }

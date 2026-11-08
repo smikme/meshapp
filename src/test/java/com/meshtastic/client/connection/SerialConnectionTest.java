@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -140,35 +141,29 @@ class SerialConnectionTest {
         CountDownLatch errorLatch = new CountDownLatch(1);
         AtomicReference<byte[]> packetRef = new AtomicReference<>();
         SerialConnection connection = new SerialConnection(
-                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80, 5_000, 1_000, 15);
+                "COM3", 115200, () -> port, port.clock::get, 5, 0, 80, 5_000, 1_000, 15);
         connection.setConnectionListener(new TestConnectionListener(errorLatch));
         connection.setDataListener(packet -> {
             packetRef.set(packet);
             packetLatch.countDown();
         });
 
-        connection.connect();
-        port.enqueueIncoming(
-                FrameParser.START_BYTE_1, FrameParser.START_BYTE_2,
-                (byte) 0x00, (byte) 0x10, (byte) 0x08
-        );
-        Thread feeder = new Thread(() -> {
-            try {
-                Thread.sleep(25);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+        try {
+            connection.connect();
+            port.enqueueIncoming(
+                    FrameParser.START_BYTE_1, FrameParser.START_BYTE_2,
+                    (byte) 0x00, (byte) 0x10, (byte) 0x08
+            );
+            port.enqueueReadTimeout(25);
             port.enqueueIncoming(validFrame((byte) 0x08, (byte) 0x01));
-        });
-        feeder.start();
 
-        assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
-        assertNotNull(packetRef.get());
-        assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
-        assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
-
-        feeder.join(1000);
-        connection.disconnect();
+            assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
+            assertNotNull(packetRef.get());
+            assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
+            assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
+        } finally {
+            connection.disconnect();
+        }
         assertTrue(port.awaitClose());
     }
 
@@ -179,35 +174,28 @@ class SerialConnectionTest {
         CountDownLatch errorLatch = new CountDownLatch(1);
         AtomicReference<byte[]> packetRef = new AtomicReference<>();
         SerialConnection connection = new SerialConnection(
-                "COM3", 115200, () -> port, System::currentTimeMillis, 5, 0, 80, 5_000, 1_000, 40);
+                "COM3", 115200, () -> port, port.clock::get, 5, 0, 80, 5_000, 1_000, 40);
         connection.setConnectionListener(new TestConnectionListener(errorLatch));
         connection.setDataListener(packet -> {
             packetRef.set(packet);
             packetLatch.countDown();
         });
 
-        connection.connect();
-        port.enqueueIncoming(
-                FrameParser.START_BYTE_1, FrameParser.START_BYTE_2,
-                (byte) 0x00, (byte) 0x02, (byte) 0x08
-        );
-
-        Thread feeder = new Thread(() -> {
-            try {
-                Thread.sleep(20);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+        try {
+            connection.connect();
+            port.enqueueIncoming(
+                    FrameParser.START_BYTE_1, FrameParser.START_BYTE_2,
+                    (byte) 0x00, (byte) 0x02, (byte) 0x08
+            );
+            port.enqueueReadTimeout(20);
             port.enqueueIncoming((byte) 0x01);
-        });
-        feeder.start();
 
-        assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
-        assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
-        assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
-
-        feeder.join(1000);
-        connection.disconnect();
+            assertTrue(packetLatch.await(1, TimeUnit.SECONDS));
+            assertArrayEquals(new byte[]{0x08, 0x01}, packetRef.get());
+            assertFalse(errorLatch.await(50, TimeUnit.MILLISECONDS));
+        } finally {
+            connection.disconnect();
+        }
         assertTrue(port.awaitClose());
     }
 
@@ -361,7 +349,10 @@ class SerialConnectionTest {
     }
 
     private static final class FakeSerialPort implements NativeSerialPort {
-        private final BlockingQueue<byte[]> incoming = new LinkedBlockingQueue<>();
+        private record ReadStep(byte[] bytes, long elapsedMillis) {}
+
+        private final BlockingQueue<ReadStep> incoming = new LinkedBlockingQueue<>();
+        private final AtomicLong clock = new AtomicLong(1_000);
         private final CountDownLatch closedLatch = new CountDownLatch(1);
         private volatile boolean open;
 
@@ -376,8 +367,8 @@ class SerialConnectionTest {
                 return -1;
             }
 
-            byte[] chunk = incoming.poll();
-            if (chunk == null) {
+            ReadStep step = incoming.poll();
+            if (step == null) {
                 try {
                     Thread.sleep(Math.max(1, timeoutMs));
                 } catch (InterruptedException e) {
@@ -387,10 +378,14 @@ class SerialConnectionTest {
                 return open ? 0 : -1;
             }
 
+            // Scripted gaps advance the injected clock on the reader thread, so OS
+            // scheduling cannot turn a short USB gap into a partial-frame timeout.
+            clock.addAndGet(step.elapsedMillis());
+            byte[] chunk = step.bytes();
             int copyLen = Math.min(len, chunk.length);
             System.arraycopy(chunk, 0, buf, 0, copyLen);
             if (copyLen < chunk.length) {
-                incoming.add(Arrays.copyOfRange(chunk, copyLen, chunk.length));
+                enqueueIncoming(Arrays.copyOfRange(chunk, copyLen, chunk.length));
             }
             return copyLen;
         }
@@ -416,7 +411,11 @@ class SerialConnectionTest {
         }
 
         void enqueueIncoming(byte... chunk) {
-            incoming.add(Arrays.copyOf(chunk, chunk.length));
+            incoming.add(new ReadStep(Arrays.copyOf(chunk, chunk.length), 0));
+        }
+
+        void enqueueReadTimeout(long elapsedMillis) {
+            incoming.add(new ReadStep(new byte[0], elapsedMillis));
         }
 
         boolean awaitClose() throws InterruptedException {
