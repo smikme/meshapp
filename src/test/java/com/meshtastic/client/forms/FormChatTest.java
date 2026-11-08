@@ -64,7 +64,11 @@ class FormChatTest {
 
     @AfterEach
     void tearDown() {
-        TestEnvironmentSupport.resetSingletons();
+        // Complete nested UI callbacks before closing their database and deleting
+        // the temporary home. Reset on the FX thread to avoid concurrent DB access.
+        waitForFxEvents();
+        waitForFxEvents();
+        onFxThread(TestEnvironmentSupport::resetSingletons);
     }
 
     @Test
@@ -559,12 +563,12 @@ class FormChatTest {
             manager.setSelectedConnectionId(entry.getId());
 
             DeviceState state = new DeviceState();
+            FormChat form = new FormChat();
             try {
                 state.setMyNodeNum(0x12345678);
                 state.addChannel(channelProto(0));
                 deviceStates(manager).put(entry.getId(), state);
 
-                FormChat form = new FormChat();
                 form.state = state;
                 form.boundConnectionId = entry.getId();
                 form.selectedChat = null;
@@ -577,6 +581,7 @@ class FormChatTest {
                 assertTrue(form.isChatDetailOpenFor(form.selectedChat));
                 assertTrue(form.detailPane.getChildren().contains(form.messageArea));
             } finally {
+                form.formClose();
                 state.shutdown();
             }
         });

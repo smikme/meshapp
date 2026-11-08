@@ -482,9 +482,11 @@ class ConnectionManagerTest {
             manager.getConfigFuture(first.getId()).get(5, TimeUnit.SECONDS);
 
             manager.connect(duplicate.getId());
-            manager.getConfigFuture(duplicate.getId()).get(5, TimeUnit.SECONDS);
-
-            assertTrue(waitUntil(() -> !duplicate.isConnected(), 2_000));
+            // Duplicate detection can disconnect and remove the config future before
+            // connect() returns. Wait for the resulting state, not a removed future.
+            assertTrue(waitUntil(() -> "!11111111".equals(duplicate.getNodeId())
+                    && !duplicate.isConnected()
+                    && manager.getDeviceState(duplicate.getId()) == null, 5_000));
             assertTrue(first.isConnected());
             assertFalse(duplicate.isConnected());
             assertEquals("!11111111", duplicate.getNodeId());
