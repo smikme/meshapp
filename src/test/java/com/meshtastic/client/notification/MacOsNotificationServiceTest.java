@@ -78,7 +78,7 @@ class MacOsNotificationServiceTest {
         var context = new MacOsNotificationService.MacOsNotificationContext(
                 "/Users/ks/.sdkman/candidates/java/current/bin",
                 "net.java.openjdk.cmd",
-                "com.openai.codex",
+                "com.example.UnrelatedApp",
                 null
         );
 

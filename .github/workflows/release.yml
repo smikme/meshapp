@@ -82,7 +82,15 @@ jobs:
       - name: Test release tooling
         if: runner.os == 'Linux'
         run: python -m unittest discover -s scripts/ci/tests -v
-      - name: Test and package
+      - name: Build and test
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            xvfb-run -a ./gradlew check --no-daemon --stacktrace --console=plain
+          else
+            ./gradlew check --no-daemon --stacktrace --console=plain
+          fi
+      - name: Package installers and verify update archives
         shell: bash
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
@@ -90,9 +98,11 @@ jobs:
           export PACKAGING_JAVA_HOME="$JAVA_HOME"
           export FLATPAK_RELEASE_DATE="$(git log -1 --format=%cs)"
           if [[ "$RUNNER_OS" == Linux ]]; then
-            xvfb-run -a ./gradlew check jpackage appImage flatpak selfUpdateArchive verifySelfUpdatePackage --no-daemon --stacktrace -Pappimagetool="$RUNNER_TEMP/appimagetool.AppImage"
+            flatpak_branch=stable
+            if [[ "$MESHAPP_VERSION" == *-unstable.* ]]; then flatpak_branch=unstable; fi
+            ./gradlew jpackage appImage flatpak selfUpdateArchive verifySelfUpdatePackage --no-daemon --stacktrace --console=plain -Pappimagetool="$RUNNER_TEMP/appimagetool.AppImage" -PflatpakBranch="$flatpak_branch"
           else
-            ./gradlew check jpackage selfUpdateArchive verifySelfUpdatePackage --no-daemon --stacktrace
+            ./gradlew jpackage selfUpdateArchive verifySelfUpdatePackage --no-daemon --stacktrace --console=plain
           fi
       - name: Collect verified packages
         shell: bash
