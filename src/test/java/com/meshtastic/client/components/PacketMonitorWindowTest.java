@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -52,14 +53,14 @@ class PacketMonitorWindowTest {
         PacketMonitorWindow.RouteFilterSelection outgoing =
                 PacketMonitorWindow.resolveRouteFilterSelection("Исходящие");
 
-        assertEquals(null, all.direction());
-        assertEquals(null, all.transportMechanism());
+        assertNull(all.direction());
+        assertNull(all.transportMechanism());
         assertTrue(all.loraOnly());
         assertEquals(PacketLogEntry.Direction.INCOMING, incoming.direction());
-        assertEquals(null, incoming.transportMechanism());
+        assertNull(incoming.transportMechanism());
         assertTrue(incoming.loraOnly());
         assertEquals(PacketLogEntry.Direction.OUTGOING, outgoing.direction());
-        assertEquals(null, outgoing.transportMechanism());
+        assertNull(outgoing.transportMechanism());
         assertTrue(outgoing.loraOnly());
 
         assertTrue(all.matches(packet(PacketLogEntry.Direction.INCOMING, "TRANSPORT_LORA")));
@@ -80,7 +81,7 @@ class PacketMonitorWindowTest {
         PacketMonitorWindow.RouteFilterSelection outgoing =
                 PacketMonitorWindow.resolveRouteFilterSelection("Исходящие MQTT");
 
-        assertEquals(null, all.direction());
+        assertNull(all.direction());
         assertEquals(PacketMonitorService.TRANSPORT_MQTT, all.transportMechanism());
         assertFalse(all.loraOnly());
         assertEquals(PacketMonitorService.TRANSPORT_MQTT, legacyAll.transportMechanism());
