@@ -1,7 +1,6 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.TransportConnection;
 import org.junit.jupiter.api.Test;
@@ -386,7 +385,7 @@ class MqttProxyServiceTest {
                     serviceEnvelopePayload(decodedPacket(Portnums.PortNum.TEXT_MESSAGE_APP))
             );
 
-            assertTrue(awaitMqttEntryCount(monitor, 1));
+            assertTrue(awaitMqttEntry(monitor));
             List<PacketLogEntry> mqttEntries = monitor.loadAll(mqttQuery());
             assertEquals(1, mqttEntries.size());
             PacketLogEntry entry = mqttEntries.getFirst();
@@ -423,7 +422,7 @@ class MqttProxyServiceTest {
                     serviceEnvelopePayload(packet, "gateway-b")
             );
 
-            assertTrue(awaitMqttEntryCount(monitor, 1));
+            assertTrue(awaitMqttEntry(monitor));
             Thread.sleep(150);
             List<PacketLogEntry> mqttEntries = monitor.loadAll(mqttQuery());
             assertEquals(1, mqttEntries.size());
@@ -452,7 +451,7 @@ class MqttProxyServiceTest {
                     serviceEnvelopePayload(encryptedChannelPacket(Portnums.PortNum.TEXT_MESSAGE_APP))
             );
 
-            assertTrue(awaitMqttEntryCount(monitor, 1));
+            assertTrue(awaitMqttEntry(monitor));
             PacketLogEntry entry = monitor.loadAll(mqttQuery()).getFirst();
             assertEquals(PacketLogEntry.Direction.INCOMING, entry.getDirection());
             assertEquals("TEXT_MESSAGE_APP", entry.getPacketType());
@@ -474,15 +473,17 @@ class MqttProxyServiceTest {
         method.invoke(proxy, topic, new MqttMessage(payload));
     }
 
-    private static boolean awaitMqttEntryCount(PacketMonitorService monitor, int expectedCount) throws InterruptedException {
+    // MQTT delivery is asynchronous and exposes no persistence callback; polling is bounded.
+    @SuppressWarnings("BusyWait")
+    private static boolean awaitMqttEntry(PacketMonitorService monitor) throws InterruptedException {
         long deadline = System.currentTimeMillis() + 2_000;
         while (System.currentTimeMillis() < deadline) {
-            if (monitor.loadAll(mqttQuery()).size() == expectedCount) {
+            if (monitor.loadAll(mqttQuery()).size() == 1) {
                 return true;
             }
             Thread.sleep(25);
         }
-        return monitor.loadAll(mqttQuery()).size() == expectedCount;
+        return monitor.loadAll(mqttQuery()).size() == 1;
     }
 
     private static PacketMonitorService.PacketQuery mqttQuery() {
@@ -552,10 +553,10 @@ class MqttProxyServiceTest {
                 .setFrom(REMOTE_NODE_NUM)
                 .setTo(BROADCAST_NODE_NUM)
                 .setId(0x10203040)
-                .setChannel(0)
+                .setChannel(8)
                 .build();
         return packet.toBuilder()
-                .setEncrypted(ByteString.copyFrom(aesCtr(packet, DEFAULT_CHANNEL_KEY, decoded.toByteArray())))
+                .setEncrypted(ByteString.copyFrom(aesCtr(packet, decoded.toByteArray())))
                 .build();
     }
 
@@ -572,12 +573,12 @@ class MqttProxyServiceTest {
         return state;
     }
 
-    private static byte[] aesCtr(MeshProtos.MeshPacket packet, byte[] key, byte[] input) {
+    private static byte[] aesCtr(MeshProtos.MeshPacket packet, byte[] input) {
         try {
             Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
             cipher.init(
                     Cipher.ENCRYPT_MODE,
-                    new SecretKeySpec(key, "AES"),
+                    new SecretKeySpec(DEFAULT_CHANNEL_KEY, "AES"),
                     new IvParameterSpec(nonce(packet))
             );
             return cipher.doFinal(input);
@@ -596,7 +597,7 @@ class MqttProxyServiceTest {
 
     private static final class FakeTransportConnection implements TransportConnection {
         @Override
-        public void connect() throws ConnectionException {}
+        public void connect() {}
 
         @Override
         public void disconnect() {}

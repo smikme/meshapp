@@ -118,9 +118,7 @@ abstract class FormChatData extends FormChatRequests {
         registerConnectedStateListeners(mgr);
 
         reloadChatList();
-        if (stateChanged) {
-            reopenSelectedChatIfPossible();
-        }
+        reopenSelectedChatIfPossible();
         updateInputEnabled();
     }
 
@@ -147,6 +145,8 @@ abstract class FormChatData extends FormChatRequests {
         return new ActiveConnection(null, null, null, null, null);
     }
 
+    // The connection manager owns this shared RPC client.
+    @SuppressWarnings("resource")
     private void unbindPreviousState() {
         if (state != null) {
             state.removeMessageChangeListener(messageChangeListener);
@@ -178,6 +178,8 @@ abstract class FormChatData extends FormChatRequests {
         lastReadCounts.putAll(MessageDbService.getInstance().loadAllReadCounts(currentOwnerNodeId()));
     }
 
+    // The connection manager owns this shared RPC client.
+    @SuppressWarnings("resource")
     private void registerConnectedStateListeners(ConnectionManager mgr) {
         String selectedConnectionId = mgr.getSelectedConnectionId();
         for (ConnectionEntry entry : mgr.getEntries()) {
@@ -301,6 +303,8 @@ abstract class FormChatData extends FormChatRequests {
         clearChatUnreadDotIfFormVisible();
     }
 
+    // The connection manager owns this shared RPC client.
+    @SuppressWarnings("resource")
     private void reloadRemoteChatList() {
         RemoteRpcState rpcState = remoteRpcState;
         if (rpcState == null) {
@@ -440,7 +444,7 @@ abstract class FormChatData extends FormChatRequests {
         }
         if (state == null || protocolHandler == null) {
             if (meshCoreCompanionRuntime != null) {
-                Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.channelPropertiesMeshtasticOnly"));
+                com.meshtastic.client.components.chat.MeshCoreChannelDialog.show(meshCoreCompanionRuntime,item.getChannelIndex(),this::reloadChatList);
                 return;
             }
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.radioNotConnected"));
@@ -495,12 +499,12 @@ abstract class FormChatData extends FormChatRequests {
         acknowledgeCheckBox.setWrapText(true);
 
         Button cancelButton = new Button(I18n.t("common.cancel"));
-        cancelButton.setOnAction(e -> Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide));
+        cancelButton.setOnAction(_ -> Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide));
 
         Button confirmButton = new Button(I18n.t("chat.confirm.clearHistory.action"));
         confirmButton.getStyleClass().add("accent");
         confirmButton.disableProperty().bind(acknowledgeCheckBox.selectedProperty().not());
-        confirmButton.setOnAction(e -> {
+        confirmButton.setOnAction(_ -> {
             Optional.ofNullable(ModalPane.getInstance()).ifPresent(ModalPane::hide);
             onConfirm.run();
         });
@@ -535,10 +539,10 @@ abstract class FormChatData extends FormChatRequests {
         preserveChatListItemAfterHistoryClear(db, key, ownerId, item);
 
         if (isChatDetailOpenFor(item)) {
-            closeMessageSearch(false);
+            closeMessageSearch();
             openingChatUnreadCount = 0;
             loadInitialMessages(false);
-            refreshMessageSearchResults(false);
+            refreshMessageSearchResults();
         }
 
         reloadChatList();
@@ -642,7 +646,7 @@ abstract class FormChatData extends FormChatRequests {
         recalcLoadedBounds();
         messageContainer.getChildren().remove(bubbleRow);
         updateMessageSelectionBar();
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         reloadChatList();
     }
 
@@ -653,9 +657,8 @@ abstract class FormChatData extends FormChatRequests {
         }
 
         long dbId = msg.getDbId();
-        boolean selected = selectedMessageDbIds.remove(dbId)
-                ? false
-                : selectedMessageDbIds.add(dbId);
+        boolean selected = !selectedMessageDbIds.remove(dbId)
+                && selectedMessageDbIds.add(dbId);
         setMessageRowSelected(row, selected);
         updateMessageSelectionBar();
     }
@@ -735,7 +738,7 @@ abstract class FormChatData extends FormChatRequests {
 
         recalcLoadedBounds();
         updateMessageSelectionBar();
-        refreshMessageSearchResults(false);
+        refreshMessageSearchResults();
         reloadChatList();
     }
 
@@ -771,6 +774,8 @@ abstract class FormChatData extends FormChatRequests {
         }
     }
 
+    // The connection manager owns this shared RPC client.
+    @SuppressWarnings("resource")
     private void markRemoteChatAsRead(ChatItem item) {
         RemoteRpcState rpcState = remoteRpcState;
         if (rpcState == null || item == null) {
@@ -824,12 +829,15 @@ abstract class FormChatData extends FormChatRequests {
 
         ContextMenu menu = new ContextMenu();
         MenuItem createChannel = new MenuItem(I18n.t("chat.menu.createChannel"));
-        createChannel.setOnAction(event -> showCreateChannelDialog());
+        createChannel.setOnAction(_ -> showCreateChannelDialog());
         menu.getItems().add(createChannel);
         return menu;
     }
 
     protected void showCreateChannelDialog() {
+        if(meshCoreCompanionRuntime != null) {
+            com.meshtastic.client.components.chat.MeshCoreChannelDialog.show(meshCoreCompanionRuntime,null,this::reloadChatList);return;
+        }
         if (protocolHandler == null) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.toast.createChannelsMeshtasticOnly"));
             return;

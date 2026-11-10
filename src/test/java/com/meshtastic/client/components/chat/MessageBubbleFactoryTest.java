@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,7 +58,6 @@ class MessageBubbleFactoryTest {
 
             assertNotNull(content);
             assertNotNull(content.getOnMouseClicked());
-            return null;
         });
     }
 
@@ -81,7 +81,6 @@ class MessageBubbleFactoryTest {
             assertNotNull(badge);
             assertNotNull(icon);
             assertTrue(content.getStyleClass().contains("chat-bubble-with-mqtt-badge"));
-            return null;
         });
     }
 
@@ -102,7 +101,6 @@ class MessageBubbleFactoryTest {
             assertNotNull(link);
             assertEquals("https://meshapp.ru", link.getText());
             assertNotNull(link.getOnMouseClicked());
-            return null;
         });
     }
 
@@ -123,7 +121,6 @@ class MessageBubbleFactoryTest {
             assertNotNull(status);
             assertEquals("✓", status.getText());
             assertFalse(status.getStyleClass().contains("chat-bubble-status-ok"));
-            return null;
         });
     }
 
@@ -144,9 +141,8 @@ class MessageBubbleFactoryTest {
             assertNotNull(status);
             assertNull(status.getText());
             assertNotNull(status.getGraphic());
-            assertTrue(status.getGraphic() instanceof SVGPath);
+            assertInstanceOf(SVGPath.class, status.getGraphic());
             assertTrue(status.getStyleClass().contains("chat-bubble-status-ok"));
-            return null;
         });
     }
 
@@ -177,7 +173,6 @@ class MessageBubbleFactoryTest {
 
                 assertTrue(ownerAContent.getStyleClass().contains("chat-bubble-mentioned"));
                 assertFalse(ownerBContent.getStyleClass().contains("chat-bubble-mentioned"));
-                return null;
             });
         } finally {
             ownerAState.shutdown();
@@ -202,7 +197,6 @@ class MessageBubbleFactoryTest {
             VBox content = findNodeWithStyle(row, "chat-bubble-incoming", VBox.class).orElseThrow();
 
             assertTrue(content.getStyleClass().contains("chat-bubble-mentioned"));
-            return null;
         });
     }
 
@@ -229,14 +223,13 @@ class MessageBubbleFactoryTest {
         return Optional.empty();
     }
 
-    private static <T> T onFxThread(FxSupplier<T> supplier) {
+    private static void onFxThread(FxTask task) {
         CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<T> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
 
         Platform.runLater(() -> {
             try {
-                result.set(supplier.get());
+                task.run();
             } catch (Throwable t) {
                 failure.set(t);
             } finally {
@@ -248,7 +241,6 @@ class MessageBubbleFactoryTest {
         if (failure.get() != null) {
             throw new AssertionError("JavaFX task failed", failure.get());
         }
-        return result.get();
     }
 
     private static void await(CountDownLatch latch) {
@@ -263,8 +255,8 @@ class MessageBubbleFactoryTest {
     }
 
     @FunctionalInterface
-    private interface FxSupplier<T> {
-        T get() throws Exception;
+    private interface FxTask {
+        void run() throws Exception;
     }
 
     private static final class NoOpBubbleActions implements MessageBubbleFactory.BubbleActions {
@@ -276,4 +268,17 @@ class MessageBubbleFactoryTest {
         @Override public boolean isMessageSelectionModeActive() { return false; }
         @Override public boolean retryMessage(MeshMessage msg) { return false; }
     }
+    @Test
+    void verifiedReceiptHasDistinctLabelAndExplanation() {
+        onFxThread(() -> {
+            Label label = new Label();
+            MessageBubbleFactory.updateStatusLabel(label, MeshMessage.DeliveryStatus.VERIFIED);
+            assertEquals("✓✓", label.getText());
+            assertNotNull(label.getTooltip());
+            MessageBubbleFactory.updateStatusLabel(label, MeshMessage.DeliveryStatus.DELIVERED);
+            assertEquals("✓", label.getText());
+            assertNull(label.getTooltip());
+        });
+    }
+
 }

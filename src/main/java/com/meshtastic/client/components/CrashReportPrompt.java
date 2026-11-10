@@ -217,8 +217,8 @@ public final class CrashReportPrompt {
             return new Content(
                     I18n.t("crashReport.startup.title"),
                     I18n.t("crashReport.startup.lead"),
-                    I18n.t("crashReport.email.label"),
-                    I18n.t("crashReport.email.prompt"),
+                    "",
+                    "",
                     I18n.t("crashReport.startup.comment.label"),
                     I18n.t("crashReport.startup.comment.prompt"),
                     I18n.t("crashReport.startup.privacy"),
@@ -230,8 +230,8 @@ public final class CrashReportPrompt {
             return new Content(
                     I18n.t("crashReport.problem.title"),
                     I18n.t("crashReport.problem.lead"),
-                    I18n.t("crashReport.email.label"),
-                    I18n.t("crashReport.email.prompt"),
+                    "",
+                    "",
                     I18n.t("crashReport.problem.comment.label"),
                     I18n.t("crashReport.problem.comment.prompt"),
                     I18n.t("crashReport.problem.privacy"),

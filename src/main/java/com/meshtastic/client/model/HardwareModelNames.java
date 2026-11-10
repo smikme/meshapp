@@ -23,8 +23,16 @@ public final class HardwareModelNames {
         if (model == null) {
             return MeshProtos.HardwareModel.UNSET.name();
         }
-        if (capabilities == null || !capabilities.firmware28OrNewer()) {
+        if (model == MeshProtos.HardwareModel.UNRECOGNIZED) {
             return model.name();
+        }
+        if (capabilities == null || !capabilities.firmware28OrNewer()) {
+            return switch (model.getNumber()) {
+                case 27 -> "SENSELORA_RP2040";
+                case 28 -> "SENSELORA_S3";
+                case 128 -> "TRACKER_T1000_E_PRO";
+                default -> model.name();
+            };
         }
         return switch (model.getNumber()) {
             case 27 -> "MAKERFABS_TRACKER";

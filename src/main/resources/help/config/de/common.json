@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "sections": {
     "owner_info": {
       "summary": "Gerätename und kurzes Rufzeichen, die für andere Benutzer im Mesh sichtbar sind.",
@@ -2866,24 +2866,19 @@
       }
     },
     "meshtastic.Config.SecurityConfig.packet_signature_policy": {
-      "summary": "Legt fest, wie signierte Mesh-Pakete angenommen und geprüft werden.",
-      "whenToUse": "Nur bei XEdDSA-Unterstützung ändern, wenn das Mesh Paketsignaturen verwendet.",
-      "defaultBehavior": "Der Standard bleibt mit gewöhnlichem unsigniertem Verkehr kompatibel."
+      "summary": "Steuert die Paketauthentifizierung. In 2.8.2 akzeptiert Compatible unsignierte Pakete und signiert ausgehende Pakete nicht.",
+      "whenToUse": "Balanced und Strict signieren geeigneten Verkehr. Strict verlangt Authentifizierung, mit Ausnahmen für Routing, Schlüsselprüfung und Traceroute. AES-CCM authentifiziert Kanalpakete unabhängig davon.",
+      "defaultBehavior": "Compatible ist der Standard. Eine fehlgeschlagene Signaturprüfung verwirft das Paket in jedem Modus."
     },
     "meshtastic.ModuleConfig.MeshBeaconConfig.flags": {
       "summary": "Wählt die aktivierten Mesh-Beacon-Sendungen und Angebote.",
       "whenToUse": "Nur die für diesen Knoten benötigten Beacon-Funktionen aktivieren.",
       "defaultBehavior": "Ohne gesetzte Flags sind Mesh-Beacon-Sendungen deaktiviert."
     },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_send_as_node": {
-      "summary": "Sendet Beacon-Nachrichten mit der Identität dieses Knotens.",
-      "whenToUse": "Aktivieren, wenn Empfänger den Quellknoten erkennen sollen.",
-      "defaultBehavior": "Deaktiviert verwendet die Firmware ihr Standardverhalten."
-    },
     "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_message": {
-      "summary": "Text in Mesh-Beacon-Sendungen.",
-      "whenToUse": "Eine kurze Kennzeichnung oder Beschreibung des Beacons verwenden.",
-      "defaultBehavior": "Ein leerer Wert sendet keinen eigenen Text."
+      "summary": "Text der Mesh-Beacon-Nachricht, höchstens 60 UTF-8-Bytes.",
+      "whenToUse": "Eine kurze Nachricht zur Kennzeichnung des Beacons verwenden.",
+      "defaultBehavior": "Ein leerer Wert sendet keinen eigenen Beacon-Text."
     },
     "meshtastic.ChannelSettings.channel_num": {
       "summary": "Kanalnummer eines Mesh-Beacon-Sendeziels.",
@@ -2945,25 +2940,25 @@
       "whenToUse": "Aktivieren, wenn Empfängern die Modem-Voreinstellung angeboten werden soll.",
       "defaultBehavior": "Voreinstellungsangebote sind deaktiviert."
     },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_channel": {
-      "summary": "Sendet Mesh-Beacon-Informationen auf dem eingestellten Kanal.",
-      "whenToUse": "Aktivieren, um Beacons über den gewählten Kanal zu senden.",
-      "defaultBehavior": "Kanalbezogene Beacon-Sendungen sind deaktiviert."
-    },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_region": {
-      "summary": "Sendet Mesh-Beacon-Informationen für die eingestellte Region.",
-      "whenToUse": "Aktivieren, um Informationen zur gewählten Region anzukündigen.",
-      "defaultBehavior": "Regionsbezogene Beacon-Sendungen sind deaktiviert."
-    },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_preset": {
-      "summary": "Sendet Mesh-Beacon-Informationen mit der eingestellten Voreinstellung.",
-      "whenToUse": "Aktivieren, um Informationen zur gewählten Voreinstellung anzukündigen.",
-      "defaultBehavior": "Voreinstellungsbezogene Beacon-Sendungen sind deaktiviert."
-    },
     "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_interval_secs": {
-      "summary": "Zeitabstand zwischen Mesh-Beacon-Sendungen in Sekunden.",
-      "whenToUse": "Einen langen Abstand passend zur geringen Mesh-Bandbreite wählen.",
-      "defaultBehavior": "Null deaktiviert periodische Sendungen; andere Werte müssen das Firmware-Minimum einhalten."
+      "summary": "Intervall zwischen Beacon-Sendungen in Sekunden.",
+      "whenToUse": "Mindestens 3600 Sekunden einstellen.",
+      "defaultBehavior": "Null wählt den Firmware-Standard von 3600 Sekunden."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_frequency_slot": {
+      "summary": "Frequenzslot, beginnend bei 1.",
+      "whenToUse": "Nur setzen, um den aus Region und Kanalnamen abgeleiteten Slot zu überschreiben.",
+      "defaultBehavior": "Für automatische Auswahl das optionale Feld leer lassen; nicht Null senden."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.BroadcastTarget.frequency_slot": {
+      "summary": "Frequenzslot, beginnend bei 1.",
+      "whenToUse": "Nur setzen, um den aus Region und Kanalnamen abgeleiteten Slot zu überschreiben.",
+      "defaultBehavior": "Für automatische Auswahl das optionale Feld leer lassen; nicht Null senden."
+    },
+    "meshtastic.ChannelSettings.use_aead": {
+      "summary": "Authentifizierte Kanalverschlüsselung mit AES-CCM.",
+      "whenToUse": "Erfordert Firmware 2.8.1 oder neuer, einen gültigen gemeinsamen Schlüssel und denselben Modus bei allen Teilnehmern.",
+      "defaultBehavior": "Deaktiviert wird das bisherige AES-CTR verwendet."
     }
   }
 }

@@ -32,7 +32,6 @@ import javafx.scene.control.TabPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
-import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
@@ -62,6 +61,7 @@ public class FormDashboard extends Form {
 
     private TelemetryChartPanel chartPanel;
     private Label logCountLabel;
+    @SuppressWarnings("FieldCanBeLocal") // TelemetryChartPanelTest inspects the table to verify cell factories.
     private TableView<TelemetryLogRow> logTable;
     private ScrollBar logTableVerticalScrollBar;
     private final ObservableList<TelemetryLogRow> logData = FXCollections.observableArrayList();
@@ -76,7 +76,7 @@ public class FormDashboard extends Form {
     private String remoteNodeId = "";
     private boolean formVisible;
 
-    private final ChangeListener<Number> logTableScrollListener = (obs, oldValue, newValue) -> {
+    private final ChangeListener<Number> logTableScrollListener = (_, _, newValue) -> {
         if (newValue.doubleValue() >= 0.95 && loadedCount < allEntries.size()) {
             loadNextPage();
         }
@@ -211,6 +211,8 @@ public class FormDashboard extends Form {
         chartPanel.bind(state, myNodeId);
     }
 
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private void refreshRemote() {
         RemoteRpcState rpcState = remoteRpcState;
         if (rpcState == null) {
@@ -265,69 +267,69 @@ public class FormDashboard extends Form {
         table.setPlaceholder(new Label(I18n.t("telemetry.table.empty")));
 
         TableColumn<TelemetryLogRow, String> colTime = new TableColumn<>(I18n.t("telemetry.column.time"));
-        colTime.setCellValueFactory(new PropertyValueFactory<>("time"));
+        colTime.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getTime()));
         colTime.setPrefWidth(150);
 
         TableColumn<TelemetryLogRow, String> colBattery = new TableColumn<>(I18n.t("telemetry.column.battery"));
-        colBattery.setCellValueFactory(new PropertyValueFactory<>("battery"));
+        colBattery.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getBattery()));
         colBattery.setPrefWidth(100);
 
         TableColumn<TelemetryLogRow, String> colVoltage = new TableColumn<>(I18n.t("telemetry.column.voltage"));
-        colVoltage.setCellValueFactory(new PropertyValueFactory<>("voltage"));
+        colVoltage.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getVoltage()));
         colVoltage.setPrefWidth(100);
 
         TableColumn<TelemetryLogRow, String> colChUtil = new TableColumn<>(I18n.t("telemetry.column.chUtil"));
-        colChUtil.setCellValueFactory(new PropertyValueFactory<>("chUtil"));
+        colChUtil.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getChUtil()));
         colChUtil.setPrefWidth(90);
 
         TableColumn<TelemetryLogRow, String> colAirUtil = new TableColumn<>(I18n.t("telemetry.column.airUtilTx"));
-        colAirUtil.setCellValueFactory(new PropertyValueFactory<>("airUtil"));
+        colAirUtil.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getAirUtil()));
         colAirUtil.setPrefWidth(90);
 
         TableColumn<TelemetryLogRow, String> colGoodRx = new TableColumn<>(I18n.t("telemetry.column.goodRx"));
-        colGoodRx.setCellValueFactory(new PropertyValueFactory<>("goodRx"));
+        colGoodRx.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getGoodRx()));
         colGoodRx.setPrefWidth(80);
 
         TableColumn<TelemetryLogRow, String> colBadRx = new TableColumn<>(I18n.t("telemetry.column.badRx"));
-        colBadRx.setCellValueFactory(new PropertyValueFactory<>("badRx"));
+        colBadRx.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getBadRx()));
         colBadRx.setPrefWidth(80);
 
         TableColumn<TelemetryLogRow, String> colDupeRx = new TableColumn<>(I18n.t("telemetry.column.dupeRx"));
-        colDupeRx.setCellValueFactory(new PropertyValueFactory<>("dupeRx"));
+        colDupeRx.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getDupeRx()));
         colDupeRx.setPrefWidth(80);
 
         TableColumn<TelemetryLogRow, String> colTx = new TableColumn<>(I18n.t("telemetry.column.tx"));
-        colTx.setCellValueFactory(new PropertyValueFactory<>("tx"));
+        colTx.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getTx()));
         colTx.setPrefWidth(60);
 
         TableColumn<TelemetryLogRow, String> colTxDropped = new TableColumn<>(I18n.t("telemetry.column.dropped"));
-        colTxDropped.setCellValueFactory(new PropertyValueFactory<>("txDropped"));
+        colTxDropped.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getTxDropped()));
         colTxDropped.setPrefWidth(70);
 
         TableColumn<TelemetryLogRow, String> colTxRelay = new TableColumn<>(I18n.t("telemetry.column.relayed"));
-        colTxRelay.setCellValueFactory(new PropertyValueFactory<>("txRelay"));
+        colTxRelay.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getTxRelay()));
         colTxRelay.setPrefWidth(70);
 
         TableColumn<TelemetryLogRow, String> colTxCanceled = new TableColumn<>(I18n.t("telemetry.column.canceled"));
-        colTxCanceled.setCellValueFactory(new PropertyValueFactory<>("txCanceled"));
+        colTxCanceled.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getTxCanceled()));
         colTxCanceled.setPrefWidth(70);
 
         TableColumn<TelemetryLogRow, String> colSnr = new TableColumn<>(I18n.t("telemetry.column.snr"));
-        colSnr.setCellValueFactory(new PropertyValueFactory<>("snr"));
+        colSnr.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getSnr()));
         colSnr.setPrefWidth(60);
 
         TableColumn<TelemetryLogRow, String> colRssi = new TableColumn<>(I18n.t("telemetry.column.rssi"));
-        colRssi.setCellValueFactory(new PropertyValueFactory<>("rssi"));
+        colRssi.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getRssi()));
         colRssi.setPrefWidth(60);
 
         TableColumn<TelemetryLogRow, String> colHops = new TableColumn<>(I18n.t("telemetry.column.hops"));
-        colHops.setCellValueFactory(new PropertyValueFactory<>("hops"));
+        colHops.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getHops()));
         colHops.setPrefWidth(60);
 
         TableColumn<TelemetryLogRow, String> colNode = new TableColumn<>(I18n.t("telemetry.column.node"));
         colNode.setCellValueFactory(cellData -> new ReadOnlyStringWrapper(
                 cellData.getValue() != null ? cellData.getValue().getNode() : "?"));
-        colNode.setCellFactory(column -> new TableCell<>() {
+        colNode.setCellFactory(_ -> new TableCell<>() {
             @Override
             protected void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
@@ -336,10 +338,30 @@ public class FormDashboard extends Form {
         });
         colNode.setPrefWidth(120);
 
-        table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode);
+        TableColumn<TelemetryLogRow, String> colSensors = new TableColumn<>(I18n.t("telemetry.column.sensors"));
+        colSensors.setCellValueFactory(cell -> new ReadOnlyStringWrapper(cell.getValue().getSensors()));
+        colSensors.setPrefWidth(260);
+        colSensors.setCellFactory(_ -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                boolean absent = empty || item == null || item.isBlank();
+                setText(absent ? null : item);
+                if (absent) {
+                    setTooltip(null);
+                } else {
+                    var tooltip = new javafx.scene.control.Tooltip(item.replace("; ", "\n"));
+                    tooltip.setMaxWidth(480);
+                    tooltip.setWrapText(true);
+                    setTooltip(tooltip);
+                }
+            }
+        });
+
+        table.getColumns().addAll(colTime, colBattery, colVoltage, colChUtil, colAirUtil, colGoodRx, colBadRx, colDupeRx, colTx, colTxDropped, colTxRelay, colTxCanceled, colSnr, colRssi, colHops, colNode, colSensors);
 
         // Lazy loading: load the next page when scrolling near the bottom.
-        table.skinProperty().addListener((obs, oldSkin, newSkin) -> {
+        table.skinProperty().addListener((_, _, newSkin) -> {
             if (newSkin == null) {
                 detachLogTableScrollListener();
             } else {
@@ -440,8 +462,10 @@ public class FormDashboard extends Form {
         private final String rssi;
         private final String hops;
         private final String node;
+        private final String sensors;
 
         public TelemetryLogRow(TelemetryEntry e, DeviceState state) {
+            this.sensors = com.meshtastic.client.utils.TelemetrySensorSummary.format(e);
             this.time = e.getTimestamp() > 0
                     ? Instant.ofEpochSecond(e.getTimestamp())
                         .atZone(ZoneId.systemDefault())
@@ -516,11 +540,7 @@ public class FormDashboard extends Form {
             }
 
             NodeData cached = NodeCacheService.getInstance().get(nodeId);
-            String cachedName = displayName(cached);
-            if (cachedName != null) {
-                return cachedName;
-            }
-            return null;
+            return displayName(cached);
         }
 
         private static String normalizeNodeId(String nodeId) {
@@ -554,6 +574,7 @@ public class FormDashboard extends Form {
         public String getSnr()      { return snr; }
         public String getRssi()     { return rssi; }
         public String getHops()     { return hops; }
+        public String getSensors() { return sensors; }
         public String getNode()     { return node; }
     }
 }

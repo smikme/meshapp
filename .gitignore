@@ -1,6 +1,8 @@
 HELP.md
 .gradle
 build/
+.release-secrets/
+__pycache__/
 .flatpak-builder/
 offline-repository/
 /src/main/resources/linux-*/
@@ -21,7 +23,13 @@ bin/
 !**/src/test/**/bin/
 
 ### IntelliJ IDEA ###
-.idea
+/.idea/*
+!/.idea/inspectionProfiles/
+/.idea/inspectionProfiles/*
+!/.idea/inspectionProfiles/Project_Default.xml
+!/.idea/scopes/
+/.idea/scopes/*
+!/.idea/scopes/GitHub_READMEs.xml
 *.iws
 *.iml
 *.ipr

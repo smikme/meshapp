@@ -50,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -166,7 +167,7 @@ class ConnectionManagerTest {
 
             assertInstanceOf(MeshCoreKissState.class, state);
             assertEquals(ProtocolType.MESHCORE_KISS, manager.getActiveProtocolType(entry.getId()));
-            assertEquals("meshcore-test", manager.getMeshCoreKissState(entry.getId()).getDeviceName());
+            var meshCoreState = manager.getMeshCoreKissState(entry.getId());            assertNotNull(meshCoreState);            assertEquals("meshcore-test", meshCoreState.getDeviceName());
             assertTrue(server.awaitDeviceNameRequest());
 
             manager.disconnect(entry.getId());
@@ -194,10 +195,10 @@ class ConnectionManagerTest {
 
         assertInstanceOf(MeshCoreCompanionState.class, state);
         assertEquals(ProtocolType.MESHCORE_COMPANION, manager.getActiveProtocolType(entry.getId()));
-        assertEquals("meshcore-companion-test", manager.getMeshCoreCompanionState(entry.getId()).getDeviceName());
+        var meshCoreState = manager.getMeshCoreCompanionState(entry.getId());        assertNotNull(meshCoreState);        assertEquals("meshcore-companion-test", meshCoreState.getDeviceName());
         DeviceState uiState = manager.getDeviceState(entry.getId());
         assertNotNull(uiState);
-        assertEquals("mc:a0a1a2a3a4a5", uiState.getOwnerNodeId());
+        assertEquals("mc:a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf", uiState.getOwnerNodeId());
         assertEquals("meshcore-companion-test", uiState.getOwnerInfo().getLongName());
         assertTrue(uiState.hasEnabledChannel(0));
         assertEquals(BleProtocolProfile.MESHCORE_COMPANION, platform.profile);
@@ -306,10 +307,10 @@ class ConnectionManagerTest {
 
             assertInstanceOf(MeshCoreCompanionState.class, state);
             assertEquals(ProtocolType.MESHCORE_COMPANION, manager.getActiveProtocolType(entry.getId()));
-            assertEquals("meshcore-companion-tcp", manager.getMeshCoreCompanionState(entry.getId()).getDeviceName());
+            var meshCoreState = manager.getMeshCoreCompanionState(entry.getId());            assertNotNull(meshCoreState);            assertEquals("meshcore-companion-tcp", meshCoreState.getDeviceName());
             DeviceState uiState = manager.getDeviceState(entry.getId());
             assertNotNull(uiState);
-            assertEquals("mc:a0a1a2a3a4a5", uiState.getOwnerNodeId());
+            assertEquals("mc:a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf", uiState.getOwnerNodeId());
             assertEquals("meshcore-companion-tcp", uiState.getOwnerInfo().getLongName());
             assertTrue(uiState.hasEnabledChannel(0));
             assertTrue(server.awaitRuntimeAppStart());
@@ -481,9 +482,11 @@ class ConnectionManagerTest {
             manager.getConfigFuture(first.getId()).get(5, TimeUnit.SECONDS);
 
             manager.connect(duplicate.getId());
-            manager.getConfigFuture(duplicate.getId()).get(5, TimeUnit.SECONDS);
-
-            assertTrue(waitUntil(() -> !duplicate.isConnected(), 2_000));
+            // Duplicate detection can disconnect and remove the config future before
+            // connect() returns. Wait for the resulting state, not a removed future.
+            assertTrue(waitUntil(() -> "!11111111".equals(duplicate.getNodeId())
+                    && !duplicate.isConnected()
+                    && manager.getDeviceState(duplicate.getId()) == null, 5_000));
             assertTrue(first.isConnected());
             assertFalse(duplicate.isConnected());
             assertEquals("!11111111", duplicate.getNodeId());
@@ -545,7 +548,9 @@ class ConnectionManagerTest {
                 () -> manager.updateEntry(updated));
 
         assertEquals(I18n.t("connection.error.editActive"), error.getMessage());
-        assertEquals("home", manager.findEntry(entry.getId()).getName());
+        var storedEntry = manager.findEntry(entry.getId());
+        assertNotNull(storedEntry);
+        assertEquals("home", storedEntry.getName());
     }
 
     @Test
@@ -688,7 +693,7 @@ class ConnectionManagerTest {
 
         ScheduledFuture<?> rebootFuture = pendingReconnects().get(entry.getId());
         assertNotNull(rebootFuture);
-        assertTrue(rebootFuture != normalFuture);
+        assertNotSame(normalFuture, rebootFuture);
         assertTrue(deviceRebootReconnectIds().contains(entry.getId()));
         assertTrue(rebootFuture.getDelay(TimeUnit.MILLISECONDS) > normalDelayMs + 2_000);
 
@@ -779,6 +784,8 @@ class ConnectionManagerTest {
             if (condition.getAsBoolean()) {
                 return true;
             }
+            // The connection manager exposes no completion event for these state predicates.
+            //noinspection BusyWait
             Thread.sleep(25);
         }
         return condition.getAsBoolean();
@@ -944,10 +951,6 @@ class ConnectionManagerTest {
         }
 
         @Override
-        public void setPasskeyRequestHandler(Consumer<String> handler) {
-        }
-
-        @Override
         public BlePlatform.AdapterState getAdapterState() {
             return BlePlatform.AdapterState.POWERED_ON;
         }
@@ -1003,10 +1006,6 @@ class ConnectionManagerTest {
         @Override
         public void setStateListener(Consumer<BleState> listener) {
             this.stateListener = listener;
-        }
-
-        @Override
-        public void setPasskeyRequestHandler(Consumer<String> handler) {
         }
 
         @Override
@@ -1070,14 +1069,8 @@ class ConnectionManagerTest {
 
         @Override
         public boolean writeToRadio(byte[] protobufPayload) {
-            if (protobufPayload.length > 0
-                    && (protobufPayload[0] & 0xFF) == MeshCoreCompanionFrames.CMD_APP_START) {
-                appStartReceived.countDown();
-                Consumer<byte[]> listener = fromRadioListener;
-                if (listener != null) {
-                    listener.accept(meshCoreSelfInfo(deviceName, publicKeyBase));
-                }
-            }
+            if(protobufPayload[0]==1)appStartReceived.countDown();
+            if(fromRadioListener!=null)for(byte[] response:companionResponses(protobufPayload,deviceName,publicKeyBase))fromRadioListener.accept(response);
             return connected;
         }
 
@@ -1089,10 +1082,6 @@ class ConnectionManagerTest {
         @Override
         public void setStateListener(Consumer<BleState> listener) {
             this.stateListener = listener;
-        }
-
-        @Override
-        public void setPasskeyRequestHandler(Consumer<String> handler) {
         }
 
         @Override
@@ -1115,8 +1104,16 @@ class ConnectionManagerTest {
         }
     }
 
-    private static byte[] meshCoreSelfInfo(String name) {
-        return meshCoreSelfInfo(name, (byte) 0xA0);
+    private static java.util.List<byte[]> companionResponses(byte[] command,String name,byte base) {
+        return switch(command[0]&255) {
+            case 1 -> java.util.List.of(meshCoreSelfInfo(name,base));
+            case 22 -> {byte[] p=new byte[82];p[0]=13;p[1]=14;p[2]=16;p[3]=1;yield java.util.List.of(p);}
+            case 4 -> java.util.List.of(new byte[]{2,0,0,0,0},new byte[]{4,0,0,0,0});
+            case 31 -> {byte[] p=new byte[50];p[0]=18;p[1]=command[1];p[2]='P';p[34]=1;yield java.util.List.of(p);}
+            case 20 -> java.util.List.of(new byte[]{12,0x34,0x12});
+            case 10 -> java.util.List.of(new byte[]{10});
+            default -> java.util.List.of(new byte[]{1,1});
+        };
     }
 
     private static byte[] meshCoreSelfInfo(String name, byte publicKeyBase) {
@@ -1140,6 +1137,7 @@ class ConnectionManagerTest {
         private final Thread acceptThread;
         private volatile Socket clientSocket;
         private volatile OutputStream clientOutput;
+        private final CountDownLatch outputReady = new CountDownLatch(1);
         private volatile boolean running = true;
 
         private TcpMeshtasticStubServer(int myNodeNum) throws IOException {
@@ -1164,6 +1162,7 @@ class ConnectionManagerTest {
                 InputStream in = socket.getInputStream();
                 OutputStream out = socket.getOutputStream();
                 clientOutput = out;
+                outputReady.countDown();
                 FrameParser parser = new FrameParser();
                 byte[] buffer = new byte[256];
 
@@ -1201,10 +1200,7 @@ class ConnectionManagerTest {
         }
 
         void sendRebooted() throws Exception {
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            while (clientOutput == null && System.nanoTime() < deadline) {
-                Thread.sleep(10);
-            }
+            assertTrue(outputReady.await(1, TimeUnit.SECONDS));
             OutputStream out = clientOutput;
             assertNotNull(out);
             send(out, MeshProtos.FromRadio.newBuilder()
@@ -1308,7 +1304,7 @@ class ConnectionManagerTest {
     private static final class TcpMeshCoreCompanionStubServer implements AutoCloseable {
         private final ServerSocket serverSocket;
         private final String deviceName;
-        private final CountDownLatch appStartLatch = new CountDownLatch(2);
+        private final CountDownLatch appStartLatch = new CountDownLatch(1);
         private final Thread acceptThread;
         private volatile Socket clientSocket;
         private volatile boolean running = true;
@@ -1334,37 +1330,21 @@ class ConnectionManagerTest {
                 clientSocket = socket;
                 InputStream in = socket.getInputStream();
                 OutputStream out = socket.getOutputStream();
-                byte[] buffer = new byte[256];
-
-                while (running) {
-                    int read = in.read(buffer);
-                    if (read < 0) {
-                        return;
+                while(running) {
+                    int marker=in.read();if(marker<0)return;
+                    if(marker!=0x3c)throw new IOException("Missing Companion stream header");
+                    int low=in.read(),high=in.read();if(low<0||high<0)return;
+                    byte[] command=in.readNBytes(low|(high<<8));
+                    if(command.length==0)return;
+                    if(command[0]==1)appStartLatch.countDown();
+                    for(byte[] response:companionResponses(command,deviceName,(byte)0xa0)) {
+                        out.write(new byte[]{0x3e,(byte)response.length,(byte)(response.length>>>8)});
+                        out.write(response);
                     }
-                    for (int i = 0; i < read; i++) {
-                        int command = buffer[i] & 0xFF;
-                        if (command == MeshCoreCompanionFrames.CMD_APP_START) {
-                            appStartLatch.countDown();
-                            out.write(meshCoreSelfInfo(deviceName));
-                            out.flush();
-                        } else if (command == MeshCoreCompanionFrames.CMD_DEVICE_QUERY && i + 1 < read && buffer[i + 1] == 0x03) {
-                            out.write(meshCoreDeviceInfo());
-                            out.flush();
-                        } else if (command == MeshCoreCompanionFrames.CMD_GET_BATTERY) {
-                            out.write(new byte[]{(byte) MeshCoreCompanionFrames.PACKET_BATTERY, (byte) 0x34, 0x12});
-                            out.flush();
-                        }
-                    }
+                    out.flush();
                 }
             } catch (Exception ignored) {
             }
-        }
-
-        private byte[] meshCoreDeviceInfo() {
-            byte[] packet = new byte[80];
-            packet[0] = (byte) MeshCoreCompanionFrames.PACKET_DEVICE_INFO;
-            packet[1] = 3;
-            return packet;
         }
 
         @Override

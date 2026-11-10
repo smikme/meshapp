@@ -7,11 +7,13 @@ import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.rpc.DirectRpcClient;
+import com.meshtastic.client.rpc.DirectRpcServer;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -98,6 +100,17 @@ class RemoteRpcHostServiceTest {
                     eventFuture.complete(payload.getAsJsonObject());
                 }
             });
+
+            // Client authentication can finish before the server registers its session.
+            // Publish only once the host has an active recipient for this event.
+            Field serverField = RemoteRpcHostService.class.getDeclaredField("server");
+            serverField.setAccessible(true);
+            DirectRpcServer server = (DirectRpcServer) serverField.get(host);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!server.hasActiveClient() && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertTrue(server.hasActiveClient(), "Server did not register the authenticated client");
 
             MeshMessage message = new MeshMessage("!11111111", "!ffffffff", 0, "sent", 20, true);
             message.setPacketId(12345);

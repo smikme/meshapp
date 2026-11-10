@@ -62,8 +62,8 @@ public class About extends VBox {
         projectHeader.setAlignment(Pos.TOP_LEFT);
 
         Hyperlink siteLink = createLink("meshapp.ru", "https://meshapp.ru");
-        Hyperlink codeLink = createLink(I18n.t("about.link.source"), "https://git.privatepractice.app/covox/meshapp");
-        Hyperlink issuesLink = createLink(I18n.t("about.link.issues"), "https://git.privatepractice.app/covox/meshapp/issues");
+        Hyperlink codeLink = createLink(I18n.t("about.link.source"), "https://github.com/smikme/meshapp");
+        Hyperlink issuesLink = createLink(I18n.t("about.link.issues"), "https://github.com/smikme/meshapp/issues");
 
         HBox linksRow = new HBox(12, siteLink, codeLink, issuesLink);
         linksRow.setAlignment(Pos.CENTER_LEFT);

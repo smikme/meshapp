@@ -25,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 class NodeCacheServiceTest {
 
     @TempDir
@@ -343,7 +345,7 @@ class NodeCacheServiceTest {
         List<TelemetryEntry> restoredEntries =
                 service.loadTelemetryForNode("!bbbbbbbb", 0, Long.MAX_VALUE, "!aaaaaaaa");
         assertEquals(1, restoredEntries.size());
-        TelemetryEntry restored = restoredEntries.get(0);
+        TelemetryEntry restored = restoredEntries.getFirst();
 
         assertEquals("ENVIRONMENT_METRICS", restored.getTelemetryVariant());
         assertEquals(87, restored.getBatteryLevel());
@@ -493,4 +495,22 @@ class NodeCacheServiceTest {
         assertNotNull(actual);
         assertEquals(expected, actual, 0.001f);
     }
+    @Test
+    void authenticationFlagsSurviveCacheRestartAndRpcPreservesUnknownVersusFalse() {
+        NodeData node = new NodeData(0xcafebabe);
+        node.setXeddsaSigned(true);
+        node.setHeardOnCurrentLora(false);
+        service.update(node);
+        TestEnvironmentSupport.resetSingletons();
+        service = NodeCacheService.getInstance();
+        var restored = service.get("!cafebabe");
+        var json = com.meshtastic.client.protocol.rpc.RemoteNodeJson.nodeToJson(restored, false, false);
+        var remote = com.meshtastic.client.protocol.rpc.RemoteNodeJson.parseNode(json);
+        assertEquals(Boolean.TRUE, remote.getXeddsaSigned());
+        assertEquals(Boolean.FALSE, remote.getHeardOnCurrentLora());
+        var legacy = com.meshtastic.client.protocol.rpc.RemoteNodeJson.parseNode(new com.google.gson.JsonObject());
+        assertNull(legacy.getXeddsaSigned());
+        assertNull(legacy.getHeardOnCurrentLora());
+    }
+
 }

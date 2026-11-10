@@ -95,7 +95,6 @@ public class ChatInputBar extends VBox {
     private final EmojiTextField messageInput;
     private final SendButtonWithRing sendRing;
     private final EmojiPicker emojiPicker;
-    private final StackPane inputStack;
     private final VBox commandSuggestionRoot;
     private final Button imageBtn;
     private final HBox imagePreviewBar;
@@ -118,6 +117,7 @@ public class ChatInputBar extends VBox {
     private boolean inputEnabled = true;
     private long imageUploadGeneration;
     private boolean restoringProtectedImageText;
+    private java.util.function.IntSupplier authenticationOverhead = () -> 0;
 
     /**
      * @param onSend message-send callback carrying text and replyId
@@ -170,7 +170,7 @@ public class ChatInputBar extends VBox {
         emojiBtn.getStyleClass().add("chat-emoji-btn");
         emojiBtn.setTooltip(new Tooltip(I18n.t("chat.emoji")));
         emojiPicker = new EmojiPicker(this::insertEmoji);
-        emojiBtn.setOnAction(e -> emojiPicker.toggle(emojiBtn));
+        emojiBtn.setOnAction(_ -> emojiPicker.toggle(emojiBtn));
 
         imageBtn = createImageButton();
 
@@ -188,19 +188,19 @@ public class ChatInputBar extends VBox {
         // Send button with a circular fill indicator.
         sendRing = new SendButtonWithRing(this::doSend);
 
-        messageInput.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+        messageInput.focusedProperty().addListener((_, _, isFocused) -> {
             if (!isFocused) {
                 savedCaretPosition = messageInput.getCaretPosition();
                 Platform.runLater(() -> {
                     if (activeNodePick != null && !messageInput.isFocused() && !commandSuggestionRoot.isHover()) {
-                        cancelActiveNodePick(true);
+                        cancelActiveNodePick();
                     }
                 });
             }
             Platform.runLater(this::refreshCommandSuggestions);
         });
 
-        messageInput.textProperty().addListener((obs, oldVal, newVal) -> {
+        messageInput.textProperty().addListener((_, oldVal, newVal) -> {
             if (restoringProtectedImageText) {
                 refreshInputState(newVal);
                 return;
@@ -218,16 +218,16 @@ public class ChatInputBar extends VBox {
             }
             refreshInputState(newVal);
         });
-        messageInput.caretPositionProperty().addListener((obs, oldVal, newVal) ->
+        messageInput.caretPositionProperty().addListener((_, _, _) ->
                 Platform.runLater(this::refreshCommandSuggestions));
-        messageInput.widthProperty().addListener((obs, oldVal, newVal) -> {
+        messageInput.widthProperty().addListener((_, _, _) -> {
             if (isCommandSuggestionsVisible()) {
                 Platform.runLater(this::showCommandSuggestions);
             }
         });
         messageInput.setKeyPressedInterceptor(this::handleCommandSuggestionKeyPressed);
 
-        messageInput.setOnAction(v -> doSend());
+        messageInput.setOnAction(_ -> doSend());
 
         HBox inputBar = new HBox(8, emojiBtn, imageBtn, messageInput, sendRing);
         inputBar.setAlignment(Pos.CENTER_LEFT);
@@ -235,7 +235,7 @@ public class ChatInputBar extends VBox {
         inputBar.getStyleClass().add("chat-input-bar");
         inputBar.setMaxHeight(Region.USE_PREF_SIZE);
 
-        inputStack = new StackPane(inputBar, commandSuggestionRoot);
+        StackPane inputStack = new StackPane(inputBar, commandSuggestionRoot);
         inputStack.setMaxWidth(Double.MAX_VALUE);
         inputStack.setMaxHeight(Region.USE_PREF_SIZE);
         inputStack.setAlignment(Pos.BOTTOM_LEFT);
@@ -257,7 +257,7 @@ public class ChatInputBar extends VBox {
         Button cancelReplyBtn = new Button("✕");
         cancelReplyBtn.getStyleClass().add("chat-reply-cancel");
         cancelReplyBtn.setTooltip(new Tooltip(I18n.t("chat.input.cancelReply")));
-        cancelReplyBtn.setOnAction(e -> cancelReply());
+        cancelReplyBtn.setOnAction(_ -> cancelReply());
 
         replyBar = new HBox(8, replyIcon, replyQuoteLabel, cancelReplyBtn);
         replyBar.setAlignment(Pos.CENTER_LEFT);
@@ -290,7 +290,7 @@ public class ChatInputBar extends VBox {
         clearImagePreviewBtn = new Button("✕");
         clearImagePreviewBtn.getStyleClass().add("chat-reply-cancel");
         clearImagePreviewBtn.setTooltip(new Tooltip(I18n.t("chat.image.clear")));
-        clearImagePreviewBtn.setOnAction(e -> clearAttachedImage(true));
+        clearImagePreviewBtn.setOnAction(_ -> clearAttachedImage(true));
 
         imagePreviewBar = new HBox(8, imagePreview, imagePreviewStatus, clearImagePreviewBtn);
         imagePreviewBar.setAlignment(Pos.CENTER_LEFT);
@@ -309,7 +309,7 @@ public class ChatInputBar extends VBox {
 
     /** Clears the input field and exits reply mode. */
     public void clear() {
-        cancelActiveNodePick(true);
+        cancelActiveNodePick();
         hideCommandSuggestions();
         clearAttachedImage(false);
         messageInput.clear();
@@ -324,7 +324,7 @@ public class ChatInputBar extends VBox {
                 || messageInput.getText().trim().isEmpty());
         updateImageButtonState();
         if (!enabled) {
-            cancelActiveNodePick(true);
+            cancelActiveNodePick();
             hideCommandSuggestions();
         }
     }
@@ -337,7 +337,7 @@ public class ChatInputBar extends VBox {
                               String prompt,
                               Consumer<ChatBotCommandHelper.NodeSuggestion> onSelected,
                               Runnable onCancelled) {
-        cancelActiveNodePick(true);
+        cancelActiveNodePick();
         activeNodePick = new ActiveNodePick(onSelected, onCancelled);
         updateImageButtonState();
         hideCommandSuggestions();
@@ -396,6 +396,8 @@ public class ChatInputBar extends VBox {
      *
      * @return {@code true} when image drag-and-drop may start an upload
      */
+    // Keep the capability query positive for callers, including drag-and-drop handlers.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     public boolean canAcceptImageDrop() {
         return getScene() != null
                 && isVisible()
@@ -440,7 +442,7 @@ public class ChatInputBar extends VBox {
             return false;
         }
         String name = file.getName();
-        if (name == null || name.isBlank()) {
+        if (name.isBlank()) {
             return false;
         }
         String lowerName = name.toLowerCase(Locale.ROOT);
@@ -449,7 +451,7 @@ public class ChatInputBar extends VBox {
 
     /** Requests focus for the text field. */
     public void focusInput() {
-        Platform.runLater(() -> messageInput.requestFocus());
+        Platform.runLater(messageInput::requestFocus);
     }
 
     // === Internal Methods ===
@@ -459,7 +461,7 @@ public class ChatInputBar extends VBox {
         button.setGraphic(createImageIcon());
         button.getStyleClass().addAll("chat-emoji-btn", "chat-image-btn");
         button.setTooltip(new Tooltip(I18n.t("chat.image.attach")));
-        button.setOnAction(e -> chooseAndUploadImage());
+        button.setOnAction(_ -> chooseAndUploadImage());
         return button;
     }
 
@@ -588,7 +590,7 @@ public class ChatInputBar extends VBox {
     private boolean insertImageUrl(String url) {
         String current = messageInput.getText();
         int rawCaret = messageInput.isFocused() ? messageInput.getCaretPosition() : savedCaretPosition;
-        int caret = Math.min(Math.max(rawCaret, 0), current.length());
+        int caret = Math.clamp(rawCaret, 0, current.length());
         ImageUrlInsertion insertion = imageUrlInsertion(current, caret, url);
         if (textByteLength(insertion.text()) > getMaxTextBytes()) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.image.tooLong"));
@@ -617,7 +619,7 @@ public class ChatInputBar extends VBox {
      */
     private static ImageUrlInsertion imageUrlInsertion(String current, int caret, String url) {
         String safeCurrent = current != null ? current : "";
-        int safeCaret = Math.min(Math.max(caret, 0), safeCurrent.length());
+        int safeCaret = Math.clamp(caret, 0, safeCurrent.length());
         String before = safeCurrent.substring(0, safeCaret);
         String after = safeCurrent.substring(safeCaret);
 
@@ -655,7 +657,7 @@ public class ChatInputBar extends VBox {
         restoringProtectedImageText = true;
         try {
             messageInput.setText(restored);
-            int caret = Math.min(Math.max(protectedImageCaretPosition, 0), restored.length());
+            int caret = Math.clamp(protectedImageCaretPosition, 0, restored.length());
             savedCaretPosition = caret;
             messageInput.positionCaret(caret);
         } finally {
@@ -811,13 +813,22 @@ public class ChatInputBar extends VBox {
         return files.stream().filter(ChatInputBar::isSupportedImageFile).findFirst();
     }
 
+    public void setAuthenticationOverheadSupplier(java.util.function.IntSupplier supplier) {
+        authenticationOverhead = supplier != null ? supplier : () -> 0;
+        updateCharCount();
+    }
+
     /** Maximum text byte length after protobuf overhead and reply mode are accounted for. */
+    private java.util.function.IntSupplier protocolTextLimit = () -> -1;
+    public void setProtocolTextLimit(java.util.function.IntSupplier supplier) { protocolTextLimit = supplier; updateCharCount(); }
     private int getMaxTextBytes() {
+        int protocolLimit=protocolTextLimit.getAsInt();
+        if(protocolLimit>=0)return protocolLimit;
         int overhead = PROTO_OVERHEAD;
         if (replyToMessage != null) {
             overhead += REPLY_ID_OVERHEAD;
         }
-        return DATA_PAYLOAD_LEN - overhead;
+        return Math.max(0, DATA_PAYLOAD_LEN - overhead - Math.max(0, authenticationOverhead.getAsInt()));
     }
 
     private void doSend() {
@@ -843,10 +854,15 @@ public class ChatInputBar extends VBox {
             return;
         }
 
+        if (textByteLength(text) > getMaxTextBytes()) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.messageTooLong", getMaxTextBytes()));
+            return;
+        }
         hideCommandSuggestions();
         int replyId = replyToMessage != null
                 ? replyToMessage.getPacketId() : 0;
-        onSend.accept(new SendRequest(text, replyId));
+        try { onSend.accept(new SendRequest(text, replyId)); }
+        catch (RuntimeException failure) { return; } // Preserve a draft rejected by the protocol/UI callback.
         clearAttachedImage(false);
         messageInput.clear();
         cancelReply();
@@ -998,8 +1014,8 @@ public class ChatInputBar extends VBox {
         button.setAlignment(Pos.CENTER_LEFT);
         button.getStyleClass().add("chat-command-suggestion-btn");
         button.setFocusTraversable(false);
-        button.setOnAction(e -> action.run());
-        button.setOnMouseEntered(e -> selectSuggestion(button));
+        button.setOnAction(_ -> action.run());
+        button.setOnMouseEntered(_ -> selectSuggestion(button));
         return button;
     }
 
@@ -1075,7 +1091,7 @@ public class ChatInputBar extends VBox {
         }
     }
 
-    private void cancelActiveNodePick(boolean notify) {
+    private void cancelActiveNodePick() {
         ActiveNodePick pick = activeNodePick;
         if (pick == null) {
             return;
@@ -1086,7 +1102,7 @@ public class ChatInputBar extends VBox {
         messageInput.clear();
         messageInput.setPromptText(defaultPromptText());
         savedCaretPosition = 0;
-        if (notify && pick.onCancelled() != null) {
+        if (pick.onCancelled() != null) {
             pick.onCancelled().run();
         }
     }
@@ -1109,7 +1125,7 @@ public class ChatInputBar extends VBox {
 
     private boolean handleCommandSuggestionKeyPressed(KeyEvent event) {
         if (activeNodePick != null && event.getCode() == KeyCode.ESCAPE) {
-            cancelActiveNodePick(true);
+            cancelActiveNodePick();
             return true;
         }
         if (!isCommandSuggestionsVisible() || commandSuggestionRoot.getChildren().isEmpty()) {

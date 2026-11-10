@@ -34,25 +34,25 @@ class LuaScriptStoreServiceTest {
         URI uri = LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("ru-RU"));
 
         assertEquals(
-                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=ru",
+                "https://smikme.github.io/meshapp/store/ru/catalog.json",
                 uri.toString());
     }
 
     @Test
     void directoryApiUriUsesEnglishBranchForEnglishAndFallbackLocales() {
         assertEquals(
-                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                "https://smikme.github.io/meshapp/store/en/catalog.json",
                 LuaScriptStoreService.directoryApiUri(Locale.ENGLISH).toString());
         assertEquals(
-                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                "https://smikme.github.io/meshapp/store/en/catalog.json",
                 LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("de-DE")).toString());
         assertEquals(
-                "https://git.privatepractice.app/api/v1/repos/covox/meshappstore/contents/scripts?ref=en",
+                "https://smikme.github.io/meshapp/store/en/catalog.json",
                 LuaScriptStoreService.directoryApiUri(null).toString());
     }
 
     @Test
-    void fetchScriptsLoadsDirectoryAndScriptExportsFromGiteaShape() throws Exception {
+    void fetchScriptsLoadsDirectoryAndScriptExportsFromStaticCatalog() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
         server.createContext("/api/scripts", exchange -> sendJson(exchange, """

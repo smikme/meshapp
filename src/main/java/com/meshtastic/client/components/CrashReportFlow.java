@@ -4,7 +4,7 @@ import com.meshtastic.client.MeshApp;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.logging.SessionCrashLogManager;
 import com.meshtastic.client.modal.ModalPane;
-import com.meshtastic.client.modal.Toast;
+import com.meshtastic.client.utils.ExternalUrlLauncher;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.service.CrashReportService;
 import com.meshtastic.client.tray.MacOsNativeTrayService;
@@ -55,7 +55,6 @@ public final class CrashReportFlow {
                                     () -> SessionCrashLogManager.deletePendingCrashLog(crashLog),
                                     null,
                                     onFinished,
-                                    decision.email(),
                                     "crashReport.toast.logSubmitted"
                             )
                     );
@@ -91,7 +90,6 @@ public final class CrashReportFlow {
                             () -> deleteReportSnapshot(snapshot),
                             () -> deleteReportSnapshot(snapshot),
                             null,
-                            decision.email(),
                             "crashReport.toast.reportSubmitted"
                     )
             );
@@ -116,12 +114,12 @@ public final class CrashReportFlow {
             runHook(hooks.onFinished());
         });
 
-        Thread worker = Thread.ofVirtual().name("meshapp-report-upload").unstarted(() -> {
+        Thread worker = Thread.ofVirtual().name("meshapp-report-prepare").unstarted(() -> {
             try {
                 CrashReportService crashReportService = CrashReportService.createDefault();
-                CrashReportService.SubmissionResult result = problemReport
-                        ? crashReportService.submitProblemReport(logFile, comment, hooks.contactEmail(), buildCrashContext())
-                        : crashReportService.submitCrashReport(logFile, comment, hooks.contactEmail(), buildCrashContext());
+                CrashReportService.PreparedReport result = problemReport
+                        ? crashReportService.prepareProblemReport(logFile, comment, buildCrashContext())
+                        : crashReportService.prepareCrashReport(logFile, comment, buildCrashContext());
 
                 if (cancelled.get()) {
                     return;
@@ -133,8 +131,15 @@ public final class CrashReportFlow {
                         return;
                     }
                     progressDialog.close(() -> {
-                        Toast.show(Toast.Type.SUCCESS, I18n.t(hooks.successMessageKey(), result.issueIndex()));
-                        runHook(hooks.onFinished());
+                        ExternalUrlLauncher.open(result.issueUrl().toString());
+                        ModalPane.showInfo(I18n.t("crashReport.prepared.title"),
+                                I18n.t(hooks.successMessageKey(), result.archive().toString(), result.issueUrl().toString()));
+                        ModalPane pane = ModalPane.getInstance();
+                        if (pane != null) {
+                            pane.setOnHidden(() -> runHook(hooks.onFinished()));
+                        } else {
+                            runHook(hooks.onFinished());
+                        }
                     });
                 });
             } catch (Exception e) {
@@ -292,6 +297,5 @@ public final class CrashReportFlow {
                                    Runnable onSuccess,
                                    Runnable onFailure,
                                    Runnable onFinished,
-                                   String contactEmail,
                                    String successMessageKey) {}
 }

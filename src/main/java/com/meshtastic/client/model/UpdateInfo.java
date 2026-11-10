@@ -90,8 +90,23 @@ public class UpdateInfo {
     }
 
     String getDownloadUrl(OsType osType, PackageFormat packageFormat) {
+        return getDownloadUrl(osType, packageFormat, OsDetect.normalizedArch());
+    }
+
+    String getDownloadUrl(OsType osType, PackageFormat packageFormat, String arch) {
         if (downloads == null || downloads.isEmpty()) {
             return null;
+        }
+
+        for (String key : selfUpdateKeys(osType, packageFormat, arch)) {
+            // Prefer architecture-specific installers; retain the established generic
+            // fallback order below for manifests that predate architecture keys.
+            if (arch != null && !arch.isBlank() && key.endsWith("-" + arch)) {
+                String url = downloads.get(key);
+                if (url != null && !url.isBlank()) {
+                    return url;
+                }
+            }
         }
 
         return switch (osType) {

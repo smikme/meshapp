@@ -17,6 +17,7 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -110,9 +111,9 @@ abstract class FormChatUi extends FormChatBase {
     private StackPane chatListWrapper;
     private SplitPane.Divider observedChatDivider;
     private Window observedWindow;
-    private final ChangeListener<Number> sceneWidthListener = (obs, oldWidth, newWidth) -> handleResponsiveWidthChanged();
-    private final ChangeListener<Number> windowWidthListener = (obs, oldWidth, newWidth) -> handleResponsiveWidthChanged();
-    private final ChangeListener<Window> sceneWindowListener = (obs, oldWindow, newWindow) -> {
+    private final ChangeListener<Number> sceneWidthListener = (_, _, _) -> handleResponsiveWidthChanged();
+    private final ChangeListener<Number> windowWidthListener = (_, _, _) -> handleResponsiveWidthChanged();
+    private final ChangeListener<Window> sceneWindowListener = (_, _, newWindow) -> {
         detachObservedWindow();
         attachObservedWindow(newWindow);
         Platform.runLater(this::updateResponsiveChatLayout);
@@ -125,7 +126,6 @@ abstract class FormChatUi extends FormChatBase {
     private boolean userDraggingChatDivider;
     private Button chatListToggleButton;
     private Region headerSpacer;
-    private Button quickScriptButton;
     private ContextMenu quickScriptMenu;
     private FormChatMessageSearchController messageSearchController;
     private StackPane imageViewerOverlay;
@@ -148,8 +148,8 @@ abstract class FormChatUi extends FormChatBase {
         getChildren().add(chatSplitPane);
         chatSplitPane.prefWidthProperty().bind(widthProperty());
         chatSplitPane.prefHeightProperty().bind(heightProperty());
-        widthProperty().addListener((obs, oldWidth, newWidth) -> handleResponsiveWidthChanged());
-        sceneProperty().addListener((obs, oldScene, newScene) -> {
+        widthProperty().addListener((_, _, _) -> handleResponsiveWidthChanged());
+        sceneProperty().addListener((_, oldScene, newScene) -> {
             if (oldScene != null) {
                 oldScene.widthProperty().removeListener(sceneWidthListener);
                 oldScene.windowProperty().removeListener(sceneWindowListener);
@@ -212,7 +212,7 @@ abstract class FormChatUi extends FormChatBase {
         Button button = new Button("✎");
         button.getStyleClass().add("chat-new-btn");
         button.setTooltip(new Tooltip(I18n.t("chat.new.tooltip")));
-        button.setOnAction(event -> showNewChatDialog());
+        button.setOnAction(_ -> showNewChatDialog());
         return button;
     }
 
@@ -225,8 +225,8 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void configureChatFilter(TextField searchField) {
-        filteredChats = new FilteredList<>(chatItems, chat -> true);
-        searchField.textProperty().addListener((obs, oldVal, newVal) ->
+        filteredChats = new FilteredList<>(chatItems, _ -> true);
+        searchField.textProperty().addListener((_, _, newVal) ->
                 filteredChats.setPredicate(chat -> chatMatchesSearch(chat, newVal)));
     }
 
@@ -250,13 +250,13 @@ abstract class FormChatUi extends FormChatBase {
         FormChatUiSupport.applyWindowsHitTestBackground(listView);
         configureChatListCellFactory(listView, false);
         listView.getSelectionModel().selectedItemProperty().addListener(
-                (obs, oldItem, newItem) -> handleChatSelection(newItem));
+                (_, _, newItem) -> handleChatSelection(newItem));
 
         return listView;
     }
 
     private void configureChatListCellFactory(ListView<ChatItem> listView, boolean compact) {
-        listView.setCellFactory(view -> new ChatListCell(
+        listView.setCellFactory(_ -> new ChatListCell(
                 this::deleteChat,
                 this::showChannelProperties,
                 this::toggleChatMute,
@@ -317,7 +317,7 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
         observedChatDivider = divider;
-        divider.positionProperty().addListener((obs, oldVal, newVal) -> {
+        divider.positionProperty().addListener((_, _, _) -> {
             if (!applyingResponsiveLayout
                     && userDraggingChatDivider
                     && currentChatListLayoutMode() == ChatListLayoutMode.SAVED_SPLIT) {
@@ -338,12 +338,12 @@ abstract class FormChatUi extends FormChatBase {
                 userDraggingChatDivider = true;
             }
         });
-        chatSplitPane.addEventFilter(MouseEvent.MOUSE_DRAGGED, event -> {
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_DRAGGED, _ -> {
             if (userDraggingChatDivider) {
                 saveUserChatListWidth();
             }
         });
-        chatSplitPane.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_RELEASED, _ -> {
             if (userDraggingChatDivider) {
                 saveUserChatListWidth();
                 userDraggingChatDivider = false;
@@ -516,9 +516,7 @@ abstract class FormChatUi extends FormChatBase {
                         chatSplitPane.setDividerPositions(dividerPositionForListWidth(CHAT_LIST_EXPANDED_WIDTH, formWidth));
                 case SAVED_SPLIT ->
                         chatSplitPane.setDividerPositions(savedChatDividerPosition(formWidth));
-                case HIDDEN -> {
-                    return;
-                }
+                case HIDDEN -> { }
             }
         } finally {
             applyingResponsiveLayout = false;
@@ -574,12 +572,11 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private double clampChatListWidth(double listWidth, double formWidth) {
-        double fallback = CHAT_LIST_EXPANDED_WIDTH;
-        double width = Double.isFinite(listWidth) && listWidth > 0 ? listWidth : fallback;
+        double width = Double.isFinite(listWidth) && listWidth > 0 ? listWidth : CHAT_LIST_EXPANDED_WIDTH;
         double maxListWidth = formWidth > 0
                 ? Math.max(CHAT_LIST_EXPANDED_WIDTH, formWidth - CHAT_DETAIL_MIN_WIDTH)
                 : Double.MAX_VALUE;
-        return Math.max(CHAT_LIST_EXPANDED_WIDTH, Math.min(width, maxListWidth));
+        return Math.clamp(width, CHAT_LIST_EXPANDED_WIDTH, maxListWidth);
     }
 
     private double savedChatDividerPosition(double formWidth) {
@@ -643,7 +640,7 @@ abstract class FormChatUi extends FormChatBase {
                 "/icons/menu.svg",
                 I18n.t("chat.list.show"),
                 "☰");
-        chatListToggleButton.setOnAction(event -> {
+        chatListToggleButton.setOnAction(_ -> {
             narrowListForcedVisible = true;
             updateResponsiveChatLayout();
         });
@@ -663,7 +660,7 @@ abstract class FormChatUi extends FormChatBase {
         headerNameLabel.getStyleClass().add("chat-header-name");
 
         headerSpacer = new Region();
-        quickScriptButton = createQuickScriptButton();
+        Button quickScriptButton = createQuickScriptButton();
         messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
@@ -701,7 +698,7 @@ abstract class FormChatUi extends FormChatBase {
                 "/icons/autoplay.svg",
                 I18n.t("chat.quickBots.tooltip"),
                 "▶");
-        button.setOnAction(event -> toggleQuickScriptMenu(button));
+        button.setOnAction(_ -> toggleQuickScriptMenu(button));
         return button;
     }
 
@@ -711,8 +708,8 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
         quickScriptMenu = buildQuickScriptMenu();
-        quickScriptMenu.setOnShowing(event -> anchor.getStyleClass().add("chat-header-icon-btn-active"));
-        quickScriptMenu.setOnHidden(event -> anchor.getStyleClass().remove("chat-header-icon-btn-active"));
+        quickScriptMenu.setOnShowing(_ -> anchor.getStyleClass().add("chat-header-icon-btn-active"));
+        quickScriptMenu.setOnHidden(_ -> anchor.getStyleClass().remove("chat-header-icon-btn-active"));
         quickScriptMenu.show(anchor, javafx.geometry.Side.BOTTOM, 0, 4);
     }
 
@@ -730,6 +727,8 @@ abstract class FormChatUi extends FormChatBase {
         return menu;
     }
 
+    // The data-source factory owns this shared source.
+    @SuppressWarnings("resource")
     private List<LuaScript> quickLaunchScripts() {
         try {
             return luaScripts().listScripts().stream()
@@ -750,7 +749,7 @@ abstract class FormChatUi extends FormChatBase {
         String handle = script.getAutomationName().trim();
         MenuItem item = new MenuItem(UnicodeTextUtils.sanitizeForJavaFxDisplay(
                 scriptIcon(script) + "  " + name + "  " + handle));
-        item.setOnAction(event -> launchQuickScript(script));
+        item.setOnAction(_ -> launchQuickScript(script));
         return item;
     }
 
@@ -820,6 +819,8 @@ abstract class FormChatUi extends FormChatBase {
         return factory;
     }
 
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private CompletableFuture<NodeData> resolveRemoteNodeForDetails(String nodeId) {
         RemoteRpcState rpcState = remoteRpcState;
         if (rpcState == null || nodeId == null || nodeId.isBlank()) {
@@ -858,6 +859,8 @@ abstract class FormChatUi extends FormChatBase {
             }
 
             @Override
+            // The connection manager owns the shared RPC client.
+            @SuppressWarnings("resource")
             public boolean canTraceroute(NodeData node) {
                 return rpcState != null
                         && rpcState.client() != null
@@ -872,6 +875,8 @@ abstract class FormChatUi extends FormChatBase {
             }
 
             @Override
+            // The connection manager owns the shared RPC client.
+            @SuppressWarnings("resource")
             public boolean canRemoteAdmin(NodeData node) {
                 return rpcState != null
                         && rpcState.client() != null
@@ -894,7 +899,7 @@ abstract class FormChatUi extends FormChatBase {
 
             @Override
             public void deleteNode(NodeData node) {
-                callRemoteNodeAction(rpcState, "node.delete", RemoteNodeJson.nodeParams(node), result -> {
+                callRemoteNodeAction(rpcState, "node.delete", RemoteNodeJson.nodeParams(node), _ -> {
                     if (node != null && node.getNodeId() != null) {
                         remoteNodeFavoriteFlags.remove(node.getNodeId());
                         remoteNodeIgnoredFlags.remove(node.getNodeId());
@@ -905,7 +910,7 @@ abstract class FormChatUi extends FormChatBase {
 
             @Override
             public void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback) {
-                callRemoteNodeAction(rpcState, "node.favorite", RemoteNodeJson.flagParams(node, favorite), result -> {
+                callRemoteNodeAction(rpcState, "node.favorite", RemoteNodeJson.flagParams(node, favorite), _ -> {
                     updateRemoteNodeFlagMap("node.favorite", node != null ? node.getNodeId() : null, favorite);
                     Optional.ofNullable(callback).ifPresent(cb -> cb.accept(favorite));
                     reloadChatList();
@@ -914,7 +919,7 @@ abstract class FormChatUi extends FormChatBase {
 
             @Override
             public void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback) {
-                callRemoteNodeAction(rpcState, "node.ignored", RemoteNodeJson.flagParams(node, ignored), result -> {
+                callRemoteNodeAction(rpcState, "node.ignored", RemoteNodeJson.flagParams(node, ignored), _ -> {
                     updateRemoteNodeFlagMap("node.ignored", node != null ? node.getNodeId() : null, ignored);
                     Optional.ofNullable(callback).ifPresent(cb -> cb.accept(ignored));
                     reloadChatList();
@@ -928,6 +933,8 @@ abstract class FormChatUi extends FormChatBase {
         };
     }
 
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private void callRemoteNodeAction(RemoteRpcState rpcState,
                                       String method,
                                       JsonObject params,
@@ -985,7 +992,7 @@ abstract class FormChatUi extends FormChatBase {
         scrollDownBtn = new Button("↓");
         scrollDownBtn.getStyleClass().add("chat-scroll-down-btn");
         scrollDownBtn.setVisible(false);
-        scrollDownBtn.setOnAction(event -> handleScrollDown());
+        scrollDownBtn.setOnAction(_ -> handleScrollDown());
 
         scrollDownBadge = new Label();
         scrollDownBadge.getStyleClass().add("chat-scroll-down-badge");
@@ -1012,9 +1019,9 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void registerMessageScrollListeners() {
-        messageScrollPane.vvalueProperty().addListener((obs, oldVal, newVal) ->
+        messageScrollPane.vvalueProperty().addListener((_, _, newVal) ->
                 handleMessageScroll(newVal.doubleValue()));
-        messageContainer.heightProperty().addListener((obs, oldH, newH) ->
+        messageContainer.heightProperty().addListener((_, _, _) ->
                 keepLiveTailPinnedAfterResize());
     }
 
@@ -1052,8 +1059,8 @@ abstract class FormChatUi extends FormChatBase {
 
     private void markSelectedChatReadWhenViewingTail() {
         Optional.ofNullable(selectedChat)
-                .filter(chat -> formVisible)
-                .filter(chat -> isAtLiveTail())
+                .filter(_ -> formVisible)
+                .filter(_ -> isAtLiveTail())
                 .filter(chat -> getUnreadCount(chat) > 0)
                 .ifPresent(this::markAsRead);
     }
@@ -1116,19 +1123,14 @@ abstract class FormChatUi extends FormChatBase {
         }
     }
 
-    protected void closeMessageSearch(boolean focusInput) {
+    protected void closeMessageSearch() {
         Optional.ofNullable(messageSearchController)
-                .ifPresent(controller -> controller.close(focusInput));
+                .ifPresent(controller -> controller.close(false));
     }
 
-    protected void refreshMessageSearchResults(boolean jumpToLatest) {
+    protected void refreshMessageSearchResults() {
         Optional.ofNullable(messageSearchController)
-                .ifPresent(controller -> controller.refreshResults(jumpToLatest));
-    }
-
-    protected void refreshMessageSearchHighlight() {
-        Optional.ofNullable(messageSearchController)
-                .ifPresent(FormChatMessageSearchController::refreshHighlight);
+                .ifPresent(controller -> controller.refreshResults(false));
     }
 
     protected void applyMessageSearchHighlight(HBox row, long dbId) {
@@ -1137,13 +1139,21 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private ChatInputBar createChatInputBar() {
-        return new ChatInputBar(
+        ChatInputBar input = new ChatInputBar(
                 this::sendChatMessage,
                 this::handleBotCommand,
                 this::suggestBotCommands,
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8),
                 this::showMeshFilesImage
         );
+        input.setProtocolTextLimit(() -> meshCoreCompanionRuntime == null ? -1 : meshCoreCompanionRuntime.maxTextBytes(
+                selectedChat != null && selectedChat.getType() == ChatItem.ChatType.DIRECT_MESSAGE));
+        input.setAuthenticationOverheadSupplier(() ->
+                meshCoreCompanionRuntime == null && selectedChat != null
+                        && selectedChat.getType() == ChatItem.ChatType.CHANNEL
+                        ? com.meshtastic.client.utils.MeshtasticPayloadLimits.channelAuthenticationOverhead(
+                                state, selectedChat.getChannelIndex()) : 0);
+        return input;
     }
 
     /**
@@ -1167,12 +1177,12 @@ abstract class FormChatUi extends FormChatBase {
 
         StackPane imageFrame = new StackPane(imageView);
         imageFrame.getStyleClass().add("chat-image-viewer-frame");
-        imageFrame.setOnMouseClicked(event -> event.consume());
+        imageFrame.setOnMouseClicked(javafx.event.Event::consume);
 
         Button closeButton = new Button("✕");
         closeButton.getStyleClass().add("chat-image-viewer-close");
         closeButton.setTooltip(new Tooltip(I18n.t("common.close")));
-        closeButton.setOnAction(event -> hideMeshFilesImage());
+        closeButton.setOnAction(_ -> hideMeshFilesImage());
 
         StackPane overlay = new StackPane(imageFrame, closeButton);
         overlay.getStyleClass().add("chat-image-viewer-overlay");
@@ -1214,6 +1224,8 @@ abstract class FormChatUi extends FormChatBase {
         return ChatBotCommandHelper.suggestBots(query, automationBotDefinitions());
     }
 
+    // The data-source factory owns this shared source.
+    @SuppressWarnings("resource")
     private List<ChatBotCommandHelper.BotDefinition> automationBotDefinitions() {
         try {
             return luaScripts().listScripts().stream()
@@ -1255,15 +1267,24 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
 
-        boolean sent = switch (selectedChat.getType()) {
+        boolean sent;
+        try { sent = switch (selectedChat.getType()) {
             case CHANNEL -> sendChannelMessage(request);
             case DIRECT_MESSAGE -> sendDirectMessage(request);
-        };
+        }; } catch (RuntimeException error) {
+            Toast.show(Toast.Type.ERROR, com.meshtastic.client.components.chat.MeshCoreChannelDialog.message(error));
+            throw error; // ChatInputBar keeps the draft when the send callback fails.
+        }
         if (sent) {
             refreshCurrentChatAfterLocalSend();
+        } else if(meshCoreCompanionRuntime!=null) {
+            Toast.show(Toast.Type.ERROR,I18n.t("meshcore.sendRejected"));
+            throw new IllegalStateException(I18n.t("meshcore.sendRejected"));
         }
     }
 
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private void sendRemoteChatMessage(ChatInputBar.SendRequest request) {
         if (selectedChat == null || remoteRpcState == null || request == null) {
             return;
@@ -1399,7 +1420,7 @@ abstract class FormChatUi extends FormChatBase {
     protected void openChat(ChatItem chat) {
         suspendScrollStateSync();
         try {
-            closeMessageSearch(false);
+            closeMessageSearch();
             hideMeshFilesImage();
             bubbleFactory.hideOpenReactionPopup();
             scrollOperationGeneration++;
@@ -1442,12 +1463,12 @@ abstract class FormChatUi extends FormChatBase {
     protected void handleChatFontSizeChanged() {
         applyChatTypography();
         Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
-        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows(true));
+        Optional.ofNullable(selectedChat).ifPresent(_ -> refreshLoadedMessageRows(true));
     }
 
     protected void applyChatTypography() {
         setStyle("-fx-font-size: " + TypographyManager.getChatFontSize() + "px;");
-        Optional.ofNullable(getScene()).ifPresent(scene -> {
+        Optional.ofNullable(getScene()).ifPresent(_ -> {
             applyCss();
             requestLayout();
         });
@@ -1455,7 +1476,7 @@ abstract class FormChatUi extends FormChatBase {
 
     protected void closeChat() {
         saveCurrentChatScrollState();
-        closeMessageSearch(false);
+        closeMessageSearch();
         hideMeshFilesImage();
         chatInputBar.cancelPendingImageUpload();
         bubbleFactory.hideOpenReactionPopup();
@@ -1486,13 +1507,13 @@ abstract class FormChatUi extends FormChatBase {
                 I18n.t("chat.selection.delete"),
                 "×");
         deleteSelectedMessagesBtn.getStyleClass().add("chat-message-selection-delete-btn");
-        deleteSelectedMessagesBtn.setOnAction(event -> deleteSelectedMessagesWithConfirmation());
+        deleteSelectedMessagesBtn.setOnAction(_ -> deleteSelectedMessagesWithConfirmation());
 
         clearSelectedMessagesBtn = FormChatUiSupport.createHeaderIconButton(
                 "/icons/close.svg",
                 I18n.t("chat.selection.clear"),
                 "×");
-        clearSelectedMessagesBtn.setOnAction(event -> clearSelectedMessages());
+        clearSelectedMessagesBtn.setOnAction(_ -> clearSelectedMessages());
 
         HBox bar = new HBox(8, messageSelectionLabel, deleteSelectedMessagesBtn, clearSelectedMessagesBtn);
         bar.setAlignment(Pos.CENTER_LEFT);
@@ -1547,7 +1568,7 @@ abstract class FormChatUi extends FormChatBase {
             return AppPreferences.remoteChatOwnerId(boundConnectionId);
         }
         return Optional.ofNullable(state)
-                .map(deviceState -> deviceState.getOwnerNodeId())
+                .map(DeviceState::getOwnerNodeId)
                 .orElse("");
     }
 }

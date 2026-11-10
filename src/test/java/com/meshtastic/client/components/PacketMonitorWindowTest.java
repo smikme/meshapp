@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -52,14 +53,14 @@ class PacketMonitorWindowTest {
         PacketMonitorWindow.RouteFilterSelection outgoing =
                 PacketMonitorWindow.resolveRouteFilterSelection("Исходящие");
 
-        assertEquals(null, all.direction());
-        assertEquals(null, all.transportMechanism());
+        assertNull(all.direction());
+        assertNull(all.transportMechanism());
         assertTrue(all.loraOnly());
         assertEquals(PacketLogEntry.Direction.INCOMING, incoming.direction());
-        assertEquals(null, incoming.transportMechanism());
+        assertNull(incoming.transportMechanism());
         assertTrue(incoming.loraOnly());
         assertEquals(PacketLogEntry.Direction.OUTGOING, outgoing.direction());
-        assertEquals(null, outgoing.transportMechanism());
+        assertNull(outgoing.transportMechanism());
         assertTrue(outgoing.loraOnly());
 
         assertTrue(all.matches(packet(PacketLogEntry.Direction.INCOMING, "TRANSPORT_LORA")));
@@ -80,7 +81,7 @@ class PacketMonitorWindowTest {
         PacketMonitorWindow.RouteFilterSelection outgoing =
                 PacketMonitorWindow.resolveRouteFilterSelection("Исходящие MQTT");
 
-        assertEquals(null, all.direction());
+        assertNull(all.direction());
         assertEquals(PacketMonitorService.TRANSPORT_MQTT, all.transportMechanism());
         assertFalse(all.loraOnly());
         assertEquals(PacketMonitorService.TRANSPORT_MQTT, legacyAll.transportMechanism());
@@ -116,6 +117,8 @@ class PacketMonitorWindowTest {
                 "Экспорт: 250 / 1000 (25%)",
                 PacketMonitorWindow.formatExportProgressText(250, 1000)
         );
+        assertEquals("Экспорт: 0 / 1 (0%)", PacketMonitorWindow.formatExportProgressText(-1, 0));
+        assertEquals("Экспорт: 10 / 10 (100%)", PacketMonitorWindow.formatExportProgressText(Long.MAX_VALUE, 10));
     }
 
     @Test
@@ -165,6 +168,19 @@ class PacketMonitorWindowTest {
         assertEquals(0.0, bounds.y());
         assertEquals(1280.0, bounds.width());
         assertEquals(720.0, bounds.height());
+    }
+
+    @Test
+    void shouldFitScreenSmallerThanPreferredMinimumWithUndefinedSavedSize() {
+        Rectangle2D screen = new Rectangle2D(25, 30, 150, 90);
+
+        PacketMonitorWindow.WindowBounds bounds = PacketMonitorWindow.normalizeWindowBounds(
+                Double.NaN, Double.NaN, Double.NaN, Double.NaN, List.of(screen), screen);
+
+        assertEquals(25.0, bounds.x());
+        assertEquals(30.0, bounds.y());
+        assertEquals(150.0, bounds.width());
+        assertEquals(90.0, bounds.height());
     }
 
     private static PacketLogEntry packet(PacketLogEntry.Direction direction, String transportMechanism) {

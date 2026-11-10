@@ -24,6 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 class DatabaseMigratorTest {
 
     @TempDir
@@ -190,7 +192,7 @@ class DatabaseMigratorTest {
 
             assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
             assertTrue(hopsAwayIsNull(connection, "!direct?"));
-            assertEquals(2, hopsAwayValue(connection, "!relay"));
+            assertEquals(2, relayHopsAway(connection));
             assertTrue(hopsAwayIsNull(connection, "!unknown"));
         }
     }
@@ -290,8 +292,8 @@ class DatabaseMigratorTest {
             DatabaseMigrator.migrate(connection);
 
             assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
-            assertTrue(MessageFullTextIndex.indexId(connection) != null);
-            assertTrue(fullTextWordIsMapped(connection, "SEARCHABLE"));
+            assertNotNull(MessageFullTextIndex.indexId(connection));
+            assertTrue(searchableWordIsMapped(connection));
         }
     }
 
@@ -817,7 +819,7 @@ class DatabaseMigratorTest {
         }
     }
 
-    private static boolean fullTextWordIsMapped(Connection connection, String word) throws SQLException {
+    private static boolean searchableWordIsMapped(Connection connection) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
                 """
                         SELECT 1
@@ -825,7 +827,7 @@ class DatabaseMigratorTest {
                         JOIN FT.MAP map ON map.WORDID = word.ID
                         WHERE word.NAME = ?
                         """)) {
-            ps.setString(1, word);
+            ps.setString(1, "SEARCHABLE");
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
@@ -844,10 +846,10 @@ class DatabaseMigratorTest {
         }
     }
 
-    private static int hopsAwayValue(Connection connection, String nodeId) throws SQLException {
+    private static int relayHopsAway(Connection connection) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
                 "SELECT hops_away FROM nodes WHERE node_id = ?")) {
-            ps.setString(1, nodeId);
+            ps.setString(1, "!relay");
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getInt(1);
@@ -891,4 +893,33 @@ class DatabaseMigratorTest {
         assertNotNull(guid);
         assertEquals(guid, UUID.fromString(guid).toString());
     }
+    @Test
+    void version25PreservesRowsAndLeavesNewSensorValuesAbsent() throws Exception {
+        try (Connection connection = openConnection("upgrade-v24-sensors")) {
+            createSchemaVersion(connection, 24);
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute("CREATE TABLE telemetry_history (id BIGINT PRIMARY KEY, temperature REAL)");
+                stmt.execute("INSERT INTO telemetry_history VALUES (1, 21.5)");
+                stmt.execute("CREATE TABLE nodes (node_id VARCHAR(20) PRIMARY KEY)");
+                stmt.execute("INSERT INTO nodes VALUES ('!12345678')");
+            }
+            DatabaseMigrator.migrate(connection);
+            DatabaseMigrator.migrate(connection);
+            assertEquals(DatabaseMigrator.CURRENT_VERSION, schemaVersion(connection));
+            try (var rs = connection.createStatement().executeQuery("SELECT * FROM telemetry_history")) {
+                assertTrue(rs.next());
+                assertEquals(21.5f, rs.getFloat("temperature"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("one_wire_temperature_ch7"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("soil_ph"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("pm_status_flags"));
+                assertFalse(rs.next());
+            }
+            try (var rs = connection.createStatement().executeQuery("SELECT * FROM nodes")) {
+                assertTrue(rs.next());
+                assertEquals("!12345678", rs.getString("node_id"));
+                org.junit.jupiter.api.Assertions.assertNull(rs.getObject("xeddsa_signed"));
+            }
+        }
+    }
+
 }

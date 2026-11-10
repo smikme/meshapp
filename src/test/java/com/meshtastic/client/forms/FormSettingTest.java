@@ -1,10 +1,10 @@
 package com.meshtastic.client.forms;
 
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.forms.settings.ConfigSavePolicy;
+import com.meshtastic.client.forms.settings.DatabaseResetConfirmationPanelFactory;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.ConfigTreeItem;
 import com.meshtastic.client.model.ConnectionEntry;
@@ -277,7 +277,7 @@ class FormSettingTest {
     }
 
     @Test
-    void clearsLoadedConfigWhenConnectionIsDisconnected() throws Exception {
+    void clearsLoadedConfigWhenConnectionIsDisconnected() {
         ConnectionManager manager = ConnectionManager.getInstance();
         ConnectionEntry entry = new ConnectionEntry("Test radio", "localhost", 4403);
         entry.setConnected(true);
@@ -356,7 +356,7 @@ class FormSettingTest {
         TabPane tabPane = onFxThread(() -> findFirst(form, TabPane.class));
 
         assertNotNull(tabPane);
-        assertFalse(onFxThread(() -> tabPane.getTabs().get(0).getContent() instanceof ScrollPane));
+        assertFalse(onFxThread(() -> tabPane.getTabs().getFirst().getContent() instanceof ScrollPane));
         assertTrue(onFxThread(() -> tabPane.getTabs().get(1).getContent() instanceof ScrollPane));
         assertTrue(onFxThread(() -> tabPane.getTabs().get(2).getContent() instanceof ScrollPane));
         assertTrue(onFxThread(() -> tabPane.getTabs().get(3).getContent() instanceof ScrollPane));
@@ -385,12 +385,8 @@ class FormSettingTest {
     void databaseResetConfirmRequiresAcknowledgementBeforeConfirmIsEnabled() {
         AtomicBoolean confirmed = new AtomicBoolean(false);
 
-        FormSetting form = onFxThread(FormSetting::new);
-        VBox panel = onFxThread(() -> (VBox) invokeReturning(
-                form,
-                "buildDatabaseResetConfirmationPanel",
-                new Class<?>[] { Runnable.class },
-                (Runnable) () -> confirmed.set(true)));
+        VBox panel = onFxThread(() -> DatabaseResetConfirmationPanelFactory.create(
+                () -> confirmed.set(true)));
 
         CheckBox acknowledgeCheckBox = onFxThread(() -> findFirst(panel, CheckBox.class));
         Button confirmButton = onFxThread(() -> findButtonByText(
@@ -424,12 +420,7 @@ class FormSettingTest {
     void databaseResetConfirmationUsesEnglishLocalization() {
         I18n.setLanguageTagForTests(I18n.LANGUAGE_EN);
 
-        FormSetting form = onFxThread(FormSetting::new);
-        VBox panel = onFxThread(() -> (VBox) invokeReturning(
-                form,
-                "buildDatabaseResetConfirmationPanel",
-                new Class<?>[] { Runnable.class },
-                (Runnable) () -> {}));
+        VBox panel = onFxThread(() -> DatabaseResetConfirmationPanelFactory.create(() -> {}));
 
         Button confirmButton = onFxThread(() -> findButtonByText(panel, "Delete Data"));
 
@@ -443,7 +434,7 @@ class FormSettingTest {
         ProtocolHandler actionHandler = track(new ProtocolHandler(new FakeConnection()));
 
         FormSetting form = onFxThread(FormSetting::new);
-        TreeItem<ConfigTreeItem> root = ownerInfoRoot("Old long", "NEWL", "New long", "NEWS");
+        TreeItem<ConfigTreeItem> root = modifiedOwnerInfoRoot();
 
         onFxThread(() -> {
             writeField(form, "state", actionState);
@@ -541,20 +532,17 @@ class FormSettingTest {
         return (List<Runnable>) readField(state, "ownerInfoListeners");
     }
 
-    private static TreeItem<ConfigTreeItem> ownerInfoRoot(String originalLongName,
-                                                          String originalShortName,
-                                                          String updatedLongName,
-                                                          String updatedShortName) {
+    private static TreeItem<ConfigTreeItem> modifiedOwnerInfoRoot() {
         TreeItem<ConfigTreeItem> root = new TreeItem<>(new ConfigTreeItem("Root", "root", 0));
         TreeItem<ConfigTreeItem> ownerSection = new TreeItem<>(new ConfigTreeItem("Owner", "owner_info", 0));
 
         ConfigTreeItem longName = new ConfigTreeItem(
-                "Long name", "long_name", originalLongName, String.class, null, null, "owner_info", 0);
-        longName.setValue(updatedLongName);
+                "Long name", "long_name", "Old long", String.class, null, null, "owner_info", 0);
+        longName.setValue("New long");
 
         ConfigTreeItem shortName = new ConfigTreeItem(
-                "Short name", "short_name", originalShortName, String.class, null, null, "owner_info", 0);
-        shortName.setValue(updatedShortName);
+                "Short name", "short_name", "NEWL", String.class, null, null, "owner_info", 0);
+        shortName.setValue("NEWS");
 
         ownerSection.getChildren().add(new TreeItem<>(longName));
         ownerSection.getChildren().add(new TreeItem<>(shortName));
@@ -631,16 +619,6 @@ class FormSettingTest {
         }
     }
 
-    private static Object invokeReturning(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
-        try {
-            Method method = target.getClass().getDeclaredMethod(methodName, parameterTypes);
-            method.setAccessible(true);
-            return method.invoke(target, args);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Failed to invoke method " + methodName, e);
-        }
-    }
-
     private static void waitForFxEvents() {
         onFxThread(() -> null);
     }
@@ -686,7 +664,7 @@ class FormSettingTest {
     private static final class FakeConnection implements MeshtasticConnection {
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             // no-op
         }
 

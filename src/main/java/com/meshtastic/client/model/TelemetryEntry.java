@@ -142,6 +142,42 @@ public class TelemetryEntry {
     private Long trafficHopExhaustedPackets;
     private Long trafficRouterHopsPreserved;
 
+    // Released 2.8 sensor fields. Null means absent; zero is a valid measurement.
+    private Float adcVoltageCh0;
+    private Float adcVoltageCh1;
+    private Float adcVoltageCh2;
+    private Float adcVoltageCh3;
+    private Float adcVoltageCh4;
+    private Float adcVoltageCh5;
+    private Float adcVoltageCh6;
+    private Float adcVoltageCh7;
+    private Float oneWireTemperatureCh0;
+    private Float oneWireTemperatureCh1;
+    private Float oneWireTemperatureCh2;
+    private Float oneWireTemperatureCh3;
+    private Float oneWireTemperatureCh4;
+    private Float oneWireTemperatureCh5;
+    private Float oneWireTemperatureCh6;
+    private Float oneWireTemperatureCh7;
+    private Long lightningStrikeCount1h;
+    private Float lightningDistanceKm;
+    private Long pmStatusFlags;
+    private Float soilPh;
+    private Float ph;
+    private Float electricalConductivity;
+    private Float salinity;
+    private Float nitrogen;
+    private Float phosphorus;
+    private Float potassium;
+    private Float dissolvedOxygen;
+    private Float orp;
+    private Float chemicalOxygenDemand;
+    private Float turbidity;
+    private Float nitrate;
+    private Float ammonium;
+    private Float biochemicalOxygenDemand;
+    private Float solarIrradiance;
+
     // Connection quality (from MeshPacket)
     private float rxSnr;
     private int rxRssi;
@@ -154,6 +190,108 @@ public class TelemetryEntry {
         this.timestamp = timestamp;
         this.nodeId = nodeId;
     }
+
+    public Float getAdcVoltageCh0() { return adcVoltageCh0; }
+    public void setAdcVoltageCh0(Float value) { this.adcVoltageCh0 = value; }
+
+    public Float getAdcVoltageCh1() { return adcVoltageCh1; }
+    public void setAdcVoltageCh1(Float value) { this.adcVoltageCh1 = value; }
+
+    public Float getAdcVoltageCh2() { return adcVoltageCh2; }
+    public void setAdcVoltageCh2(Float value) { this.adcVoltageCh2 = value; }
+
+    public Float getAdcVoltageCh3() { return adcVoltageCh3; }
+    public void setAdcVoltageCh3(Float value) { this.adcVoltageCh3 = value; }
+
+    public Float getAdcVoltageCh4() { return adcVoltageCh4; }
+    public void setAdcVoltageCh4(Float value) { this.adcVoltageCh4 = value; }
+
+    public Float getAdcVoltageCh5() { return adcVoltageCh5; }
+    public void setAdcVoltageCh5(Float value) { this.adcVoltageCh5 = value; }
+
+    public Float getAdcVoltageCh6() { return adcVoltageCh6; }
+    public void setAdcVoltageCh6(Float value) { this.adcVoltageCh6 = value; }
+
+    public Float getAdcVoltageCh7() { return adcVoltageCh7; }
+    public void setAdcVoltageCh7(Float value) { this.adcVoltageCh7 = value; }
+
+    public Float getOneWireTemperatureCh0() { return oneWireTemperatureCh0; }
+    public void setOneWireTemperatureCh0(Float value) { this.oneWireTemperatureCh0 = value; }
+
+    public Float getOneWireTemperatureCh1() { return oneWireTemperatureCh1; }
+    public void setOneWireTemperatureCh1(Float value) { this.oneWireTemperatureCh1 = value; }
+
+    public Float getOneWireTemperatureCh2() { return oneWireTemperatureCh2; }
+    public void setOneWireTemperatureCh2(Float value) { this.oneWireTemperatureCh2 = value; }
+
+    public Float getOneWireTemperatureCh3() { return oneWireTemperatureCh3; }
+    public void setOneWireTemperatureCh3(Float value) { this.oneWireTemperatureCh3 = value; }
+
+    public Float getOneWireTemperatureCh4() { return oneWireTemperatureCh4; }
+    public void setOneWireTemperatureCh4(Float value) { this.oneWireTemperatureCh4 = value; }
+
+    public Float getOneWireTemperatureCh5() { return oneWireTemperatureCh5; }
+    public void setOneWireTemperatureCh5(Float value) { this.oneWireTemperatureCh5 = value; }
+
+    public Float getOneWireTemperatureCh6() { return oneWireTemperatureCh6; }
+    public void setOneWireTemperatureCh6(Float value) { this.oneWireTemperatureCh6 = value; }
+
+    public Float getOneWireTemperatureCh7() { return oneWireTemperatureCh7; }
+    public void setOneWireTemperatureCh7(Float value) { this.oneWireTemperatureCh7 = value; }
+
+    public Long getLightningStrikeCount1h() { return lightningStrikeCount1h; }
+    public void setLightningStrikeCount1h(Long value) { this.lightningStrikeCount1h = value; }
+
+    public Float getLightningDistanceKm() { return lightningDistanceKm; }
+    public void setLightningDistanceKm(Float value) { this.lightningDistanceKm = value; }
+
+    public Long getPmStatusFlags() { return pmStatusFlags; }
+    public void setPmStatusFlags(Long value) { this.pmStatusFlags = value; }
+
+    public Float getSoilPh() { return soilPh; }
+    public void setSoilPh(Float value) { this.soilPh = value; }
+
+    public Float getPh() { return ph; }
+    public void setPh(Float value) { this.ph = value; }
+
+    public Float getElectricalConductivity() { return electricalConductivity; }
+    public void setElectricalConductivity(Float value) { this.electricalConductivity = value; }
+
+    public Float getSalinity() { return salinity; }
+    public void setSalinity(Float value) { this.salinity = value; }
+
+    public Float getNitrogen() { return nitrogen; }
+    public void setNitrogen(Float value) { this.nitrogen = value; }
+
+    public Float getPhosphorus() { return phosphorus; }
+    public void setPhosphorus(Float value) { this.phosphorus = value; }
+
+    public Float getPotassium() { return potassium; }
+    public void setPotassium(Float value) { this.potassium = value; }
+
+    public Float getDissolvedOxygen() { return dissolvedOxygen; }
+    public void setDissolvedOxygen(Float value) { this.dissolvedOxygen = value; }
+
+    public Float getOrp() { return orp; }
+    public void setOrp(Float value) { this.orp = value; }
+
+    public Float getChemicalOxygenDemand() { return chemicalOxygenDemand; }
+    public void setChemicalOxygenDemand(Float value) { this.chemicalOxygenDemand = value; }
+
+    public Float getTurbidity() { return turbidity; }
+    public void setTurbidity(Float value) { this.turbidity = value; }
+
+    public Float getNitrate() { return nitrate; }
+    public void setNitrate(Float value) { this.nitrate = value; }
+
+    public Float getAmmonium() { return ammonium; }
+    public void setAmmonium(Float value) { this.ammonium = value; }
+
+    public Float getBiochemicalOxygenDemand() { return biochemicalOxygenDemand; }
+    public void setBiochemicalOxygenDemand(Float value) { this.biochemicalOxygenDemand = value; }
+
+    public Float getSolarIrradiance() { return solarIrradiance; }
+    public void setSolarIrradiance(Float value) { this.solarIrradiance = value; }
 
     public long getTimestamp() { return timestamp; }
     public String getNodeId() { return nodeId; }

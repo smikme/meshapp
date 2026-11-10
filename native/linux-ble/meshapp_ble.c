@@ -1945,6 +1945,18 @@ typedef struct {
 
 static void do_write_to_radio(void* arg) {
     write_ctx_t* ctx = (write_ctx_t*)arg;
+    if (active_profile() == PROFILE_MESHCORE) {
+        uint16_t mtu = 0;
+        sd_bus_error error = SD_BUS_ERROR_NULL;
+        int result = sd_bus_get_property_trivial(g_bus, BLUEZ_BUS, g_to_radio_char_path,
+                CHAR_IFACE, "MTU", &error, 'q', &mtu);
+        sd_bus_error_free(&error);
+        if (result >= 0 && mtu > 3 && ctx->length > (int)mtu - 3) {
+            log_msg("[meshble] Companion frame %d exceeds negotiated ATT payload %d", ctx->length, mtu - 3);
+            ctx->result = -1;
+            return;
+        }
+    }
     ctx->result = dbus_write_value(g_bus, g_to_radio_char_path, ctx->data, ctx->length);
 }
 
@@ -1973,8 +1985,9 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
 
     int fd = g_to_radio_fd;
     if (fd < 0) return -1;
+    if (active_profile() == PROFILE_MESHCORE && g_to_radio_mtu > 3 && length > (int)g_to_radio_mtu - 3) return -1;
     ssize_t written = write(fd, data, length);
-    if (written < 0) {
+    if (written != length) {
         log_msg("[meshble] write_to_radio failed: %s", strerror(errno));
         return -1;
     }

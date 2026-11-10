@@ -18,7 +18,6 @@ public class PacketLogEntry {
 
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss.SSS");
-    private static final int PAYLOAD_PREVIEW_LIMIT = 180;
 
     /**
      * Packet direction relative to the local mesh node and client transport.
@@ -149,22 +148,6 @@ public class PacketLogEntry {
     }
 
     /**
-     * Returns a shortened payload for compact UI locations.
-     * The original {@link #payloadText} value is not modified.
-     *
-     * @return full payload or truncated preview with an ellipsis
-     */
-    public String getPayloadPreview() {
-        if (payloadText == null || payloadText.isBlank()) {
-            return "";
-        }
-        if (payloadText.length() <= PAYLOAD_PREVIEW_LIMIT) {
-            return payloadText;
-        }
-        return payloadText.substring(0, PAYLOAD_PREVIEW_LIMIT - 3) + "...";
-    }
-
-    /**
      * @return copy of serialized packet bytes, safe for callers to mutate
      */
     public byte[] getPacketBytes() {
@@ -180,6 +163,7 @@ public class PacketLogEntry {
             case "TRANSPORT_LORA_ALT1" -> "LoRa alt 1";
             case "TRANSPORT_LORA_ALT2" -> "LoRa alt 2";
             case "TRANSPORT_LORA_ALT3" -> "LoRa alt 3";
+            case "MESHCORE_RADIO" -> "MeshCore Radio";
             case "MESHCORE_COMPANION" -> "MeshCore Companion";
             case "TRANSPORT_MQTT" -> "MQTT";
             case "TRANSPORT_MULTICAST_UDP" -> "Multicast UDP";

@@ -52,6 +52,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -63,7 +64,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 import java.util.function.IntFunction;
-import java.util.stream.Collectors;
 
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.AdminProtos;
@@ -345,7 +345,7 @@ public final class RemoteRpcHostService {
 
     private RpcMethodRegistry createRegistry() {
         return new RpcMethodRegistry()
-                .register("system.ping", (params, context) -> {
+                .register("system.ping", (_, _) -> {
                     JsonObject result = new JsonObject();
                     result.addProperty("app", "MeshApp");
                     result.addProperty("version", MeshApp.APPLICATION_VERSION);
@@ -355,190 +355,194 @@ public final class RemoteRpcHostService {
                             ConnectionManager.getInstance().getActiveConnectionEntries().size());
                     return CompletableFuture.completedFuture(result);
                 })
-                .register("connection.list", (params, context) ->
+                .register("connection.list", (_, _) ->
                         CompletableFuture.completedFuture(connectionList()))
-                .register("connection.connect", (params, context) -> {
+                .register("connection.connect", (params, _) -> {
                     String id = requiredId(params);
                     ConnectionManager.getInstance().connect(id);
                     ConnectionManager.getInstance().setSelectedConnectionId(id);
                     return CompletableFuture.completedFuture(connectionActionResult(id));
                 })
-                .register("connection.disconnect", (params, context) -> {
+                .register("connection.disconnect", (params, _) -> {
                     String id = requiredId(params);
                     ConnectionManager.getInstance().disconnect(id);
                     return CompletableFuture.completedFuture(connectionActionResult(id));
                 })
-                .register("connection.select", (params, context) -> {
+                .register("connection.select", (params, _) -> {
                     String id = requiredId(params);
                     ConnectionManager.getInstance().setSelectedConnectionId(id);
                     return CompletableFuture.completedFuture(connectionActionResult(id));
                 })
-                .register("chat.list", (params, context) ->
+                .register("meshcore.status", (_, _) -> CompletableFuture.completedFuture(
+                        com.meshtastic.client.protocol.meshcore.MeshCoreRpc.status(requireMeshCoreRuntime())))
+                .register("meshcore.execute", (params, _) ->
+                        com.meshtastic.client.protocol.meshcore.MeshCoreRpc.execute(requireMeshCoreRuntime(), params).thenApply(value -> value))
+                .register("chat.list", (_, _) ->
                         CompletableFuture.completedFuture(chatList()))
-                .register("chat.messages", (params, context) ->
+                .register("chat.messages", (params, _) ->
                         CompletableFuture.completedFuture(chatMessages(params)))
-                .register("chat.markRead", (params, context) ->
+                .register("chat.markRead", (params, _) ->
                         CompletableFuture.completedFuture(chatMarkRead(params)))
-                .register("chat.send", (params, context) ->
+                .register("chat.send", (params, _) ->
                         CompletableFuture.completedFuture(chatSend(params)))
-                .register("chat.retry", (params, context) ->
+                .register("chat.retry", (params, _) ->
                         CompletableFuture.completedFuture(chatRetry(params)))
-                .register("chat.react", (params, context) ->
+                .register("chat.react", (params, _) ->
                         CompletableFuture.completedFuture(chatReact(params)))
-                .register("node.list", (params, context) ->
+                .register("node.list", (params, _) ->
                         CompletableFuture.completedFuture(nodeList(params)))
-                .register("node.get", (params, context) ->
+                .register("node.get", (params, _) ->
                         CompletableFuture.completedFuture(nodeGet(params)))
-                .register("node.traceroute", (params, context) ->
+                .register("node.traceroute", (params, _) ->
                         CompletableFuture.completedFuture(nodeTraceroute(params)))
-                .register("node.refresh", (params, context) ->
+                .register("node.refresh", (params, _) ->
                         CompletableFuture.completedFuture(nodeRefresh(params)))
-                .register("node.delete", (params, context) ->
+                .register("node.delete", (params, _) ->
                         CompletableFuture.completedFuture(nodeDelete(params)))
-                .register("node.favorite", (params, context) ->
+                .register("node.favorite", (params, _) ->
                         CompletableFuture.completedFuture(nodeFavorite(params)))
-                .register("node.ignored", (params, context) ->
+                .register("node.ignored", (params, _) ->
                         CompletableFuture.completedFuture(nodeIgnored(params)))
-                .register("telemetry.dashboard", (params, context) ->
+                .register("telemetry.dashboard", (params, _) ->
                         CompletableFuture.completedFuture(telemetryDashboard(params)))
-                .register("packetMonitor.page", (params, context) ->
+                .register("packetMonitor.page", (params, _) ->
                         CompletableFuture.completedFuture(packetMonitorPage(params)))
-                .register("packetMonitor.types", (params, context) ->
+                .register("packetMonitor.types", (params, _) ->
                         CompletableFuture.completedFuture(packetMonitorTypes(params)))
-                .register("packetMonitor.counts", (params, context) ->
+                .register("packetMonitor.counts", (params, _) ->
                         CompletableFuture.completedFuture(packetMonitorCounts(params)))
-                .register("packetMonitor.captureState", (params, context) ->
+                .register("packetMonitor.captureState", (_, _) ->
                         CompletableFuture.completedFuture(RemotePacketMonitorJson.captureStateToJson(
                                 PacketMonitorService.getInstance().isCaptureEnabled())))
-                .register("packetMonitor.start", (params, context) -> {
+                .register("packetMonitor.start", (_, _) -> {
                     PacketMonitorService.getInstance().startCapture();
                     return CompletableFuture.completedFuture(RemotePacketMonitorJson.captureStateToJson(true));
                 })
-                .register("packetMonitor.stop", (params, context) -> {
+                .register("packetMonitor.stop", (_, _) -> {
                     PacketMonitorService.getInstance().stopCapture();
                     return CompletableFuture.completedFuture(RemotePacketMonitorJson.captureStateToJson(false));
                 })
-                .register("packetMonitor.clear", (params, context) -> {
+                .register("packetMonitor.clear", (_, _) -> {
                     PacketMonitorService.getInstance().clear();
                     return CompletableFuture.completedFuture(RemotePacketMonitorJson.countsToJson(0, 0));
                 })
-                .register("lua.list", (params, context) ->
+                .register("lua.list", (_, _) ->
                         CompletableFuture.completedFuture(luaList()))
-                .register("lua.get", (params, context) ->
+                .register("lua.get", (params, _) ->
                         CompletableFuture.completedFuture(luaGet(params)))
-                .register("lua.draft", (params, context) ->
+                .register("lua.draft", (_, _) ->
                         CompletableFuture.completedFuture(RemoteLuaScriptJson.scriptResult(
                                 LuaScriptService.getInstance().createDraftScript(),
                                 LuaScriptRuntimeService.getInstance())))
-                .register("lua.createDefault", (params, context) ->
+                .register("lua.createDefault", (_, _) ->
                         CompletableFuture.completedFuture(RemoteLuaScriptJson.scriptResult(
                                 LuaScriptService.getInstance().createScript(),
                                 LuaScriptRuntimeService.getInstance())))
-                .register("lua.create", (params, context) ->
+                .register("lua.create", (params, _) ->
                         CompletableFuture.completedFuture(luaCreate(params)))
-                .register("lua.save", (params, context) ->
+                .register("lua.save", (params, _) ->
                         CompletableFuture.completedFuture(luaSave(params)))
-                .register("lua.saveSettings", (params, context) ->
+                .register("lua.saveSettings", (params, _) ->
                         CompletableFuture.completedFuture(luaSaveSettings(params)))
-                .register("lua.delete", (params, context) ->
+                .register("lua.delete", (params, _) ->
                         CompletableFuture.completedFuture(luaDelete(params)))
-                .register("lua.importJson", (params, context) ->
+                .register("lua.importJson", (params, _) ->
                         CompletableFuture.completedFuture(luaImportJson(params)))
-                .register("lua.importExport", (params, context) ->
+                .register("lua.importExport", (params, _) ->
                         CompletableFuture.completedFuture(luaImportExport(params)))
-                .register("lua.export", (params, context) ->
+                .register("lua.export", (params, _) ->
                         CompletableFuture.completedFuture(luaExport(params)))
-                .register("lua.runningState", (params, context) ->
+                .register("lua.runningState", (params, _) ->
                         CompletableFuture.completedFuture(RemoteLuaScriptJson.runningStateToJson(
                                 requiredScriptId(params),
                                 LuaScriptRuntimeService.getInstance())))
-                .register("lua.run", (params, context) ->
+                .register("lua.run", (params, _) ->
                         CompletableFuture.completedFuture(luaRun(params)))
-                .register("lua.automation.run", (params, context) ->
+                .register("lua.automation.run", (params, _) ->
                         CompletableFuture.completedFuture(luaAutomationRun(params)))
-                .register("lua.ui.nodeSelection", (params, context) ->
+                .register("lua.ui.nodeSelection", (params, _) ->
                         CompletableFuture.completedFuture(luaUiNodeSelection(params)))
-                .register("lua.form.event", (params, context) ->
+                .register("lua.form.event", (params, _) ->
                         CompletableFuture.completedFuture(luaFormEvent(params)))
-                .register("lua.form.valueResult", (params, context) ->
+                .register("lua.form.valueResult", (params, _) ->
                         CompletableFuture.completedFuture(luaFormValueResult(params)))
-                .register("lua.debug", (params, context) ->
+                .register("lua.debug", (params, _) ->
                         CompletableFuture.completedFuture(luaDebug(params)))
-                .register("lua.stop", (params, context) ->
+                .register("lua.stop", (params, _) ->
                         CompletableFuture.completedFuture(luaStop(params)))
-                .register("lua.debugContinue", (params, context) -> {
+                .register("lua.debugContinue", (params, _) -> {
                     long scriptId = requiredScriptId(params);
                     LuaScriptRuntimeService.getInstance().debugContinue(scriptId);
                     return CompletableFuture.completedFuture(RemoteLuaScriptJson.runningStateToJson(
                             scriptId,
                             LuaScriptRuntimeService.getInstance()));
                 })
-                .register("lua.debugStep", (params, context) -> {
+                .register("lua.debugStep", (params, _) -> {
                     long scriptId = requiredScriptId(params);
                     LuaScriptRuntimeService.getInstance().debugStep(scriptId);
                     return CompletableFuture.completedFuture(RemoteLuaScriptJson.runningStateToJson(
                             scriptId,
                             LuaScriptRuntimeService.getInstance()));
                 })
-                .register("lua.debugSnapshot", (params, context) ->
+                .register("lua.debugSnapshot", (params, _) ->
                         CompletableFuture.completedFuture(RemoteLuaScriptJson.debugSnapshotResult(
                                 LuaScriptRuntimeService.getInstance()
                                         .debugSnapshot(requiredScriptId(params))
                                         .orElse(null))))
-                .register("lua.kv.list", (params, context) ->
+                .register("lua.kv.list", (params, _) ->
                         CompletableFuture.completedFuture(RemoteLuaScriptJson.kvToJson(
                                 LuaScriptService.getInstance().listKv(requiredScriptId(params)))))
-                .register("lua.kv.set", (params, context) -> {
+                .register("lua.kv.set", (params, _) -> {
                     LuaScriptService.getInstance().setKv(
                             requiredScriptId(params),
                             requiredText(params, "key"),
                             rawTextField(params, "value"));
                     return CompletableFuture.completedFuture(new JsonObject());
                 })
-                .register("lua.kv.delete", (params, context) ->
+                .register("lua.kv.delete", (params, _) ->
                         CompletableFuture.completedFuture(RemoteLuaScriptJson.deletedResult(
                                 LuaScriptService.getInstance().deleteKv(
                                         requiredScriptId(params),
                                         requiredText(params, "key")))))
-                .register("lua.kv.clear", (params, context) -> {
+                .register("lua.kv.clear", (params, _) -> {
                     LuaScriptService.getInstance().clearKv(requiredScriptId(params));
                     return CompletableFuture.completedFuture(new JsonObject());
                 })
-                .register("settings.snapshot", (params, context) ->
+                .register("settings.snapshot", (_, _) ->
                         CompletableFuture.completedFuture(settingsSnapshot()))
-                .register("settings.saveOwner", (params, context) ->
+                .register("settings.saveOwner", (params, _) ->
                         settingsSaveOwner(params))
-                .register("settings.saveConfigChanges", (params, context) ->
+                .register("settings.saveConfigChanges", (params, _) ->
                         settingsSaveConfigChanges(params))
-                .register("settings.setFixedPosition", (params, context) ->
+                .register("settings.setFixedPosition", (params, _) ->
                         settingsSetFixedPosition(params))
-                .register("settings.removeFixedPosition", (params, context) ->
+                .register("settings.removeFixedPosition", (_, _) ->
                         settingsRemoveFixedPosition())
-                .register("settings.setRingtone", (params, context) ->
+                .register("settings.setRingtone", (params, _) ->
                         settingsSetRingtone(params))
-                .register("settings.command", (params, context) ->
+                .register("settings.command", (params, _) ->
                         settingsCommand(params))
-                .register("admin.load", (params, context) ->
+                .register("admin.load", (params, _) ->
                         remoteAdminLoad(params))
-                .register("admin.requestConfig", (params, context) ->
+                .register("admin.requestConfig", (params, _) ->
                         remoteAdminRequestConfig(params))
-                .register("admin.requestModuleConfig", (params, context) ->
+                .register("admin.requestModuleConfig", (params, _) ->
                         remoteAdminRequestModuleConfig(params))
-                .register("admin.saveOwner", (params, context) ->
+                .register("admin.saveOwner", (params, _) ->
                         remoteAdminSaveOwner(params))
-                .register("admin.saveConfigChanges", (params, context) ->
+                .register("admin.saveConfigChanges", (params, _) ->
                         remoteAdminSaveConfigChanges(params))
-                .register("admin.setFixedPosition", (params, context) ->
+                .register("admin.setFixedPosition", (params, _) ->
                         remoteAdminSetFixedPosition(params))
-                .register("admin.removeFixedPosition", (params, context) ->
+                .register("admin.removeFixedPosition", (params, _) ->
                         remoteAdminRemoveFixedPosition(params))
-                .register("admin.setRingtone", (params, context) ->
+                .register("admin.setRingtone", (params, _) ->
                         remoteAdminSetRingtone(params))
-                .register("admin.setCannedMessages", (params, context) ->
+                .register("admin.setCannedMessages", (params, _) ->
                         remoteAdminSetCannedMessages(params))
-                .register("admin.command", (params, context) ->
+                .register("admin.command", (params, _) ->
                         remoteAdminCommand(params))
-                .register("admin.refreshConnectionStatus", (params, context) ->
+                .register("admin.refreshConnectionStatus", (params, _) ->
                         remoteAdminRefreshConnectionStatus(params));
     }
 
@@ -546,7 +550,7 @@ public final class RemoteRpcHostService {
      * Publishes a host-side incoming-message event to the active remote client.
      */
     public void publishIncomingMessage(MeshMessage message, String chatType, String chatKey) {
-        if (!hasRemoteRpcEndpoint() || message == null) {
+        if (hasNoRemoteRpcEndpoint() || message == null) {
             return;
         }
         JsonObject event = new JsonObject();
@@ -565,7 +569,7 @@ public final class RemoteRpcHostService {
      * Publishes a non-notification chat update, such as reaction or metadata changes.
      */
     public void publishChatChanged(String chatType, String chatKey, int targetPacketId) {
-        if (!hasRemoteRpcEndpoint()) {
+        if (hasNoRemoteRpcEndpoint()) {
             return;
         }
         JsonObject event = new JsonObject();
@@ -587,7 +591,7 @@ public final class RemoteRpcHostService {
      * Publishes an outgoing-message delivery status update to the active remote client.
      */
     public void publishMessageStatusChanged(MessageChangeEvent change) {
-        if (!hasRemoteRpcEndpoint()
+        if (hasNoRemoteRpcEndpoint()
                 || change == null
                 || change.kind() != MessageChangeEvent.Kind.STATUS_CHANGED
                 || change.message() == null) {
@@ -615,8 +619,8 @@ public final class RemoteRpcHostService {
         publishRemoteEvent(event, payload != null ? payload : new JsonObject());
     }
 
-    private boolean hasRemoteRpcEndpoint() {
-        return server != null || routerClient != null;
+    private boolean hasNoRemoteRpcEndpoint() {
+        return server == null && routerClient == null;
     }
 
     private void publishRemoteEvent(String event, JsonElement payload) {
@@ -762,8 +766,7 @@ public final class RemoteRpcHostService {
         long scriptId = requiredScriptId(params);
         LuaScript script = LuaScriptService.getInstance().findScript(scriptId)
                 .orElseThrow(() -> new IllegalArgumentException("Lua script not found: " + scriptId));
-        Set<Integer> breakpoints = RemoteLuaScriptJson.parseBreakpoints(params).stream()
-                .collect(Collectors.toSet());
+        Set<Integer> breakpoints = new HashSet<>(RemoteLuaScriptJson.parseBreakpoints(params));
         if (script.getBotType() == LuaScript.BotType.EXTENSION) {
             LuaScriptRuntimeService.getInstance().debugExtension(
                     script,
@@ -830,7 +833,6 @@ public final class RemoteRpcHostService {
     private final class RemoteLuaFormBridge implements LuaFormBridge {
         private final LuaScript script;
         private final AtomicLong componentCounter = new AtomicLong();
-        private volatile boolean open = true;
 
         private RemoteLuaFormBridge(LuaScript script) {
             this.script = script;
@@ -838,7 +840,7 @@ public final class RemoteRpcHostService {
 
         @Override
         public boolean isFormAvailable() {
-            return open && server != null;
+            return server != null;
         }
 
         @Override
@@ -995,7 +997,7 @@ public final class RemoteRpcHostService {
                 node.setLicensed(owner.getIsLicensed());
                 active.state().fireNodeUpdateListeners(active.state().getMyNodeNum());
             }
-            return (JsonElement) settingsSnapshot(active.state());
+            return settingsSnapshot(active.state());
         });
     }
 
@@ -1045,7 +1047,7 @@ public final class RemoteRpcHostService {
                         "commitEditSettings",
                         log);
             }
-            return (JsonElement) settingsSnapshot(state);
+            return settingsSnapshot(state);
         });
     }
 
@@ -1065,7 +1067,7 @@ public final class RemoteRpcHostService {
                 node.setAltitude(altitude);
                 active.state().fireNodeUpdateListeners(active.state().getMyNodeNum());
             }
-            return (JsonElement) settingsSnapshot(active.state());
+            return settingsSnapshot(active.state());
         });
     }
 
@@ -1074,7 +1076,7 @@ public final class RemoteRpcHostService {
             ActiveHostConnection active = activeHostConnection();
             ensureSessionPasskey(active.handler(), active.state());
             MessageService.removeFixedPosition(active.handler(), active.state());
-            return (JsonElement) settingsSnapshot(active.state());
+            return settingsSnapshot(active.state());
         });
     }
 
@@ -1089,7 +1091,7 @@ public final class RemoteRpcHostService {
                     "setRingtone",
                     log);
             active.state().setRingtone(ringtone);
-            return (JsonElement) settingsSnapshot(active.state());
+            return settingsSnapshot(active.state());
         });
     }
 
@@ -1123,7 +1125,7 @@ public final class RemoteRpcHostService {
                         log);
                 default -> throw new IllegalArgumentException("Unsupported settings command: " + command);
             }
-            return (JsonElement) settingsSnapshot(active.state());
+            return settingsSnapshot(active.state());
         });
     }
 
@@ -1291,6 +1293,8 @@ public final class RemoteRpcHostService {
         return result;
     }
 
+    // The MeshCore runtime belongs to ConnectionManager and must outlive this request.
+    @SuppressWarnings("resource")
     private JsonObject chatSend(JsonObject params) {
         ActiveHostConnection active = activeHostConnection();
         String chatType = requiredText(params, "chatType");
@@ -1339,6 +1343,8 @@ public final class RemoteRpcHostService {
         return result;
     }
 
+    // The MeshCore runtime belongs to ConnectionManager and must outlive this request.
+    @SuppressWarnings("resource")
     private JsonObject chatRetry(JsonObject params) {
         ActiveHostConnection active = activeHostConnection();
         if (active.meshCoreRuntime() != null) {
@@ -1415,6 +1421,8 @@ public final class RemoteRpcHostService {
         return firstText(ownerId, "") + "|" + clientRequestId.trim();
     }
 
+    // The MeshCore runtime belongs to ConnectionManager and must outlive this request.
+    @SuppressWarnings("resource")
     private JsonObject chatReact(JsonObject params) {
         ActiveHostConnection active = activeHostConnection();
         String chatType = requiredText(params, "chatType");
@@ -1638,7 +1646,7 @@ public final class RemoteRpcHostService {
     }
 
     private void clearPendingTraceroutes() {
-        pendingTraceroutes.forEach((requestId, pending) ->
+        pendingTraceroutes.forEach((_, pending) ->
                 pending.state().removeTracerouteListener(pending.listener()));
         pendingTraceroutes.clear();
     }
@@ -1747,29 +1755,37 @@ public final class RemoteRpcHostService {
                 monitorService.countAllPackets());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminLoad(JsonObject params) {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.loadSnapshot()
                 .thenApply(session -> (JsonElement) RemoteAdminRpcJson.sessionToJson(session))
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminRequestConfig(JsonObject params) {
         AdminProtos.AdminMessage.ConfigType type = configType(params);
         RemoteAdminService service = createRemoteAdminService(params);
         return service.requestConfigSection(type)
                 .thenApply(ignored -> (JsonElement) RemoteAdminRpcJson.sessionToJson(service.session()))
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminRequestModuleConfig(JsonObject params) {
         AdminProtos.AdminMessage.ModuleConfigType type = moduleConfigType(params);
         RemoteAdminService service = createRemoteAdminService(params);
         return service.requestModuleConfigSection(type)
                 .thenApply(ignored -> (JsonElement) RemoteAdminRpcJson.sessionToJson(service.session()))
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminSaveOwner(JsonObject params) {
         String longName = rawTextField(params, "longName");
         String shortName = rawTextField(params, "shortName");
@@ -1777,9 +1793,11 @@ public final class RemoteRpcHostService {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.saveOwner(longName, shortName, isLicensed)
                 .thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminSaveConfigChanges(JsonObject params) {
         List<ConfigProtos.Config> configs = RemoteAdminRpcJson.configsFromJson(params, "configs");
         List<ModuleConfigProtos.ModuleConfig> moduleConfigs =
@@ -1788,9 +1806,11 @@ public final class RemoteRpcHostService {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.saveConfigChanges(configs, moduleConfigs, channels)
                 .thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminSetFixedPosition(JsonObject params) {
         double latDegrees = doubleField(params, "latDegrees");
         double lonDegrees = doubleField(params, "lonDegrees");
@@ -1798,30 +1818,36 @@ public final class RemoteRpcHostService {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.setFixedPosition(latDegrees, lonDegrees, altMeters)
                 .thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminRemoveFixedPosition(JsonObject params) {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.removeFixedPosition()
                 .thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminSetRingtone(JsonObject params) {
         String ringtone = rawTextField(params, "ringtone");
         RemoteAdminService service = createRemoteAdminService(params);
         return service.setRingtone(ringtone)
                 .thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminSetCannedMessages(JsonObject params) {
         String messages = rawTextField(params, "messages");
         RemoteAdminService service = createRemoteAdminService(params);
         return service.setCannedMessages(messages)
                 .thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
     private CompletableFuture<JsonElement> remoteAdminCommand(JsonObject params) {
@@ -1848,9 +1874,11 @@ public final class RemoteRpcHostService {
             throw e;
         }
         return future.thenApply(ignored -> okResult())
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
+    // The asynchronous operation owns this service; whenComplete closes it after completion.
+    @SuppressWarnings("resource")
     private CompletableFuture<JsonElement> remoteAdminRefreshConnectionStatus(JsonObject params) {
         RemoteAdminService service = createRemoteAdminService(params);
         return service.refreshConnectionStatus()
@@ -1859,7 +1887,7 @@ public final class RemoteRpcHostService {
                     result.addProperty("adminMessage", RemoteAdminRpcJson.encodeAdminMessage(adminMessage));
                     return (JsonElement) result;
                 })
-                .whenComplete((ignored, error) -> service.close());
+                .whenComplete((ignored, _) -> service.close());
     }
 
     private RemoteAdminService createRemoteAdminService(JsonObject params) {
@@ -2010,9 +2038,9 @@ public final class RemoteRpcHostService {
         int snrCount = route.getSnrTowardsCount();
         for (int i = 0; i <= hops.size(); i++) {
             if (i < snrCount) {
-                sb.append(String.format(Locale.US, " \u2192%.1fdB\u2192 ", route.getSnrTowards(i) / 4.0));
+                sb.append(String.format(Locale.US, " →%.1fdB→ ", route.getSnrTowards(i) / 4.0));
             } else {
-                sb.append(" \u2192 ");
+                sb.append(" → ");
             }
             sb.append(i < hops.size() ? nodeNameResolver.apply(hops.get(i)) : targetName);
         }
@@ -2022,9 +2050,9 @@ public final class RemoteRpcHostService {
             int snrBackCount = route.getSnrBackCount();
             for (int i = 0; i <= backHops.size(); i++) {
                 if (i < snrBackCount) {
-                    sb.append(String.format(Locale.US, " \u2192%.1fdB\u2192 ", route.getSnrBack(i) / 4.0));
+                    sb.append(String.format(Locale.US, " →%.1fdB→ ", route.getSnrBack(i) / 4.0));
                 } else {
-                    sb.append(" \u2192 ");
+                    sb.append(" → ");
                 }
                 sb.append(i < backHops.size() ? nodeNameResolver.apply(backHops.get(i)) : I18n.t("chat.self.avatar"));
             }
@@ -2068,6 +2096,12 @@ public final class RemoteRpcHostService {
 
     private static String nodeIdFromNum(int nodeNum) {
         return String.format("!%08x", nodeNum);
+    }
+
+    private MeshCoreCompanionProtocolRuntime requireMeshCoreRuntime() {
+        var runtime=activeHostConnection().meshCoreRuntime();
+        if(runtime==null)throw new IllegalStateException("Selected connection is not MeshCore Companion");
+        return runtime;
     }
 
     private ActiveHostConnection activeHostConnection() {
@@ -2294,7 +2328,7 @@ public final class RemoteRpcHostService {
 
     private static String textField(JsonObject params, String field) {
         String value = rawTextField(params, field);
-        return value == null ? "" : value.trim();
+        return value.trim();
     }
 
     private static String rawTextField(JsonObject params, String field) {

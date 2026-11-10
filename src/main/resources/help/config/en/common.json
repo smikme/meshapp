@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "sections": {
     "owner_info": {
       "summary": "Device name and short callsign visible to other users on the mesh.",
@@ -2866,22 +2866,17 @@
       }
     },
     "meshtastic.Config.SecurityConfig.packet_signature_policy": {
-      "summary": "Controls how signed mesh packets are accepted and verified.",
-      "whenToUse": "Change this only when the node supports XEdDSA and your mesh uses packet signatures.",
-      "defaultBehavior": "The firmware default keeps compatibility with ordinary unsigned traffic."
+      "summary": "Controls packet authentication. In 2.8.2, Compatible accepts unsigned packets and does not sign outgoing packets.",
+      "whenToUse": "Balanced and Strict sign eligible traffic. Strict requires authentication, with exceptions for routing, key verification and traceroute. AES-CCM authenticates channel packets independently of this policy.",
+      "defaultBehavior": "Compatible is the default. A signature that fails verification is rejected in every mode."
     },
     "meshtastic.ModuleConfig.MeshBeaconConfig.flags": {
       "summary": "Selects which Mesh Beacon broadcasts and offers are enabled.",
       "whenToUse": "Enable only the beacon features required by this node.",
       "defaultBehavior": "With no flags set, Mesh Beacon broadcasts are disabled."
     },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_send_as_node": {
-      "summary": "Sends beacon broadcasts using this node's identity.",
-      "whenToUse": "Enable it when receivers should identify the beacon source as this node.",
-      "defaultBehavior": "Disabled broadcasts use the firmware's default beacon identity behavior."
-    },
     "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_message": {
-      "summary": "Text included in Mesh Beacon broadcasts.",
+      "summary": "Text included in Mesh Beacon broadcasts, up to 60 UTF-8 bytes.",
       "whenToUse": "Use a short message that identifies the beacon or its purpose.",
       "defaultBehavior": "An empty value sends no custom beacon text."
     },
@@ -2945,25 +2940,25 @@
       "whenToUse": "Enable it when receivers should be offered this node's modem preset.",
       "defaultBehavior": "Preset offers are disabled."
     },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_channel": {
-      "summary": "Broadcasts Mesh Beacon information on the configured channel.",
-      "whenToUse": "Enable it to send beacons through the selected channel.",
-      "defaultBehavior": "Channel-based beacon broadcasting is disabled."
-    },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_region": {
-      "summary": "Broadcasts Mesh Beacon information for the configured region.",
-      "whenToUse": "Enable it to announce information tied to the selected region.",
-      "defaultBehavior": "Region-based beacon broadcasting is disabled."
-    },
-    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_on_preset": {
-      "summary": "Broadcasts Mesh Beacon information using the configured preset.",
-      "whenToUse": "Enable it to announce information tied to the selected modem preset.",
-      "defaultBehavior": "Preset-based beacon broadcasting is disabled."
-    },
     "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_interval_secs": {
       "summary": "Interval in seconds between Mesh Beacon broadcasts.",
-      "whenToUse": "Set a long interval appropriate for low-bandwidth mesh traffic.",
-      "defaultBehavior": "Zero disables periodic broadcasts; non-zero values must meet the firmware minimum."
+      "whenToUse": "Use at least 3600 seconds for a custom interval.",
+      "defaultBehavior": "Zero selects the firmware default of 3600 seconds."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.broadcast_offer_frequency_slot": {
+      "summary": "Frequency slot, starting at 1.",
+      "whenToUse": "Set this only to override the slot derived from the region and channel name.",
+      "defaultBehavior": "Leave the optional value unset for automatic selection; do not send zero."
+    },
+    "meshtastic.ModuleConfig.MeshBeaconConfig.BroadcastTarget.frequency_slot": {
+      "summary": "Frequency slot, starting at 1.",
+      "whenToUse": "Set this only to override the slot derived from the region and channel name.",
+      "defaultBehavior": "Leave the optional value unset for automatic selection; do not send zero."
+    },
+    "meshtastic.ChannelSettings.use_aead": {
+      "summary": "Authenticated channel encryption using AES-CCM.",
+      "whenToUse": "Requires firmware 2.8.1 or newer, a valid shared key and the same mode on every participant.",
+      "defaultBehavior": "Disabled uses legacy AES-CTR."
     }
   }
 }

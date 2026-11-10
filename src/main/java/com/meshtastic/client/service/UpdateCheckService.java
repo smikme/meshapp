@@ -32,7 +32,7 @@ public final class UpdateCheckService {
 
     private static final Logger log = LoggerFactory.getLogger(UpdateCheckService.class);
     private static final Gson GSON = new Gson();
-    private static final String UPDATE_URL = "https://flatpak.privatepractice.app/meshapp.json";
+    private static final String UPDATE_URL = "https://smikme.github.io/meshapp/updates/stable/meshapp.json";
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
     private UpdateCheckService() {}

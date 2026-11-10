@@ -40,6 +40,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -63,7 +64,11 @@ class FormChatTest {
 
     @AfterEach
     void tearDown() {
-        TestEnvironmentSupport.resetSingletons();
+        // Complete nested UI callbacks before closing their database and deleting
+        // the temporary home. Reset on the FX thread to avoid concurrent DB access.
+        waitForFxEvents();
+        waitForFxEvents();
+        onFxThread(TestEnvironmentSupport::resetSingletons);
     }
 
     @Test
@@ -71,7 +76,7 @@ class FormChatTest {
         onFxThread(() -> {
             FormChat form = new FormChat();
             ChatItem channel = channel(0);
-            ChatItem directMessage = directMessage("!00000002");
+            ChatItem directMessage = directMessage();
 
             MeshMessage staleDirectMessage = incoming("stale dm row");
             staleDirectMessage.setDbId(42);
@@ -85,7 +90,6 @@ class FormChatTest {
             form.saveCurrentChatScrollState();
 
             assertFalse(form.savedChatScrollStates.containsKey(form.chatScrollCacheKey(channel)));
-            return null;
         });
     }
 
@@ -112,8 +116,7 @@ class FormChatTest {
             FormChatBase.ChatScrollState actual = form.savedChatScrollStates.get(form.chatScrollCacheKey(channel));
             assertEquals(saved.anchorDbId(), actual.anchorDbId());
             assertEquals(saved.anchorOffset(), actual.anchorOffset());
-            assertEquals(saved.atBottom(), actual.atBottom());
-            return null;
+            assertFalse(actual.atBottom());
         });
     }
 
@@ -128,7 +131,6 @@ class FormChatTest {
 
             assertFalse(form.formVisible);
             assertEquals(generation + 1, form.scrollOperationGeneration);
-            return null;
         });
     }
 
@@ -161,7 +163,6 @@ class FormChatTest {
             assertFalse(chatListView.getPseudoClassStates().stream()
                     .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
             assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -185,7 +186,6 @@ class FormChatTest {
             assertTrue(chatListView.getPseudoClassStates().stream()
                     .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
             assertEquals(64.0 / 650.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -209,7 +209,6 @@ class FormChatTest {
             assertFalse(chatListView.getPseudoClassStates().stream()
                     .anyMatch(pseudoClass -> "compact".equals(pseudoClass.getPseudoClassName())));
             assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -230,7 +229,6 @@ class FormChatTest {
             assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
             assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
             assertEquals(314.0 / 820.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -252,7 +250,6 @@ class FormChatTest {
             assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
             Boolean hidden = readField(form, "chatListHiddenMode");
             assertFalse(hidden);
-            return null;
         });
     }
 
@@ -284,7 +281,6 @@ class FormChatTest {
             } finally {
                 stage.close();
             }
-            return null;
         });
     }
 
@@ -310,7 +306,6 @@ class FormChatTest {
             assertEquals(314.0, chatListPane.getPrefWidth(), 0.01);
             assertEquals(314.0, AppPreferences.getChatListWidth(0.0), 0.01);
             assertEquals(314.0 / 1383.0, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -333,7 +328,6 @@ class FormChatTest {
             assertEquals(314.0, chatListPane.getMinWidth(), 0.01);
             Boolean hidden = readField(form, "chatListHiddenMode");
             assertFalse(hidden);
-            return null;
         });
     }
 
@@ -365,7 +359,6 @@ class FormChatTest {
             assertEquals(360.0, chatListPane.getPrefWidth(), 0.01);
             assertTrue(chatListPane.getMaxWidth() > 360.0);
             assertEquals(0.4, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -396,7 +389,6 @@ class FormChatTest {
             assertEquals(500.0, chatListPane.getPrefWidth(), 0.01);
             assertTrue(chatListPane.getMaxWidth() > 500.0);
             assertTrue(splitPane.getDividers().getFirst().getPosition() < 0.4);
-            return null;
         });
     }
 
@@ -415,7 +407,6 @@ class FormChatTest {
             SplitPane splitPane = readField(form, "chatSplitPane");
 
             assertEquals(0.4, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -438,7 +429,6 @@ class FormChatTest {
             assertEquals(360.0, chatListPane.getPrefWidth(), 0.01);
             assertTrue(chatListPane.getMaxWidth() > 360.0);
             assertEquals(0.4, splitPane.getDividers().getFirst().getPosition(), 0.02);
-            return null;
         });
     }
 
@@ -468,7 +458,6 @@ class FormChatTest {
 
             assertEquals(405.0, AppPreferences.getChatListWidth(0.0), 0.001);
             assertEquals(0.45, AppPreferences.getChatDividerPos(), 0.001);
-            return null;
         });
     }
 
@@ -488,7 +477,6 @@ class FormChatTest {
             drawerPane.setChatUnreadDot(true);
 
             assertFalse(dot.isVisible());
-            return null;
         });
     }
 
@@ -515,7 +503,6 @@ class FormChatTest {
             } finally {
                 state.shutdown();
             }
-            return null;
         });
     }
 
@@ -544,7 +531,6 @@ class FormChatTest {
             } finally {
                 state.shutdown();
             }
-            return null;
         });
     }
 
@@ -564,7 +550,7 @@ class FormChatTest {
         assertTrue(FormChatMessages.copyLoadedMessageMetadata(loaded, updated));
         assertEquals(200, loaded.getPacketId());
         assertEquals(MeshMessage.DeliveryStatus.SENDING, loaded.getStatus());
-        assertEquals(null, loaded.getErrorReason());
+        assertNull(loaded.getErrorReason());
     }
 
     @Test
@@ -577,12 +563,12 @@ class FormChatTest {
             manager.setSelectedConnectionId(entry.getId());
 
             DeviceState state = new DeviceState();
+            FormChat form = new FormChat();
             try {
                 state.setMyNodeNum(0x12345678);
                 state.addChannel(channelProto(0));
                 deviceStates(manager).put(entry.getId(), state);
 
-                FormChat form = new FormChat();
                 form.state = state;
                 form.boundConnectionId = entry.getId();
                 form.selectedChat = null;
@@ -595,9 +581,9 @@ class FormChatTest {
                 assertTrue(form.isChatDetailOpenFor(form.selectedChat));
                 assertTrue(form.detailPane.getChildren().contains(form.messageArea));
             } finally {
+                form.formClose();
                 state.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -631,7 +617,6 @@ class FormChatTest {
             } finally {
                 state.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -650,11 +635,10 @@ class FormChatTest {
 
             form.closeChat();
 
-            assertEquals(null, form.selectedChat);
+            assertNull(form.selectedChat);
             assertTrue(form.selectedChatsByConnectionId.containsKey(connectionId));
             assertEquals("channel:0", AppPreferences.loadSelectedChat(connectionId));
             assertTrue(form.detailPane.getChildren().contains(form.placeholderBox));
-            return null;
         });
     }
 
@@ -680,16 +664,15 @@ class FormChatTest {
 
                 form.reloadChatList();
 
-                assertEquals(null, form.selectedChat);
+                assertNull(form.selectedChat);
                 assertTrue(form.chatListView.getSelectionModel().isEmpty());
                 assertFalse(form.selectedChatsByConnectionId.containsKey(connectionId));
-                assertEquals(null, AppPreferences.loadSelectedChat(connectionId));
+                assertNull(AppPreferences.loadSelectedChat(connectionId));
                 assertTrue(form.detailPane.getChildren().contains(form.placeholderBox));
                 assertFalse(form.detailPane.getChildren().contains(form.messageArea));
             } finally {
                 state.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -723,7 +706,6 @@ class FormChatTest {
             } finally {
                 state.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -754,7 +736,6 @@ class FormChatTest {
             } finally {
                 state.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -787,7 +768,7 @@ class FormChatTest {
                 assertFalse(state.getAllDirectMessages().containsKey(peerNodeId));
 
                 form.openChat(dm);
-                invokeOneArg(form, "clearChatHistory", ChatItem.class, dm);
+                invokeChatAction(form, "clearChatHistory", dm);
 
                 assertTrue(db.loadLast("dm", peerNodeId, 10, ownerNodeId).isEmpty());
                 assertTrue(state.getAllDirectMessages().containsKey(peerNodeId));
@@ -820,7 +801,6 @@ class FormChatTest {
             } finally {
                 restartedState.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -851,18 +831,17 @@ class FormChatTest {
                 form.openChat(dm);
                 assertEquals("dm:" + peerNodeId, AppPreferences.loadSelectedChat(connectionId));
 
-                invokeOneArg(form, "deleteChat", ChatItem.class, dm);
+                invokeChatAction(form, "deleteChat", dm);
 
                 assertTrue(db.getDistinctDmPeers(state.getOwnerNodeId()).isEmpty());
                 assertFalse(state.getAllDirectMessages().containsKey(peerNodeId));
                 assertTrue(form.chatListView.getItems().stream()
                         .noneMatch(item -> item.getType() == ChatItem.ChatType.DIRECT_MESSAGE
                                 && peerNodeId.equals(item.getPeerNodeId())));
-                assertEquals(null, AppPreferences.loadSelectedChat(connectionId));
+                assertNull(AppPreferences.loadSelectedChat(connectionId));
             } finally {
                 state.shutdown();
             }
-            return null;
         });
         waitForFxEvents();
         waitForFxEvents();
@@ -907,11 +886,10 @@ class FormChatTest {
                         form.savedChatScrollStates.get(form.chatScrollCacheKey(channel));
                 assertEquals(saved.anchorDbId(), actual.anchorDbId());
                 assertEquals(saved.anchorOffset(), actual.anchorOffset());
-                assertEquals(saved.atBottom(), actual.atBottom());
+                assertFalse(actual.atBottom());
             } finally {
                 state.shutdown();
             }
-            return null;
         });
     }
 
@@ -926,7 +904,6 @@ class FormChatTest {
 
             assertTrue(form.pendingMessageChangesOverflowed.get());
             assertTrue(form.pendingMessageChanges.size() <= FormChatBase.MAX_PENDING_MESSAGE_CHANGE_EVENTS);
-            return null;
         });
         waitForFxEvents();
     }
@@ -962,6 +939,15 @@ class FormChatTest {
         assertFalse(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, 0.95));
         assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(0, 0, 0));
         assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(300, 400, 0));
+    }
+
+    @Test
+    void liveTailMetricClampsOverscrollAndPreservesUndefinedLayout() {
+        assertFalse(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, -1));
+        assertTrue(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, 2));
+        assertFalse(FormChatMessages.isScrolledToBottomFromMetrics(1000, 400, Double.NaN));
+        assertFalse(FormChatMessages.isScrolledToBottomFromMetrics(Double.NaN, 400, 1));
+        assertFalse(FormChatMessages.isScrolledToBottomFromMetrics(1000, Double.NaN, 1));
     }
 
     @Test
@@ -1038,17 +1024,16 @@ class FormChatTest {
                 .build();
     }
 
-    private static ChatItem directMessage(String nodeId) {
-        return ChatItem.fromDirectMessage(nodeId, null, (MeshMessage) null, 0, false);
+    private static ChatItem directMessage() {
+        return ChatItem.fromDirectMessage("!00000002", null, (MeshMessage) null, 0, false);
     }
 
     private static void waitForFxEvents() {
-        onFxThread(() -> null);
+        onFxThread(() -> {});
     }
 
-    @SuppressWarnings("unchecked")
     private static Map<String, DeviceState> deviceStates(ConnectionManager manager) {
-        return (Map<String, DeviceState>) readField(manager, "deviceStates");
+        return readField(manager, "deviceStates");
     }
 
     @SuppressWarnings("unchecked")
@@ -1092,13 +1077,13 @@ class FormChatTest {
         throw new AssertionError("Failed to find method " + methodName);
     }
 
-    private static void invokeOneArg(Object target, String methodName, Class<?> argType, Object arg) {
+    private static void invokeChatAction(Object target, String methodName, ChatItem chat) {
         Class<?> current = target.getClass();
         while (current != null) {
             try {
-                java.lang.reflect.Method method = current.getDeclaredMethod(methodName, argType);
+                java.lang.reflect.Method method = current.getDeclaredMethod(methodName, ChatItem.class);
                 method.setAccessible(true);
-                method.invoke(target, arg);
+                method.invoke(target, chat);
                 return;
             } catch (NoSuchMethodException ignored) {
                 current = current.getSuperclass();
@@ -1109,14 +1094,13 @@ class FormChatTest {
         throw new AssertionError("Failed to find method " + methodName);
     }
 
-    private static <T> T onFxThread(FxSupplier<T> supplier) {
+    private static void onFxThread(FxTask task) {
         CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<T> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
 
         Platform.runLater(() -> {
             try {
-                result.set(supplier.get());
+                task.run();
             } catch (Throwable t) {
                 failure.set(t);
             } finally {
@@ -1128,7 +1112,6 @@ class FormChatTest {
         if (failure.get() != null) {
             throw new AssertionError("JavaFX task failed", failure.get());
         }
-        return result.get();
     }
 
     private static void await(CountDownLatch latch) {
@@ -1143,7 +1126,7 @@ class FormChatTest {
     }
 
     @FunctionalInterface
-    private interface FxSupplier<T> {
-        T get() throws Exception;
+    private interface FxTask {
+        void run() throws Exception;
     }
 }

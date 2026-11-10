@@ -32,12 +32,14 @@ import java.util.regex.Pattern;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class DatabaseMigrator {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
 
     /** Current schema version. Increment on every schema change. */
-    static final int CURRENT_VERSION = 24;
+    static final int CURRENT_VERSION = 26;
     private static final String LEGACY_TRACEROUTE_PREFIX = "\uD83D\uDD0D Traceroute → ";
     private static final Pattern CONNECTION_NODE_ID_PATTERN =
             Pattern.compile("\"nodeId\"\\s*:\\s*\"(![0-9a-fA-F]{8})\"");
@@ -213,6 +215,9 @@ public final class DatabaseMigrator {
             if (version < 23) { migrateToV23(connection); version = 23; }
             if (version < 24) { migrateToV24(connection); version = 24; }
 
+            if (version < 25) { migrateToV25(connection); }
+            if (version < 26) { widenMeshCoreIdentifiers(connection); }
+
             setVersion(connection, CURRENT_VERSION);
             log.info("Database migration complete, schema version = {}", CURRENT_VERSION);
         } catch (SQLException e) {
@@ -258,6 +263,8 @@ public final class DatabaseMigrator {
         return 0;
     }
 
+    // schema_version contains one row; every migration replaces its version.
+    @SuppressWarnings("SqlWithoutWhere")
     private static void setVersion(Connection connection, int version) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
                 "UPDATE schema_version SET version = ?")) {
@@ -298,10 +305,10 @@ public final class DatabaseMigrator {
             addColumnIfMissing(stmt, connection, "MESSAGES", "RX_SNR", "rx_snr REAL DEFAULT 0");
 
             if (!columnExists(connection, "MESSAGES", "FROM_NODE_ID")) {
-                stmt.execute("ALTER TABLE messages ADD COLUMN from_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                stmt.execute("ALTER TABLE messages ADD COLUMN from_node_id VARCHAR(80) NOT NULL DEFAULT ''");
             }
             if (!columnExists(connection, "MESSAGES", "TO_NODE_ID")) {
-                stmt.execute("ALTER TABLE messages ADD COLUMN to_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                stmt.execute("ALTER TABLE messages ADD COLUMN to_node_id VARCHAR(80) NOT NULL DEFAULT ''");
             }
         }
 
@@ -361,7 +368,7 @@ public final class DatabaseMigrator {
         }
         try (Statement stmt = connection.createStatement()) {
             if (!columnExists(connection, "NODES", "NODE_ID")) {
-                stmt.execute("ALTER TABLE nodes ADD COLUMN node_id VARCHAR(20)");
+                stmt.execute("ALTER TABLE nodes ADD COLUMN node_id VARCHAR(80)");
             }
             addColumnIfMissing(stmt, connection, "NODES", "NODE_NUM", "node_num INT");
         }
@@ -394,7 +401,7 @@ public final class DatabaseMigrator {
         }
         try (Statement stmt = connection.createStatement()) {
             if (!columnExists(connection, "TELEMETRY_HISTORY", "NODE_ID")) {
-                stmt.execute("ALTER TABLE telemetry_history ADD COLUMN node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                stmt.execute("ALTER TABLE telemetry_history ADD COLUMN node_id VARCHAR(80) NOT NULL DEFAULT ''");
             }
         }
         if (columnExists(connection, "TELEMETRY_HISTORY", "NODE_NUM")) {
@@ -488,6 +495,7 @@ public final class DatabaseMigrator {
         }
     }
 
+    @SuppressWarnings("SameParameterValue") // Keep the JDBC helper independent of a particular column/table.
     private static boolean isCharacterColumn(Connection connection, String tableName, String columnName) throws SQLException {
         try (ResultSet rs = connection.getMetaData()
                 .getColumns(null, null, tableName, columnName)) {
@@ -517,13 +525,13 @@ public final class DatabaseMigrator {
         String ownerNodeId = inferOwnerNodeId();
         try (Statement stmt = connection.createStatement()) {
             if (tableExists(connection, "MESSAGES")) {
-                stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                stmt.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(80) NOT NULL DEFAULT ''");
                 backfillOwnerNodeId(connection, "messages", ownerNodeId);
                 stmt.execute("DROP INDEX IF EXISTS idx_msg_chat");
                 stmt.execute("CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages (owner_node_id, chat_type, chat_key, id)");
             }
             if (tableExists(connection, "CHAT_READ_COUNTS")) {
-                stmt.execute("ALTER TABLE chat_read_counts ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+                stmt.execute("ALTER TABLE chat_read_counts ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(80) NOT NULL DEFAULT ''");
                 backfillOwnerNodeId(connection, "chat_read_counts", ownerNodeId);
                 dropPrimaryKeyIfPresent(stmt, "chat_read_counts");
                 stmt.execute("ALTER TABLE chat_read_counts ADD PRIMARY KEY (owner_node_id, chat_type, chat_key)");
@@ -540,7 +548,7 @@ public final class DatabaseMigrator {
         }
         String ownerNodeId = inferOwnerNodeId();
         try (Statement stmt = connection.createStatement()) {
-            stmt.execute("ALTER TABLE telemetry_history ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(20) NOT NULL DEFAULT ''");
+            stmt.execute("ALTER TABLE telemetry_history ADD COLUMN IF NOT EXISTS owner_node_id VARCHAR(80) NOT NULL DEFAULT ''");
             backfillOwnerNodeId(connection, "telemetry_history", ownerNodeId);
             stmt.execute("DROP INDEX IF EXISTS idx_telemetry_node_ts");
             stmt.execute("CREATE INDEX idx_telemetry_node_ts ON telemetry_history (owner_node_id, node_id, ts)");
@@ -566,12 +574,12 @@ public final class DatabaseMigrator {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS message_reactions (
                         id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id      VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type          VARCHAR(10) NOT NULL,
-                        chat_key           VARCHAR(20) NOT NULL,
+                        chat_key           VARCHAR(80) NOT NULL,
                         target_packet_id   INT NOT NULL,
                         reaction_packet_id INT DEFAULT 0,
-                        from_node_id       VARCHAR(20) NOT NULL,
+                        from_node_id       VARCHAR(80) NOT NULL,
                         emoji              VARCHAR(16) NOT NULL,
                         timestamp          BIGINT NOT NULL,
                         outgoing           BOOLEAN NOT NULL,
@@ -619,7 +627,7 @@ public final class DatabaseMigrator {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS lora_packet_logs (
                         id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
                         captured_at   BIGINT NOT NULL,
                         direction     VARCHAR(10) NOT NULL,
                         packet_type   VARCHAR(40) NOT NULL,
@@ -647,7 +655,7 @@ public final class DatabaseMigrator {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS lora_packet_logs (
                         id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id       VARCHAR(80) NOT NULL DEFAULT '',
                         captured_at         BIGINT NOT NULL,
                         direction           VARCHAR(10) NOT NULL,
                         packet_type         VARCHAR(40) NOT NULL,
@@ -928,13 +936,87 @@ public final class DatabaseMigrator {
         log.info("Migration v24: added telemetry replay packet identity");
     }
 
+    /** v26: preserve full MeshCore identities in existing tables without rebuilding history. */
+    public static void widenMeshCoreIdentifiers(Connection connection) throws SQLException {
+        java.util.List<String> changes = new java.util.ArrayList<>();
+        java.util.Set<String> identifiers = java.util.Set.of("NODE_ID", "OWNER_NODE_ID", "FROM_NODE_ID",
+                "TO_NODE_ID", "CHAT_KEY", "PEER_NODE_ID", "TARGET_NODE_ID", "RESPONSE_FROM_NODE_ID");
+        try (var columns = connection.getMetaData().getColumns(null, "PUBLIC", "%", "%")) {
+            while (columns.next()) {
+                String column = columns.getString("COLUMN_NAME");
+                if (identifiers.contains(column) && columns.getInt("DATA_TYPE") == java.sql.Types.VARCHAR
+                        && columns.getInt("COLUMN_SIZE") < 80) {
+                    changes.add("ALTER TABLE \"" + columns.getString("TABLE_NAME") + "\" ALTER COLUMN \""
+                            + column + "\" VARCHAR(80)");
+                }
+            }
+        }
+        try (var statement = connection.createStatement()) {
+            for (String sql : changes) statement.execute(sql);
+        }
+    }
+
+    /** v25: released Meshtastic 2.8 sensor channels and soil/water metrics. */
+    private static void migrateToV25(Connection connection) throws SQLException {
+        if (tableExists(connection, "NODES")) {
+            try (Statement stmt = connection.createStatement()) {
+                addColumnIfMissing(stmt, connection, "NODES", "XEDDSA_SIGNED", "xeddsa_signed BOOLEAN");
+                addColumnIfMissing(stmt, connection, "NODES", "HEARD_ON_CURRENT_LORA", "heard_on_current_lora BOOLEAN");
+            }
+        }
+        if (!tableExists(connection, "TELEMETRY_HISTORY")) {
+            return;
+        }
+        String[][] columns = {
+                {"ADC_VOLTAGE_CH0", "adc_voltage_ch0 REAL"},
+                {"ADC_VOLTAGE_CH1", "adc_voltage_ch1 REAL"},
+                {"ADC_VOLTAGE_CH2", "adc_voltage_ch2 REAL"},
+                {"ADC_VOLTAGE_CH3", "adc_voltage_ch3 REAL"},
+                {"ADC_VOLTAGE_CH4", "adc_voltage_ch4 REAL"},
+                {"ADC_VOLTAGE_CH5", "adc_voltage_ch5 REAL"},
+                {"ADC_VOLTAGE_CH6", "adc_voltage_ch6 REAL"},
+                {"ADC_VOLTAGE_CH7", "adc_voltage_ch7 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH0", "one_wire_temperature_ch0 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH1", "one_wire_temperature_ch1 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH2", "one_wire_temperature_ch2 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH3", "one_wire_temperature_ch3 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH4", "one_wire_temperature_ch4 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH5", "one_wire_temperature_ch5 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH6", "one_wire_temperature_ch6 REAL"},
+                {"ONE_WIRE_TEMPERATURE_CH7", "one_wire_temperature_ch7 REAL"},
+                {"LIGHTNING_STRIKE_COUNT_1H", "lightning_strike_count_1h BIGINT"},
+                {"LIGHTNING_DISTANCE_KM", "lightning_distance_km REAL"},
+                {"PM_STATUS_FLAGS", "pm_status_flags BIGINT"},
+                {"SOIL_PH", "soil_ph REAL"},
+                {"PH", "ph REAL"},
+                {"ELECTRICAL_CONDUCTIVITY", "electrical_conductivity REAL"},
+                {"SALINITY", "salinity REAL"},
+                {"NITROGEN", "nitrogen REAL"},
+                {"PHOSPHORUS", "phosphorus REAL"},
+                {"POTASSIUM", "potassium REAL"},
+                {"DISSOLVED_OXYGEN", "dissolved_oxygen REAL"},
+                {"ORP", "orp REAL"},
+                {"CHEMICAL_OXYGEN_DEMAND", "chemical_oxygen_demand REAL"},
+                {"TURBIDITY", "turbidity REAL"},
+                {"NITRATE", "nitrate REAL"},
+                {"AMMONIUM", "ammonium REAL"},
+                {"BIOCHEMICAL_OXYGEN_DEMAND", "biochemical_oxygen_demand REAL"},
+                {"SOLAR_IRRADIANCE", "solar_irradiance REAL"}
+        };
+        try (Statement stmt = connection.createStatement()) {
+            for (String[] column : columns) {
+                addColumnIfMissing(stmt, connection, "TELEMETRY_HISTORY", column[0], column[1]);
+            }
+        }
+    }
+
     private static void createChatThreadsTable(Connection connection) throws SQLException {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_threads (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type     VARCHAR(10) NOT NULL,
-                        chat_key      VARCHAR(20) NOT NULL,
+                        chat_key      VARCHAR(80) NOT NULL,
                         PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
                     """);
@@ -945,8 +1027,8 @@ public final class DatabaseMigrator {
         try (Statement stmt = connection.createStatement()) {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS node_flags (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
-                        node_id       VARCHAR(20) NOT NULL,
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
+                        node_id       VARCHAR(80) NOT NULL,
                         favorite      BOOLEAN DEFAULT FALSE,
                         ignored       BOOLEAN DEFAULT FALSE,
                         PRIMARY KEY (owner_node_id, node_id)
@@ -1032,17 +1114,17 @@ public final class DatabaseMigrator {
             stmt.execute("""
                     CREATE TABLE IF NOT EXISTS traceroute_results (
                         id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id          VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id          VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type              VARCHAR(10) NOT NULL DEFAULT '',
-                        chat_key               VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_key               VARCHAR(80) NOT NULL DEFAULT '',
                         source                 VARCHAR(80) NOT NULL DEFAULT '',
                         request_id             VARCHAR(120) NOT NULL DEFAULT '',
                         script_id              BIGINT DEFAULT 0,
                         target_node_num        BIGINT DEFAULT 0,
-                        target_node_id         VARCHAR(20),
+                        target_node_id         VARCHAR(80),
                         target_name            VARCHAR(120),
                         response_from_node_num BIGINT DEFAULT 0,
-                        response_from_node_id  VARCHAR(20),
+                        response_from_node_id  VARCHAR(80),
                         route_data             BLOB,
                         formatted_text         CLOB,
                         timestamp              BIGINT NOT NULL
@@ -1219,6 +1301,7 @@ public final class DatabaseMigrator {
 
     private record GuidUpdate(long scriptId, String guid) {}
 
+    @SuppressWarnings("SameParameterValue") // Keep the JDBC helper independent of a particular column/table.
     private static void dropPrimaryKeyIfPresent(Statement stmt, String tableName) throws SQLException {
         try {
             stmt.execute("ALTER TABLE " + tableName + " DROP PRIMARY KEY");

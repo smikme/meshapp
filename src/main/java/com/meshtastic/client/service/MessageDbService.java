@@ -25,6 +25,8 @@ import java.util.*;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schema is created at runtime and covered by database integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class MessageDbService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageDbService.class);
@@ -90,9 +92,9 @@ public final class MessageDbService {
                     CREATE TABLE IF NOT EXISTS messages (
                         id             BIGINT AUTO_INCREMENT PRIMARY KEY,
                         chat_type      VARCHAR(10) NOT NULL,
-                        chat_key       VARCHAR(20) NOT NULL,
-                        from_node_id   VARCHAR(20) NOT NULL,
-                        to_node_id     VARCHAR(20) NOT NULL,
+                        chat_key       VARCHAR(80) NOT NULL,
+                        from_node_id   VARCHAR(80) NOT NULL,
+                        to_node_id     VARCHAR(80) NOT NULL,
                         channel_idx    INT NOT NULL,
                         text           CLOB,
                         timestamp      BIGINT NOT NULL,
@@ -109,7 +111,7 @@ public final class MessageDbService {
                         system_msg     BOOLEAN DEFAULT FALSE,
                         rx_rssi        INT DEFAULT 0,
                         rx_snr         REAL DEFAULT 0,
-                        owner_node_id  VARCHAR(20) NOT NULL DEFAULT ''
+                        owner_node_id  VARCHAR(80) NOT NULL DEFAULT ''
                     )
                     """);
 
@@ -129,12 +131,12 @@ public final class MessageDbService {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS message_reactions (
                         id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id      VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type          VARCHAR(10) NOT NULL,
-                        chat_key           VARCHAR(20) NOT NULL,
+                        chat_key           VARCHAR(80) NOT NULL,
                         target_packet_id   INT NOT NULL,
                         reaction_packet_id INT DEFAULT 0,
-                        from_node_id       VARCHAR(20) NOT NULL,
+                        from_node_id       VARCHAR(80) NOT NULL,
                         emoji              VARCHAR(16) NOT NULL,
                         timestamp          BIGINT NOT NULL,
                         outgoing           BOOLEAN NOT NULL,
@@ -155,9 +157,9 @@ public final class MessageDbService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_read_counts (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type     VARCHAR(10) NOT NULL,
-                        chat_key      VARCHAR(20) NOT NULL,
+                        chat_key      VARCHAR(80) NOT NULL,
                         read_count    INT NOT NULL DEFAULT 0,
                         PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
@@ -165,9 +167,9 @@ public final class MessageDbService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_threads (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type     VARCHAR(10) NOT NULL,
-                        chat_key      VARCHAR(20) NOT NULL,
+                        chat_key      VARCHAR(80) NOT NULL,
                         PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
                     """);
@@ -175,17 +177,17 @@ public final class MessageDbService {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS traceroute_results (
                         id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id          VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id          VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type              VARCHAR(10) NOT NULL DEFAULT '',
-                        chat_key               VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_key               VARCHAR(80) NOT NULL DEFAULT '',
                         source                 VARCHAR(80) NOT NULL DEFAULT '',
                         request_id             VARCHAR(120) NOT NULL DEFAULT '',
                         script_id              BIGINT DEFAULT 0,
                         target_node_num        BIGINT DEFAULT 0,
-                        target_node_id         VARCHAR(20),
+                        target_node_id         VARCHAR(80),
                         target_name            VARCHAR(120),
                         response_from_node_num BIGINT DEFAULT 0,
-                        response_from_node_id  VARCHAR(20),
+                        response_from_node_id  VARCHAR(80),
                         route_data             BLOB,
                         formatted_text         CLOB,
                         timestamp              BIGINT NOT NULL
@@ -213,7 +215,7 @@ public final class MessageDbService {
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
-                UPDATE messages SET status = ?, error_reason = ? WHERE packet_id = ? AND packet_id <> 0
+                UPDATE messages SET status = ?, error_reason = ? WHERE packet_id = ? AND packet_id <> 0 AND owner_node_id NOT LIKE 'mc:%'
                 """);
 
             insertReactionStmt = dbConnection.prepareStatement("""
@@ -264,7 +266,7 @@ public final class MessageDbService {
             ps.setString(2, "STALE");
             int updatedMessages = ps.executeUpdate();
 
-            int updatedReactions = 0;
+            int updatedReactions;
             try (PreparedStatement reactionPs = dbConnection.prepareStatement(
                     "UPDATE message_reactions SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
                 reactionPs.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
@@ -389,7 +391,7 @@ public final class MessageDbService {
                   AND channel_idx = ? AND outgoing = ?
                   AND ((from_node_id = ?) OR (from_node_id IS NULL AND ? IS NULL))
                   AND ((to_node_id = ?) OR (to_node_id IS NULL AND ? IS NULL))
-                ORDER BY id ASC LIMIT 1
+                ORDER BY id LIMIT 1
                 """)) {
             ps.setString(1, ownerNodeId);
             ps.setString(2, chatType);
@@ -618,9 +620,16 @@ public final class MessageDbService {
         return null;
     }
 
-    /**
-     * Updates message delivery status by packetId.
-     */
+    /** Updates one persisted message; protocol ACK identifiers are not database keys. */
+    public synchronized void updateStatusById(long id, String owner, MeshMessage.DeliveryStatus status, String error) {
+        if (dbConnection == null || id <= 0) throw new IllegalStateException("Message is not persisted");
+        try (var ps = dbConnection.prepareStatement(
+                "UPDATE messages SET status=?, error_reason=? WHERE id=? AND owner_node_id=?")) {
+            ps.setString(1, status.name()); ps.setString(2, error); ps.setLong(3, id); ps.setString(4, owner);
+            if (ps.executeUpdate() != 1) throw new IllegalStateException("Message owner mismatch");
+        } catch (SQLException e) { throw new IllegalStateException("Cannot persist message status", e); }
+    }
+
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {
         if (packetId == 0) { return; }
         if (updateStatusStmt == null) {
@@ -721,7 +730,7 @@ public final class MessageDbService {
             SELECT * FROM (
                 SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                 ORDER BY id DESC LIMIT ?
-            ) ORDER BY id ASC
+            ) ORDER BY id
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -756,7 +765,7 @@ public final class MessageDbService {
             SELECT * FROM (
                 SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id < ?
                 ORDER BY id DESC LIMIT ?
-            ) ORDER BY id ASC
+            ) ORDER BY id
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -807,8 +816,8 @@ public final class MessageDbService {
         List<MeshMessage> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = limit > 0
-                ? "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC LIMIT ?"
-                : "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
+                ? "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id LIMIT ?"
+                : "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -863,42 +872,6 @@ public final class MessageDbService {
     // ═══════════════════════════════════════════════════════════
     // Reads: search and metadata.
     // ═══════════════════════════════════════════════════════════
-
-    /**
-     * Loads recent system messages whose text starts with the given prefix.
-     *
-     * @param textPrefix  system-message text prefix
-     * @param limit       maximum number of messages
-     * @param ownerNodeId owner device nodeId
-     * @return messages from newest to oldest
-     */
-    public List<MeshMessage> loadRecentSystemMessagesByPrefix(String textPrefix, int limit, String ownerNodeId) {
-        List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null || textPrefix == null || textPrefix.isBlank() || limit <= 0) {
-            return result;
-        }
-        String sql = """
-            SELECT * FROM messages
-            WHERE owner_node_id = ?
-              AND system_msg = TRUE
-              AND CAST(text AS VARCHAR) LIKE ?
-            ORDER BY id DESC
-            LIMIT ?
-            """;
-        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
-            ps.setString(2, textPrefix + "%");
-            ps.setInt(3, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(readMessage(rs));
-                }
-            }
-        } catch (SQLException e) {
-            log.error("Failed to load recent system messages by prefix (limit={})", limit, e);
-        }
-        return result;
-    }
 
     /**
      * Loads recent saved traceroute results.
@@ -1506,7 +1479,7 @@ public final class MessageDbService {
                       WHERE other_map.WORDID IN (%s)
                         AND other_map.ROWID = ft_map.ROWID
                   )
-                    """.formatted(placeholders(searchQuery.wordIdGroups().get(i).size())));
+                  """.formatted(placeholders(searchQuery.wordIdGroups().get(i).size())));
         }
         return sql.toString();
     }
@@ -1796,7 +1769,7 @@ public final class MessageDbService {
                 SELECT * FROM messages
                 WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                   AND packet_id = ? AND packet_id <> 0
-                ORDER BY id ASC LIMIT 1
+                ORDER BY id LIMIT 1
                 """)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -1861,7 +1834,7 @@ public final class MessageDbService {
                 WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                   AND reply_id <> 0
                   AND (reply_text IS NULL OR LENGTH(reply_text) = 0)
-                ORDER BY id ASC
+                ORDER BY id
                 """)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -1932,7 +1905,7 @@ public final class MessageDbService {
             SELECT * FROM message_reactions
             WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
               AND target_packet_id IN (%s)
-            ORDER BY target_packet_id ASC, id ASC
+            ORDER BY target_packet_id, id
             """.formatted(placeholders);
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -1972,8 +1945,8 @@ public final class MessageDbService {
         List<MessageReaction> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = limit > 0
-                ? "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC LIMIT ?"
-                : "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
+                ? "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id LIMIT ?"
+                : "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
