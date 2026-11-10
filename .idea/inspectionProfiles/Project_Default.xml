@@ -1,13 +1,12 @@
 <component name="InspectionProjectProfileManager">
   <profile version="1.0">
     <option name="myName" value="Project Default" />
-    <inspection_tool class="JvmTaintAnalysis" enabled="true" level="WARNING" enabled_by_default="true" />
-    <!-- GitHub READMEs intentionally use legacy alignment and scaled screenshot thumbnails. -->
-    <inspection_tool class="HtmlDeprecatedAttribute" enabled="true" level="WARNING" enabled_by_default="true">
-      <scope name="GitHub READMEs" level="WARNING" enabled="false" />
-    </inspection_tool>
     <inspection_tool class="CheckImageSize" enabled="true" level="WARNING" enabled_by_default="true">
       <scope name="GitHub READMEs" level="WARNING" enabled="false" />
     </inspection_tool>
+    <inspection_tool class="HtmlDeprecatedAttribute" enabled="true" level="WARNING" enabled_by_default="true">
+      <scope name="GitHub READMEs" level="WARNING" enabled="false" />
+    </inspection_tool>
+    <inspection_tool class="JvmTaintAnalysis" enabled="true" level="WARNING" enabled_by_default="true" />
   </profile>
 </component>
