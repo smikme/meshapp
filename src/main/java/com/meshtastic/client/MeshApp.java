@@ -218,7 +218,7 @@ public class MeshApp extends Application {
             savePrimaryWindowStateIfPossible();
             AppTrayManager.getInstance().handleCloseRequest(e);
         });
-        stage.setOnHiding(e -> saveWindowState(stage, rootPane));
+        stage.setOnHiding(_ -> saveWindowState(stage, rootPane));
 
         startUiWatchdog();
         handlePendingCrashLog(stage);
@@ -309,7 +309,7 @@ public class MeshApp extends Application {
 
         stage
             .maximizedProperty()
-            .addListener((obs, wasMaximized, isMaximized) -> {
+            .addListener((_, _, isMaximized) -> {
                 if (!isMaximized) {
                     return;
                 }
@@ -324,7 +324,7 @@ public class MeshApp extends Application {
 
         stage
             .iconifiedProperty()
-            .addListener((obs, wasIconified, isIconified) -> {
+            .addListener((_, _, isIconified) -> {
                 if (isIconified) {
                     return;
                 }
@@ -403,7 +403,7 @@ public class MeshApp extends Application {
         AppPreferences.init();
         if (singleInstanceDisabled) {
             log.info("Single-instance guard disabled by launch option");
-        } else if (!acquireSingleInstanceGuard()) {
+        } else if (shouldExitForExistingInstance()) {
             return;
         }
         if (
@@ -468,25 +468,23 @@ public class MeshApp extends Application {
     }
 
     /**
-     * Acquires the cross-process single-instance guard before JavaFX starts.
-     * If an active instance already exists, it receives a window-activation
-     * command and the current process exits without showing UI.
- *
-     * @return {@code true} when the current process may continue startup
+     * Activates an existing instance or acquires the single-instance guard before JavaFX starts.
+     *
+     * @return {@code true} when another instance is running and this process should stop startup
      */
-    public static boolean acquireSingleInstanceGuard() {
+    public static boolean shouldExitForExistingInstance() {
         synchronized (SINGLE_INSTANCE_LOCK) {
             if (singleInstanceGuard != null) {
-                return true;
+                return false;
             }
             try {
                 Optional<SingleInstanceGuard> guard =
                     SingleInstanceGuard.acquire(resolveAppDirectory());
                 if (guard.isEmpty()) {
-                    return false;
+                    return true;
                 }
                 singleInstanceGuard = guard.get();
-                return true;
+                return false;
             } catch (IOException e) {
                 // Do not block startup because ~/.meshapp is unavailable; letting
                 // the user open the application is more important here.
@@ -494,7 +492,7 @@ public class MeshApp extends Application {
                     "Failed to initialize single-instance guard; continuing without duplicate launch protection",
                     e
                 );
-                return true;
+                return false;
             }
         }
     }

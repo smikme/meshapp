@@ -247,13 +247,13 @@ public final class AppTrayManager {
 
     private void installStageHooks(Stage stage) {
         if (OsDetect.isMacOs()) {
-            stage.showingProperty().addListener((obs, wasShowing, isShowing) -> {
+            stage.showingProperty().addListener((_, _, isShowing) -> {
                 if (!isShowing || exiting.get()) {
                     return;
                 }
                 Platform.runLater(this::restoreAuxiliaryWindows);
             });
-            stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {
+            stage.iconifiedProperty().addListener((_, _, isIconified) -> {
                 if (isIconified || suppressIconifiedHook || exiting.get()) {
                     return;
                 }
@@ -263,7 +263,7 @@ public final class AppTrayManager {
                 return;
             }
         }
-        stage.iconifiedProperty().addListener((obs, wasIconified, isIconified) -> {
+        stage.iconifiedProperty().addListener((_, _, isIconified) -> {
             if (!isIconified || suppressIconifiedHook || exiting.get()) {
                 return;
             }
@@ -293,7 +293,7 @@ public final class AppTrayManager {
             if (!desktop.isSupported(Desktop.Action.APP_EVENT_REOPENED)) {
                 return;
             }
-            macAppReopenedListener = event -> restoreWindow();
+            macAppReopenedListener = _ -> restoreWindow();
             desktop.addAppEventListener(macAppReopenedListener);
         } catch (Throwable t) {
             macAppReopenedListener = null;

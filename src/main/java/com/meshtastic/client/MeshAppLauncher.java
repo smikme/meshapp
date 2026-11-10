@@ -35,7 +35,7 @@ public final class MeshAppLauncher {
             return;
         }
         AppPreferences.init();
-        if (!MeshApp.isSingleInstanceGuardDisabled(args) && !MeshApp.acquireSingleInstanceGuard()) {
+        if (!MeshApp.isSingleInstanceGuardDisabled(args) && MeshApp.shouldExitForExistingInstance()) {
             return;
         }
         SessionCrashLogManager.prepareForLaunch();

@@ -90,8 +90,8 @@ class AppTrayManagerTest {
         AtomicBoolean hiddenDuringAction = new AtomicBoolean();
         onFxThread(() -> {
             showWindow(style);
-            stage.setOnHiding(event -> hiddenDuringAction.set(handlingAction.get()));
-            minimizeButton.setOnAction(event -> {
+            stage.setOnHiding(_ -> hiddenDuringAction.set(handlingAction.get()));
+            minimizeButton.setOnAction(_ -> {
                 handlingAction.set(true);
                 try {
                     manager.requestMinimize();
@@ -376,7 +376,7 @@ class AppTrayManagerTest {
     private void showWindow(StageStyle style) {
         stage = new Stage(style);
         minimizeButton = new Button("Minimize");
-        minimizeButton.setOnAction(event -> manager.requestMinimize());
+        minimizeButton.setOnAction(_ -> manager.requestMinimize());
         stage.setScene(new Scene(new StackPane(minimizeButton), 320, 200));
         stage.setOnCloseRequest(manager::handleCloseRequest);
         stage.show();
