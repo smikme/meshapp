@@ -17,6 +17,9 @@ import com.meshtastic.client.service.ChatHistoryLoader;
 import com.meshtastic.client.service.DatabaseProvider;
 import javafx.application.Platform;
 import javafx.scene.Scene;
+import javafx.scene.control.TextField;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.stage.Stage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FormChatViewportTest {
@@ -625,12 +629,20 @@ class FormChatViewportTest {
         fx(() -> form.openChat(channel(0)));
         drain();
         fx(() -> {
-            form.detailPane.fireEvent(new javafx.scene.input.KeyEvent(javafx.scene.input.KeyEvent.KEY_PRESSED, "", "",
-                    javafx.scene.input.KeyCode.F, false, true, false, false));
-            var field = (javafx.scene.control.TextField) form.lookup(".chat-message-search-field");
+            // JavaFX uses Command as the shortcut modifier on macOS and Control elsewhere.
+            boolean mac = System.getProperty("os.name", "").startsWith("Mac");
+            KeyEvent openSearch = new KeyEvent(KeyEvent.KEY_PRESSED, "", "",
+                    KeyCode.F, false, !mac, false, mac);
+            assertTrue(openSearch.isShortcutDown(), "search must use the platform shortcut modifier");
+            form.detailPane.fireEvent(openSearch);
+            var controls = form.lookup(".chat-message-search-controls");
+            assertNotNull(controls);
+            assertTrue(controls.isVisible(), "Ctrl/Cmd+F must open the search panel before entering the query");
+            var field = (TextField) form.lookup(".chat-message-search-field");
+            assertNotNull(field);
             field.setText("unique_history_search_target");
-            field.fireEvent(new javafx.scene.input.KeyEvent(javafx.scene.input.KeyEvent.KEY_PRESSED, "", "",
-                    javafx.scene.input.KeyCode.ENTER, false, false, false, false));
+            field.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "",
+                    KeyCode.ENTER, false, false, false, false));
         });
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         boolean[] found = {false};
