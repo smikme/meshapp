@@ -18,7 +18,7 @@ public final class MeshAppLauncher {
 
     private MeshAppLauncher() {}
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         if (NativeAccessRelauncher.relaunchIfRequired(args)) {
             return;
         }
