@@ -211,12 +211,12 @@ public class MeshApp extends Application {
         NativeWindowHelper.applyNativeEffects(stage, isDark);
         installWindowStateGuards(stage, rootPane);
 
-        // Save window state on close. setOnHiding fires for both stage.close()
-        // from the custom title bar and native window closing.
+        // Custom and native close buttons share this path, including state saving
+        // when macOS hides the native window without changing Stage.showing.
         stage.setOnCloseRequest(e -> {
             e.consume();
             savePrimaryWindowStateIfPossible();
-            AppTrayManager.getInstance().exitApplication();
+            AppTrayManager.getInstance().handleCloseRequest(e);
         });
         stage.setOnHiding(e -> saveWindowState(stage, rootPane));
 

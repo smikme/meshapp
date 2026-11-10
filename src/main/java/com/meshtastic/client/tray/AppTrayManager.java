@@ -6,12 +6,14 @@ import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.utils.AppPreferences;
 import javafx.application.Platform;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.awt.Desktop;
 import java.awt.desktop.AppReopenedListener;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /**
  * Single control point for the tray icon/status item and minimize-to-tray behavior.
@@ -26,11 +28,14 @@ public final class AppTrayManager {
     private static final AppTrayManager INSTANCE = new AppTrayManager();
 
     private final AtomicBoolean exiting = new AtomicBoolean(false);
+    private final Supplier<AppTrayService> serviceFactory;
+    private final Runnable shutdownAction;
 
     private AppTrayService service = new NoOpTrayService();
     private Stage primaryStage;
     private boolean initialized;
     private boolean trayAvailable;
+    private boolean hideToTrayPending;
     private boolean suppressIconifiedHook;
     private boolean macWindowHiddenToTray;
     private AppReopenedListener macAppReopenedListener;
@@ -50,7 +55,7 @@ public final class AppTrayManager {
         service = new NoOpTrayService();
 
         try {
-            service = createService();
+            service = serviceFactory.get();
             trayAvailable = service.install(this::restoreWindow, this::exitApplication);
         } catch (Throwable t) {
             trayAvailable = false;
@@ -58,6 +63,9 @@ public final class AppTrayManager {
             log.error("Failed to initialize application tray", t);
         }
 
+        // The tray owns application lifetime even while no JavaFX windows are visible.
+        // Keep this policy stable across hide/show cycles; explicit Exit still calls Platform.exit().
+        runOnFxThread(() -> Platform.setImplicitExit(!trayAvailable));
         installStageHooks(stage);
         installMacAppReopenedHandler();
         initialized = true;
@@ -70,6 +78,7 @@ public final class AppTrayManager {
         trayAvailable = false;
         primaryStage = null;
         initialized = false;
+        hideToTrayPending = false;
         suppressIconifiedHook = false;
         macWindowHiddenToTray = false;
         macAppReopenedListener = null;
@@ -79,6 +88,23 @@ public final class AppTrayManager {
 
     public boolean isAvailable() {
         return trayAvailable;
+    }
+
+    /** Handles the primary window's close button or a system close request. */
+    public void handleCloseRequest(WindowEvent event) {
+        // The default close handler would hide the stage synchronously and bypass
+        // both the deferred tray transition and explicit application shutdown.
+        event.consume();
+        runOnFxThread(() -> {
+            if (exiting.get()) {
+                return;
+            }
+            if (shouldMinimizeToTray()) {
+                hideToTray();
+            } else {
+                exitApplication();
+            }
+        });
     }
 
     public void requestMinimize() {
@@ -96,45 +122,52 @@ public final class AppTrayManager {
     }
 
     public void hideToTray() {
-        if (!shouldMinimizeToTray()) {
-            return;
-        }
-
-        Stage stage = primaryStage;
-        if (stage == null) {
-            return;
-        }
-
         runOnFxThread(() -> {
-            if (!trayAvailable || exiting.get()) {
+            Stage stage = primaryStage;
+            if (stage == null || !shouldMinimizeToTray() || exiting.get() || hideToTrayPending) {
                 return;
             }
 
-            suppressIconifiedHook = true;
-            try {
-                Platform.setImplicitExit(false);
-                PacketMonitorWindow.hideWindowIfOpen();
-                if (OsDetect.isMacOs()) {
-                    if (AppPreferences.isDisableEffectsEffective()) {
-                        if (stage.isShowing()) {
-                            stage.hide();
-                        }
-                    } else {
-                        MacOsNativeTrayService.hideWindow(stage);
-                    }
-                    macWindowHiddenToTray = true;
-                } else {
-                    if (stage.isIconified()) {
-                        stage.setIconified(false);
-                    }
+            hideToTrayPending = true;
+            // Stage.hide() disposes the native window. Let the current button/native
+            // event finish before destroying the window that is dispatching it.
+            Platform.runLater(() -> hideWindowToTray(stage));
+        });
+    }
+
+    private void hideWindowToTray(Stage stage) {
+        if (stage != primaryStage || !hideToTrayPending) {
+            return;
+        }
+        hideToTrayPending = false;
+        if (!shouldMinimizeToTray() || exiting.get()) {
+            return;
+        }
+
+        suppressIconifiedHook = true;
+        try {
+            Platform.setImplicitExit(false);
+            PacketMonitorWindow.hideWindowIfOpen();
+            if (OsDetect.isMacOs()) {
+                if (AppPreferences.isDisableEffectsEffective()) {
                     if (stage.isShowing()) {
                         stage.hide();
                     }
+                } else {
+                    MacOsNativeTrayService.hideWindow(stage);
                 }
-            } finally {
-                suppressIconifiedHook = false;
+                macWindowHiddenToTray = true;
+            } else {
+                if (stage.isIconified()) {
+                    stage.setIconified(false);
+                }
+                if (stage.isShowing()) {
+                    stage.hide();
+                }
             }
-        });
+        } finally {
+            suppressIconifiedHook = false;
+        }
     }
 
     public void restoreWindow() {
@@ -144,13 +177,13 @@ public final class AppTrayManager {
         }
 
         runOnFxThread(() -> {
+            hideToTrayPending = false;
             if (exiting.get()) {
                 return;
             }
 
             suppressIconifiedHook = true;
             try {
-                Platform.setImplicitExit(true);
                 if (OsDetect.isMacOs() && macWindowHiddenToTray) {
                     if (AppPreferences.isDisableEffectsEffective()) {
                         if (stage.isIconified()) {
@@ -200,6 +233,10 @@ public final class AppTrayManager {
         if (!exiting.compareAndSet(false, true)) {
             return;
         }
+        shutdownAction.run();
+    }
+
+    private static void shutdownApplication() {
         scheduleHardExitFallback();
         runOnFxThread(() -> {
             PacketMonitorWindow.closeWindowIfOpen();
@@ -233,7 +270,7 @@ public final class AppTrayManager {
             if (!shouldMinimizeToTray()) {
                 return;
             }
-            Platform.runLater(this::hideToTray);
+            hideToTray();
         });
     }
 
@@ -279,7 +316,7 @@ public final class AppTrayManager {
         return trayAvailable && AppPreferences.isMinimizeToTray();
     }
 
-    private AppTrayService createService() {
+    private static AppTrayService createService() {
         return switch (OsDetect.current()) {
             case MACOS -> new MacOsNativeTrayService();
             case WINDOWS -> new AwtAppTrayService();
@@ -288,7 +325,7 @@ public final class AppTrayManager {
         };
     }
 
-    private void runOnFxThread(Runnable action) {
+    private static void runOnFxThread(Runnable action) {
         if (Platform.isFxApplicationThread()) {
             action.run();
         } else {
@@ -296,7 +333,7 @@ public final class AppTrayManager {
         }
     }
 
-    private void scheduleHardExitFallback() {
+    private static void scheduleHardExitFallback() {
         Thread fallbackThread = new Thread(() -> {
             try {
                 Thread.sleep(HARD_EXIT_FALLBACK_DELAY_MS);
@@ -311,7 +348,14 @@ public final class AppTrayManager {
         fallbackThread.start();
     }
 
-    private AppTrayManager() {}
+    private AppTrayManager() {
+        this(AppTrayManager::createService, AppTrayManager::shutdownApplication);
+    }
+
+    AppTrayManager(Supplier<AppTrayService> serviceFactory, Runnable shutdownAction) {
+        this.serviceFactory = serviceFactory;
+        this.shutdownAction = shutdownAction;
+    }
 
     private static final class NoOpTrayService implements AppTrayService {
         @Override

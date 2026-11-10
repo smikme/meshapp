@@ -29,6 +29,8 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -150,7 +152,10 @@ public class RootPane extends BorderPane {
 
         // Traffic light buttons.
         Button closeBtn = createWindowButton("window-btn-close");
-        closeBtn.setOnAction(e -> AppTrayManager.getInstance().exitApplication());
+        closeBtn.setOnAction(e -> {
+            Window window = getScene().getWindow();
+            window.fireEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSE_REQUEST));
+        });
 
         Button minimizeBtn = createWindowButton("window-btn-minimize");
         minimizeBtn.setOnAction(e -> AppTrayManager.getInstance().requestMinimize());
