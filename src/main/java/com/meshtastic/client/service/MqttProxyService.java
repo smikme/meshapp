@@ -189,7 +189,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                 connectInitially(mqttClient, config);
             } catch (Exception e) {
                 log.error("Failed to start MQTT proxy for '{}'", connectionName, e);
-                stopClient(true);
+                stopClient();
             }
         }
     }
@@ -262,7 +262,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             }
             closed = true;
         }
-        stopClient(true);
+        stopClient();
         logDownlinkStats(true);
         var write = activeDownlinkWrite.getAndSet(null);
         if (write != null) write.cancel(false);
@@ -410,7 +410,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         return options;
     }
 
-    private void stopClient(boolean removeListener) {
+    private void stopClient() {
         MqttAsyncClient mqttClient;
         synchronized (lifecycleLock) {
             mqttClient = client;
@@ -420,7 +420,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             if (subscriptionRetry != null) subscriptionRetry.cancel(false);
             localEchoSuppressor.clear();
             downlinkDuplicateSuppressor.clear();
-            if (removeListener && listenerRegistered) {
+            if (listenerRegistered) {
                 protocolHandler.removeListener(this);
                 listenerRegistered = false;
             }
@@ -877,27 +877,6 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         DownlinkDuplicateSuppressor(long ttlMillis, int maxEntries) {
             this.ttlMillis = Math.max(1L, ttlMillis);
             this.maxEntries = Math.max(1, maxEntries);
-        }
-
-        /**
-         * Remembers a packet key and reports whether it has already been seen recently.
-         *
-         * @param key packet identity produced by the downlink filter
-         * @return {@code true} when the packet is a recent duplicate
-         */
-        boolean rememberIfDuplicate(DownlinkPacketKey key) {
-            if (key == null) {
-                return false;
-            }
-            synchronized (recentPackets) {
-                long nowMillis = System.currentTimeMillis();
-                purgeExpiredPackets(nowMillis);
-                if (recentKeys.contains(key)) {
-                    return true;
-                }
-                remember(key, nowMillis);
-                return false;
-            }
         }
 
         /** Pending writes do not expire while waiting for the bounded worker. */

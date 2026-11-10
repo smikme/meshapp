@@ -632,12 +632,12 @@ abstract class FormChatData extends FormChatRequests {
                 preview != null ? preview : "",
                 confirmed -> {
                     if (!confirmed) { return; }
-                    deleteMessageFromCurrentChat(msg, bubbleRow);
+                    deleteMessageFromCurrentChat(msg);
                 }
         );
     }
 
-    private void deleteMessageFromCurrentChat(MeshMessage msg, HBox bubbleRow) {
+    private void deleteMessageFromCurrentChat(MeshMessage msg) {
         MessageDbService.getInstance().deleteMessage(msg.getDbId());
         selectedMessageDbIds.remove(msg.getDbId());
         loadedMessages.removeIf(loaded -> loaded.getDbId() == msg.getDbId());

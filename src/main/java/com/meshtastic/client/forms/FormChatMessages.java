@@ -17,7 +17,6 @@ import com.meshtastic.client.utils.AppPreferences;
 
 import javafx.application.Platform;
 import javafx.scene.control.Label;
-import javafx.scene.layout.HBox;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -108,15 +107,17 @@ abstract class FormChatMessages extends FormChatUi {
                 currentChatType(), currentChatKey(), historyWindowGeneration), direction, cursor, PAGE_SIZE);
     }
 
-    private boolean currentHistoryRequest(ChatHistoryLoader.Request request) {
+    private boolean isStaleHistoryRequest(ChatHistoryLoader.Request request) {
         var scope = request.scope();
-        return selectedChat != null && scope.generation() == historyWindowGeneration
-                && (remoteRpcState != null || historySource == MessageDbService.getIfInitialized())
-                && Objects.equals(scope.connectionId(), boundConnectionId)
-                && Objects.equals(scope.owner(), currentOwnerNodeId())
-                && Objects.equals(scope.type(), currentChatType()) && Objects.equals(scope.key(), currentChatKey());
+        return selectedChat == null || scope.generation() != historyWindowGeneration
+                || (remoteRpcState == null && historySource != MessageDbService.getIfInitialized())
+                || !Objects.equals(scope.connectionId(), boundConnectionId)
+                || !Objects.equals(scope.owner(), currentOwnerNodeId())
+                || !Objects.equals(scope.type(), currentChatType()) || !Objects.equals(scope.key(), currentChatKey());
     }
 
+    // The connection manager owns the shared RPC client; this request must not close it.
+    @SuppressWarnings("resource")
     protected CompletableFuture<ChatHistoryLoader.Page> fetchHistoryPage(ChatHistoryLoader.Request request) {
         if (remoteRpcState == null) return historyLoader.load(request);
         boolean before = request.direction() == ChatHistoryLoader.Direction.BEFORE;
@@ -148,7 +149,7 @@ abstract class FormChatMessages extends FormChatUi {
         pending.future = fetchHistoryPage(request);
         historyRequests.put(request, pending);
         pending.future.whenComplete((page, error) -> Platform.runLater(() -> {
-            if (!currentHistoryRequest(request) || historyRequests.get(request) != pending) return;
+            if (isStaleHistoryRequest(request) || historyRequests.get(request) != pending) return;
             historyRequests.remove(request);
             if (error != null) {
                 loadingInitialHistory = false;
@@ -261,7 +262,7 @@ abstract class FormChatMessages extends FormChatUi {
                 .thenCompose(result -> historyLoader.submit(() -> RemoteChatJson.parseMessages(result)))
                 .whenComplete((messages, error) -> Platform.runLater(() -> {
                     try {
-                        if (!isRemoteChatRequestCurrent(rpcState, requestChat, requestGeneration)) {
+                        if (isStaleRemoteChatRequest(rpcState, requestChat, requestGeneration)) {
                             return;
                         }
                         loadingInitialHistory = false;
@@ -376,7 +377,7 @@ abstract class FormChatMessages extends FormChatUi {
         historyRequests.put(request, pending);
         if (before) loadingOlderMessages = true; else loadingNewerMessages = true;
         pending.future.whenComplete((page, error) -> Platform.runLater(() -> {
-            if (!currentHistoryRequest(request) || historyRequests.get(request) != pending) return;
+            if (isStaleHistoryRequest(request) || historyRequests.get(request) != pending) return;
             historyRequests.remove(request);
             if (before) loadingOlderMessages = false; else loadingNewerMessages = false;
             if (request.cursor() != (before ? oldestLoadedDbId : newestLoadedDbId)) return;
@@ -584,7 +585,7 @@ abstract class FormChatMessages extends FormChatUi {
                                 currentChatType(), currentChatKey(), PAGE_SIZE, 0, latestKnownDbId),
                         REMOTE_RPC_TIMEOUT)
                 .whenComplete((result, error) -> Platform.runLater(() -> {
-                    if (!isRemoteChatRequestCurrent(rpcState, requestChat, requestGeneration)) {
+                    if (isStaleRemoteChatRequest(rpcState, requestChat, requestGeneration)) {
                         return;
                     }
                     if (error != null) {
@@ -605,12 +606,12 @@ abstract class FormChatMessages extends FormChatUi {
                 }));
     }
 
-    private boolean isRemoteChatRequestCurrent(RemoteRpcState rpcState, ChatItem requestChat, long requestGeneration) {
-        return requestGeneration == chatRequestGeneration
-                && rpcState == remoteRpcState
-                && requestChat != null
-                && selectedChat != null
-                && chatItemMatches(selectedChat, requestChat);
+    private boolean isStaleRemoteChatRequest(RemoteRpcState rpcState, ChatItem requestChat, long requestGeneration) {
+        return requestGeneration != chatRequestGeneration
+                || rpcState != remoteRpcState
+                || requestChat == null
+                || selectedChat == null
+                || !chatItemMatches(selectedChat, requestChat);
     }
 
     private boolean applyMessageChangeEvent(MessageChangeEvent event) {
@@ -1052,18 +1053,6 @@ abstract class FormChatMessages extends FormChatUi {
         synchronizeMessageViewport();
     }
 
-    protected void prependLoadedMessageRow(MeshMessage msg) {
-        loadedMessages.addFirst(msg);
-        synchronizeMessageViewport();
-    }
-
-    protected void prependOlderMessages(List<MeshMessage> older) {
-        attachReactions(older);
-        loadedMessages.addAll(0, older);
-        recalcLoadedBounds();
-        synchronizeMessageViewport();
-    }
-
     protected void appendNewerMessages(List<MeshMessage> newer) {
         attachReactions(newer);
         Set<Long> existing = loadedMessages.stream().map(MeshMessage::getDbId).collect(java.util.stream.Collectors.toSet());
@@ -1073,30 +1062,16 @@ abstract class FormChatMessages extends FormChatUi {
     }
 
     protected void trimLoadedWindowFromTopIfNeeded() {
-        trimLoadedWindowIfNeeded(true);
-    }
-
-    protected void trimLoadedWindowFromBottomIfNeeded() {
-        trimLoadedWindowIfNeeded(false);
-    }
-
-    protected void trimLoadedWindowIfNeeded(boolean trimFromTop) {
         int excess = loadedMessages.size() - MAX_LOADED_MESSAGES;
         if (excess <= 0) {
             return;
         }
 
-        if (trimFromTop) loadedMessages.subList(0, excess).clear();
-        else loadedMessages.subList(loadedMessages.size() - excess, loadedMessages.size()).clear();
+        loadedMessages.subList(0, excess).clear();
         // Selection belongs to message ids, never to recycled visual cells.
         synchronizeMessageViewport();
 
-        if (trimFromTop) {
-            allHistoryLoaded = false;
-            recalcLoadedBounds();
-            return;
-        }
-        allNewerHistoryLoaded = false;
+        allHistoryLoaded = false;
         recalcLoadedBounds();
     }
 
@@ -1629,10 +1604,6 @@ abstract class FormChatMessages extends FormChatUi {
             return;
         }
         messageContainer.scrollToMessage(dbId, anchorOffset - 12);
-    }
-
-    protected void alignMessageToViewport(long dbId, double anchorOffset) {
-        messageContainer.scrollToMessage(dbId, anchorOffset);
     }
 
     /**

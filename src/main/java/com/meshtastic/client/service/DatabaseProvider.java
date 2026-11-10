@@ -39,7 +39,7 @@ public final class DatabaseProvider {
     private static final DateTimeFormatter RECOVERY_TIMESTAMP_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault());
     private static final RecoveryExecutor DIRECT_RECOVERY_EXECUTOR =
-            (dbFile, task) -> task.run((step, path) -> {});
+            (_, task) -> task.run((_, _) -> {});
 
     private static Connection connection;
     private static final java.util.Set<Connection> historyReaders = new java.util.HashSet<>();
@@ -204,6 +204,8 @@ public final class DatabaseProvider {
         }
 
         try (Statement stmt = activeConnection.createStatement()) {
+            // The active H2 profile is selected at runtime, not an IDE data source.
+            //noinspection SqlNoDataSourceInspection
             stmt.execute("DROP ALL OBJECTS");
         }
         log.info("All database objects dropped by explicit reset request");

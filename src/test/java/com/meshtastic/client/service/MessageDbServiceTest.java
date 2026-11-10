@@ -16,6 +16,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -106,14 +107,14 @@ class MessageDbServiceTest {
     }
 
     @Test
-    void unavailableHistoryCompletesExceptionallyAndNeverMasqueradesAsEndOfHistory() throws Exception {
+    void unavailableHistoryCompletesExceptionallyAndNeverMasqueradesAsEndOfHistory() {
         var scope = new ChatHistoryLoader.Scope("connection", "!owner", "channel", "0", 1);
         service.prepareForDatabaseReset();
         try (var loader = new ChatHistoryLoader()) {
             var future = loader.load(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.LATEST, 0, 50));
             var error = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
                     () -> future.get(5, java.util.concurrent.TimeUnit.SECONDS));
-            assertTrue(error.getCause() instanceof java.sql.SQLException);
+            assertInstanceOf(java.sql.SQLException.class, error.getCause());
         }
     }
 
@@ -156,6 +157,8 @@ class MessageDbServiceTest {
     }
 
     @Test
+    // Reset intentionally clears the whole messages table in this test's temporary database.
+    @SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve", "SqlWithoutWhere"})
     void unreadCountCacheDoesNotSurviveDatabaseReset() throws Exception {
         service.save(message("before reset", 1, 10), "channel", "0", "!a");
         assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!a"));
@@ -560,9 +563,15 @@ class MessageDbServiceTest {
         service.save(ownerB, "channel", "0", "!ownerB");
         service.save(channelOne, "channel", "1", "!ownerA");
 
-        assertEquals("owner-a", service.findByPacketId(888, "channel", "0", "!ownerA").getText());
-        assertEquals("owner-b", service.findByPacketId(888, "channel", "0", "!ownerB").getText());
-        assertEquals("channel-one", service.findByPacketId(888, "channel", "1", "!ownerA").getText());
+        MeshMessage foundOwnerA = service.findByPacketId(888, "channel", "0", "!ownerA");
+        MeshMessage foundOwnerB = service.findByPacketId(888, "channel", "0", "!ownerB");
+        MeshMessage foundChannelOne = service.findByPacketId(888, "channel", "1", "!ownerA");
+        assertNotNull(foundOwnerA);
+        assertNotNull(foundOwnerB);
+        assertNotNull(foundChannelOne);
+        assertEquals("owner-a", foundOwnerA.getText());
+        assertEquals("owner-b", foundOwnerB.getText());
+        assertEquals("channel-one", foundChannelOne.getText());
     }
 
     @Test
@@ -583,8 +592,9 @@ class MessageDbServiceTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals("quoted text", loadedReply.getReplyText());
-        assertEquals("quoted text",
-                service.findByPacketId(902, "channel", "0", "!owner").getReplyText());
+        MeshMessage persistedReply = service.findByPacketId(902, "channel", "0", "!owner");
+        assertNotNull(persistedReply);
+        assertEquals("quoted text", persistedReply.getReplyText());
     }
 
     @Test
@@ -620,9 +630,12 @@ class MessageDbServiceTest {
         service.save(unresolvedReply, "channel", "0", "!owner");
 
         assertEquals(1, service.backfillMissingReplyTexts("channel", "0", "!owner"));
-        assertEquals("old quoted",
-                service.findByPacketId(908, "channel", "0", "!owner").getReplyText());
-        assertNull(service.findByPacketId(909, "channel", "0", "!owner").getReplyText());
+        MeshMessage persistedReply = service.findByPacketId(908, "channel", "0", "!owner");
+        MeshMessage persistedUnresolvedReply = service.findByPacketId(909, "channel", "0", "!owner");
+        assertNotNull(persistedReply);
+        assertNotNull(persistedUnresolvedReply);
+        assertEquals("old quoted", persistedReply.getReplyText());
+        assertNull(persistedUnresolvedReply.getReplyText());
     }
 
     @Test
@@ -824,8 +837,7 @@ class MessageDbServiceTest {
     }
 
     private static MeshMessage message(String text, int packetId, long timestamp) {
-        MeshMessage message = messageFrom("!00000001", text, packetId, timestamp);
-        return message;
+        return messageFrom("!00000001", text, packetId, timestamp);
     }
 
     private static MeshMessage messageFrom(String fromNodeId, String text, int packetId, long timestamp) {

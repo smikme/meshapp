@@ -794,7 +794,7 @@ public final class MessageDbService {
             readTrace.close();
             long readNanos = System.nanoTime() - started;
             long hydrationStarted = System.nanoTime();
-            try (var trace = ChatHistoryTrace.start("hydrate page")) {
+            try (var _ = ChatHistoryTrace.start("hydrate page")) {
                 List<MeshMessage> resolvedQuotes = hydrateHistoryPage(reader, scope, messages);
                 reader.commit();
                 persistHistoryQuotes(reader, scope, resolvedQuotes, revision);

@@ -351,9 +351,7 @@ class FormChatViewportTest {
             form.loadOlderMessages();
         });
         drain();
-        fx(() -> {
-            assertEquals(anchor[0].anchorOffset(), anchorOffset(anchor[0].anchorDbId()), 1.0);
-        });
+        fx(() -> assertEquals(anchor[0].anchorOffset(), anchorOffset(anchor[0].anchorDbId()), 1.0));
         fx(() -> {
             MeshMessage incoming = message(241);
             MessageDbService.getInstance().save(incoming, "channel", "0", "");
@@ -639,6 +637,8 @@ class FormChatViewportTest {
         while (!found[0] && System.nanoTime() < deadline) {
             pulse();
             fx(() -> found[0] = form.loadedMessageRows.containsKey(target.getDbId()));
+            // Bounded polling also pumps FX layout; there is no single search/render completion event.
+            //noinspection BusyWait
             if (!found[0]) Thread.sleep(10);
         }
         assertTrue(found[0], "search must load its result from outside the current window");
@@ -729,6 +729,8 @@ class FormChatViewportTest {
         boolean[] loading = {true};
         while (loading[0] && System.nanoTime() < deadline) {
             fx(() -> { form.applyCss(); form.layout(); loading[0] = form.isHistoryLoading(); });
+            // Yield outside the FX thread while waiting for database work and layout together.
+            //noinspection BusyWait
             if (loading[0]) Thread.sleep(10);
         }
         assertFalse(loading[0], "history reader did not complete");

@@ -379,6 +379,8 @@ class MqttProxyServiceTest {
             synchronized (monitor) {
                 invokeBrokerMessage(proxy, "msh/test/close", new byte[] {1});
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                // Thread monitor contention has no callback; poll it with a fixed deadline.
+                //noinspection BusyWait
                 while (worker.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) Thread.sleep(5);
                 assertEquals(Thread.State.BLOCKED, worker.getState());
                 proxy.close();

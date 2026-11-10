@@ -266,7 +266,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
         int resultCount = Math.max(count.count(), 1);
         int resultIndex = count.limited()
                 ? 0
-                : Math.min(Math.max(request.previousResultIndex(), 0), Math.max(0, resultCount - 1));
+                : Math.clamp(request.previousResultIndex(), 0, resultCount - 1);
         return new SearchPosition(request.previousHighlightedDbId(), resultCount, resultIndex, count.limited());
     }
 

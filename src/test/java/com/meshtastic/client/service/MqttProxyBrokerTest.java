@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -85,7 +86,7 @@ class MqttProxyBrokerTest {
             assertTrue(failed.await(5, TimeUnit.SECONDS));
             try (var broker = new Broker(port, false)) {
                 assertForwarded();
-                assertEquals(1, broker.subscriptions);
+                assertEquals(1, broker.subscriptions.get());
                 proxy.close();
                 broker.finished.get(5, TimeUnit.SECONDS);
             }
@@ -99,7 +100,7 @@ class MqttProxyBrokerTest {
         try (var broker = new Broker(0, true)) {
             startProxy(broker.server.getLocalPort());
             assertForwarded();
-            assertEquals(2, broker.subscriptions);
+            assertEquals(2, broker.subscriptions.get());
             proxy.close();
             broker.finished.get(5, TimeUnit.SECONDS);
         }
@@ -122,7 +123,7 @@ class MqttProxyBrokerTest {
     private static class Broker implements AutoCloseable {
         final ServerSocket server;
         final CompletableFuture<Void> finished = new CompletableFuture<>();
-        volatile int subscriptions;
+        final AtomicInteger subscriptions = new AtomicInteger();
         volatile Socket socket;
 
         Broker(int port, boolean rejectFirstSubscription) throws Exception {
@@ -141,8 +142,8 @@ class MqttProxyBrokerTest {
                         if (packet.type == 14) break; // DISCONNECT
                         if (packet.type == 12) { out.write(new byte[] {(byte) 0xd0, 0}); out.flush(); continue; }
                         assertEquals(8, packet.type); // SUBSCRIBE
-                        subscriptions++;
-                        boolean rejected = rejectFirstSubscription && subscriptions == 1;
+                        int subscriptionCount = subscriptions.incrementAndGet();
+                        boolean rejected = rejectFirstSubscription && subscriptionCount == 1;
                         out.write(new byte[] {(byte) 0x90, 3, packet.payload[0], packet.payload[1],
                                 (byte) (rejected ? 0x80 : 0)});
                         out.flush();

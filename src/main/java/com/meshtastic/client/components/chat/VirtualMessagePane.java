@@ -119,7 +119,7 @@ public final class VirtualMessagePane extends Pane {
             double offset = pixelOffset();
             Entry neighbor = entries.stream().filter(retained::contains)
                     .filter(e -> e.top + e.height >= offset).findFirst()
-                    .orElseGet(() -> entries.stream().filter(retained::contains).reduce((a, b) -> b).orElse(null));
+                    .orElseGet(() -> entries.reversed().stream().filter(retained::contains).findFirst().orElse(null));
             if (neighbor != null) pendingAnchor = new Anchor(neighbor.message.getDbId(), offset - neighbor.top, false);
         }
         List<Node> removed = new ArrayList<>();
@@ -265,7 +265,7 @@ public final class VirtualMessagePane extends Pane {
                 }
                 getChildren().removeAll(removed);
                 List<Node> added = new ArrayList<>();
-                try (var trace = ChatHistoryTrace.start("create cells")) {
+                try (var _ = ChatHistoryTrace.start("create cells")) {
                     for (Entry entry : entries) {
                         if (entry.top + entry.height < first || entry.top > last) continue;
                         if (entry.rendered == null) {
@@ -276,7 +276,7 @@ public final class VirtualMessagePane extends Pane {
                 }
                 getChildren().addAll(added);
                 boolean changed = false;
-                try (var trace = ChatHistoryTrace.start("CSS and measure")) {
+                try (var _ = ChatHistoryTrace.start("CSS and measure")) {
                     if (!added.isEmpty() || widthChanged) applyCss();
                     for (Entry entry : entries) {
                         if (entry.rendered == null) continue;
@@ -298,7 +298,7 @@ public final class VirtualMessagePane extends Pane {
                 resize(getWidth(), targetHeight);
                 if (getParent() != null) getParent().requestLayout();
             }
-            try (var trace = ChatHistoryTrace.start("layout cells")) {
+            try (var _ = ChatHistoryTrace.start("layout cells")) {
                 for (Entry entry : entries) {
                     if (entry.rendered == null) continue;
                     HBox row = entry.rendered.row();
@@ -312,7 +312,7 @@ public final class VirtualMessagePane extends Pane {
                 accessory.resizeRelocate(getInsets().getLeft(), accessoryTop, innerWidth(), height);
                 accessoryTop += height + GAP;
             }
-            try (var trace = ChatHistoryTrace.start("restore anchor")) {
+            try (var _ = ChatHistoryTrace.start("restore anchor")) {
                 offset = Math.clamp(offsetFor(anchor, offset), 0, extent());
                 scrollPane.setVvalue(extent() == 0 ? 0 : offset / extent());
                 pendingAnchor = null;

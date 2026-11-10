@@ -60,7 +60,7 @@ public final class MeshtasticProtocolRuntime implements ProtocolRuntime<DeviceSt
     public MeshtasticProtocolRuntime(ProtocolRuntimeContext context) {
         this.context = context;
         this.protocolHandler = new ProtocolHandler(context.connectionId(), context.transportConnection());
-        this.messageListenerService = new MessageListenerService(deviceState, protocolHandler);
+        this.messageListenerService = new MessageListenerService(deviceState);
         this.mqttProxyService = new MqttProxyService(
                 context.connectionId(),
                 context.connectionEntry().getName(),

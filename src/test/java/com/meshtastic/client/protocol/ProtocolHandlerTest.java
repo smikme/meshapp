@@ -2,7 +2,6 @@ package com.meshtastic.client.protocol;
 
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.model.DeviceState;
@@ -166,7 +165,7 @@ class ProtocolHandlerTest {
 
         List<MeshProtos.ToRadio> sentMessages = connection.sentMessages();
         int packetIndex = indexOfPacket(sentMessages);
-        int secondMqttIndex = indexOfMqttTopic(sentMessages, "msh/test/second");
+        int secondMqttIndex = indexOfSecondMqttMessage(sentMessages);
 
         assertTrue(packetIndex >= 0);
         assertTrue(secondMqttIndex >= 0);
@@ -182,7 +181,7 @@ class ProtocolHandlerTest {
         handler.sendToRadio(outboundTextPacket(packetId));
 
         assertTrue(connection.awaitSendCountAtLeast(1));
-        connection.emit(queueStatus(packetId, 1, 0, 1));
+        connection.emit(queueStatus(packetId, 1));
 
         assertTrue(connection.awaitSendCountAtLeast(2));
         List<MeshProtos.ToRadio> sentMessages = connection.sentMessages();
@@ -204,7 +203,7 @@ class ProtocolHandlerTest {
                 queueStatusSeen.countDown();
             }
         });
-        connection.emit(queueStatus(7101, 0, 0, 1));
+        connection.emit(queueStatus(7101, 0));
         assertTrue(queueStatusSeen.await(1, TimeUnit.SECONDS));
 
         handler.sendToRadio(outboundTextPacket(7102));
@@ -270,7 +269,7 @@ class ProtocolHandlerTest {
         connection.emit(MeshProtos.FromRadio.newBuilder().setLogRecord(logRecord).build().toByteArray());
         connection.emit(MeshProtos.FromRadio.newBuilder().setQueueStatus(queueStatus).build().toByteArray());
 
-        assertTrue(listener.awaitEvents(12));
+        assertTrue(listener.awaitEvents(12, 1_000));
         assertEquals(0x12345678, listener.myNodeNum.get());
         assertEquals(0xCAFEBABE, listener.nodeNum.get());
         assertEquals(ConfigProtos.Config.PayloadVariantCase.DEVICE, listener.configType);
@@ -336,13 +335,14 @@ class ProtocolHandlerTest {
         CountDownLatch release = new CountDownLatch(1);
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean interrupted = new AtomicBoolean(false);
+        AtomicBoolean released = new AtomicBoolean(false);
 
         handler.addListener(new FromRadioListener() {
             @Override
             public void onNodeInfo(MeshProtos.NodeInfo nodeInfo) {
                 entered.countDown();
                 try {
-                    release.await(1, TimeUnit.SECONDS);
+                    released.set(release.await(1, TimeUnit.SECONDS));
                 } catch (InterruptedException e) {
                     interrupted.set(true);
                     Thread.currentThread().interrupt();
@@ -363,6 +363,7 @@ class ProtocolHandlerTest {
         release.countDown();
 
         assertTrue(finished.await(1, TimeUnit.SECONDS));
+        assertTrue(released.get(), "listener must be released explicitly, not by its timeout");
         assertFalse(interrupted.get());
     }
 
@@ -454,6 +455,7 @@ class ProtocolHandlerTest {
             CountDownLatch firstPacketEntered = new CountDownLatch(1);
             CountDownLatch releaseFirstPacket = new CountDownLatch(1);
             AtomicBoolean holdFirstPacket = new AtomicBoolean(true);
+            AtomicBoolean firstPacketReleased = new AtomicBoolean(false);
             handler.addListener(new FromRadioListener() {
                 @Override
                 public void onMeshPacket(MeshProtos.MeshPacket packet) {
@@ -462,7 +464,7 @@ class ProtocolHandlerTest {
                     }
                     firstPacketEntered.countDown();
                     try {
-                        releaseFirstPacket.await(2, TimeUnit.SECONDS);
+                        firstPacketReleased.set(releaseFirstPacket.await(2, TimeUnit.SECONDS));
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -479,9 +481,9 @@ class ProtocolHandlerTest {
             releaseFirstPacket.countDown();
 
             assertTrue(waitUntil(() ->
-                            MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount,
-                    5_000));
-            assertTrue(waitUntil(() -> PacketMonitorService.getInstance().loadAll().size() == packetCount, 5_000));
+                    MessageDbService.getInstance().loadLast("channel", "2", packetCount + 10, "!12345678").size() == packetCount));
+            assertTrue(waitUntil(() -> PacketMonitorService.getInstance().loadAll().size() == packetCount));
+            assertTrue(firstPacketReleased.get(), "the first packet must wait for the explicit release");
 
             List<PacketLogEntry> packets = PacketMonitorService.getInstance().loadAll();
             assertEquals(packetCount, packets.size());
@@ -519,13 +521,13 @@ class ProtocolHandlerTest {
                 .build();
     }
 
-    private static byte[] queueStatus(int packetId, int result, int free, int maxlen) {
+    private static byte[] queueStatus(int packetId, int result) {
         return MeshProtos.FromRadio.newBuilder()
                 .setQueueStatus(MeshProtos.QueueStatus.newBuilder()
                         .setMeshPacketId(packetId)
                         .setRes(result)
-                        .setFree(free)
-                        .setMaxlen(maxlen)
+                        .setFree(0)
+                        .setMaxlen(1)
                         .build())
                 .build()
                 .toByteArray();
@@ -554,12 +556,14 @@ class ProtocolHandlerTest {
         return payload;
     }
 
-    private static boolean waitUntil(BooleanSupplier condition, long timeoutMs) throws InterruptedException {
-        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+    private static boolean waitUntil(BooleanSupplier condition) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (System.nanoTime() < deadlineNanos) {
             if (condition.getAsBoolean()) {
                 return true;
             }
+            // Bound polling of database state; listener completion alone does not cover queued writes.
+            //noinspection BusyWait
             Thread.sleep(10);
         }
         return condition.getAsBoolean();
@@ -573,11 +577,12 @@ class ProtocolHandlerTest {
         private volatile boolean lastExpectResponseAfterWrite = true;
         private volatile boolean connected;
         private final AtomicInteger sendCount = new AtomicInteger();
+        private final Object sendMonitor = new Object();
         private final List<byte[]> sentFrames = Collections.synchronizedList(new ArrayList<>());
         private volatile CountDownLatch sendBlockLatch;
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             connected = true;
             if (connectionListener != null) {
                 connectionListener.onConnected();
@@ -607,7 +612,7 @@ class ProtocolHandlerTest {
             CountDownLatch gate = sendBlockLatch;
             if (gate != null) {
                 try {
-                    gate.await(1, TimeUnit.SECONDS);
+                    assertTrue(gate.await(1, TimeUnit.SECONDS), "test transport was not released");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
@@ -616,7 +621,10 @@ class ProtocolHandlerTest {
             lastSentBytes = data;
             lastExpectResponseAfterWrite = expectResponseAfterWrite;
             sentFrames.add(data.clone());
-            sendCount.incrementAndGet();
+            synchronized (sendMonitor) {
+                sendCount.incrementAndGet();
+                sendMonitor.notifyAll();
+            }
         }
 
         @Override
@@ -642,13 +650,14 @@ class ProtocolHandlerTest {
 
         boolean awaitSendCountAtLeast(int minimum) throws InterruptedException {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            while (System.nanoTime() < deadline) {
-                if (sendCount.get() >= minimum) {
-                    return true;
+            synchronized (sendMonitor) {
+                while (sendCount.get() < minimum) {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) return false;
+                    TimeUnit.NANOSECONDS.timedWait(sendMonitor, remaining);
                 }
-                Thread.sleep(10);
+                return true;
             }
-            return sendCount.get() >= minimum;
         }
 
         void blockSends() {
@@ -689,11 +698,11 @@ class ProtocolHandlerTest {
         return -1;
     }
 
-    private static int indexOfMqttTopic(List<MeshProtos.ToRadio> sentMessages, String topic) {
+    private static int indexOfSecondMqttMessage(List<MeshProtos.ToRadio> sentMessages) {
         for (int i = 0; i < sentMessages.size(); i++) {
             MeshProtos.ToRadio toRadio = sentMessages.get(i);
             if (toRadio.hasMqttClientProxyMessage()
-                    && topic.equals(toRadio.getMqttClientProxyMessage().getTopic())) {
+                    && "msh/test/second".equals(toRadio.getMqttClientProxyMessage().getTopic())) {
                 return i;
             }
         }
@@ -712,7 +721,7 @@ class ProtocolHandlerTest {
         private final AtomicInteger packetFrom = new AtomicInteger();
         private final AtomicInteger queuePacketId = new AtomicInteger();
         private final AtomicBoolean rebooted = new AtomicBoolean(false);
-        private final CountDownLatch eventLatch = new CountDownLatch(12);
+        private final Object eventMonitor = new Object();
         private volatile ConfigProtos.Config.PayloadVariantCase configType;
         private volatile ModuleConfigProtos.ModuleConfig.PayloadVariantCase moduleConfigType;
         private volatile String logMessage;
@@ -790,24 +799,23 @@ class ProtocolHandlerTest {
             seen();
         }
 
-        boolean awaitEvents(int count) throws InterruptedException {
-            return awaitEvents(count, 1000);
-        }
-
         boolean awaitEvents(int count, long timeoutMs) throws InterruptedException {
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-            while (System.nanoTime() < deadline) {
-                if (eventsSeen.get() >= count) {
-                    return true;
+            synchronized (eventMonitor) {
+                while (eventsSeen.get() < count) {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) return false;
+                    TimeUnit.NANOSECONDS.timedWait(eventMonitor, remaining);
                 }
-                Thread.sleep(10);
+                return true;
             }
-            return eventsSeen.get() >= count;
         }
 
         private void seen() {
-            eventsSeen.incrementAndGet();
-            eventLatch.countDown();
+            synchronized (eventMonitor) {
+                eventsSeen.incrementAndGet();
+                eventMonitor.notifyAll();
+            }
         }
     }
 }

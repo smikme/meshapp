@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class ChatHistoryLoaderTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(CancelPath.class)
+    // This fixture creates its schema in a temporary H2 database, without an IDE data source.
+    @SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
     void cancellationMustNotCloseTheSharedH2FileChannel(CancelPath path,
             @org.junit.jupiter.api.io.TempDir java.nio.file.Path home) throws Exception {
         String url = "jdbc:h2:" + home.resolve("history") + ";TRACE_LEVEL_FILE=0";

@@ -4,11 +4,11 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import com.google.protobuf.ByteString;
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.logging.UiLogAppender;
 import com.meshtastic.client.model.DeviceState;
+import com.meshtastic.client.model.LogEntry;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.protocol.ProtocolHandler;
@@ -25,6 +25,7 @@ import org.meshtastic.proto.Portnums;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 import java.nio.file.Path;
 
@@ -358,7 +359,7 @@ class MessageServiceTest {
     }
 
     @Test
-    void sendChannelReactionFallsBackToOwnerNodeIdWhenOwnNodeMissingInState() throws Exception {
+    void sendChannelReactionFallsBackToOwnerNodeIdWhenOwnNodeMissingInState() {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));
         DeviceState state = new DeviceState();
@@ -396,7 +397,7 @@ class MessageServiceTest {
             MessageService.sendChannelMessage(handler, state, 2, "private reply payload", 12345);
 
             List<String> loggedMessages = UiLogAppender.getBuffer().stream()
-                    .map(entry -> entry.getFullMessage())
+                    .map(LogEntry::getFullMessage)
                     .toList();
             assertTrue(loggedMessages.stream().anyMatch(message ->
                     message.contains("REPLY_DEBUG send channel: replyId=12345")));
@@ -503,9 +504,10 @@ class MessageServiceTest {
 
     private static final class RecordingConnection implements MeshtasticConnection {
         private volatile byte[] lastSentBytes;
+        private final CountDownLatch firstSend = new CountDownLatch(1);
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             // no-op
         }
 
@@ -522,6 +524,7 @@ class MessageServiceTest {
         @Override
         public void sendBytes(byte[] data) {
             lastSentBytes = data;
+            firstSend.countDown();
         }
 
         @Override
@@ -535,16 +538,8 @@ class MessageServiceTest {
         }
 
         byte[] awaitLastSentBytes() throws InterruptedException {
-            long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            byte[] frame = lastSentBytes;
-            while (frame == null && System.nanoTime() < deadlineNanos) {
-                Thread.sleep(10);
-                frame = lastSentBytes;
-            }
-            if (frame == null) {
-                throw new AssertionError("Timed out waiting for outbound frame");
-            }
-            return frame;
+            assertTrue(firstSend.await(1, TimeUnit.SECONDS), "Timed out waiting for outbound frame");
+            return lastSentBytes;
         }
     }
 }

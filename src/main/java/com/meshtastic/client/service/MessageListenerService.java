@@ -15,7 +15,6 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
-import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +41,6 @@ public class MessageListenerService implements FromRadioListener {
 
     private final DeviceState deviceState;
     private final NotificationManager notificationManager;
-    private final ProtocolHandler protocolHandler;
     private final Object deferredMeshLock = new Object();
     private final List<DeferredMeshPacket> deferredMeshPackets = new ArrayList<>();
     private int deferredMeshWarnBucket;
@@ -52,13 +50,8 @@ public class MessageListenerService implements FromRadioListener {
                                       long receivedAtSeconds) {}
 
     public MessageListenerService(DeviceState deviceState) {
-        this(deviceState, null);
-    }
-
-    public MessageListenerService(DeviceState deviceState, ProtocolHandler protocolHandler) {
         this.deviceState = deviceState;
         this.notificationManager = new NotificationManager(deviceState);
-        this.protocolHandler = protocolHandler;
     }
 
     public NotificationManager getNotificationManager() {

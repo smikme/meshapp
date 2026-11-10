@@ -65,8 +65,6 @@ public class ProtocolHandler {
     /** Outgoing packet queue, prioritizing normal commands over MQTT downlink. */
     private final PriorityBlockingQueue<OutboundFrame> outgoingQueue = new PriorityBlockingQueue<>();
     private final Set<CompletableFuture<Void>> pendingWrites = ConcurrentHashMap.newKeySet();
-    private final Thread dispatcherThread;
-    private final Thread senderThread;
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
     private final AtomicInteger incomingQueueWarnBucket = new AtomicInteger(0);
     private final AtomicLong outboundSequence = new AtomicLong();
@@ -96,10 +94,10 @@ public class ProtocolHandler {
         this.connectionId = connectionId;
         this.connection = connection;
         connection.setDataListener(this::handleRawPacket);
-        dispatcherThread = new Thread(this::dispatchLoop, "proto-dispatcher");
+        Thread dispatcherThread = new Thread(this::dispatchLoop, "proto-dispatcher");
         dispatcherThread.setDaemon(true);
         dispatcherThread.start();
-        senderThread = new Thread(this::sendLoop, "proto-sender");
+        Thread senderThread = new Thread(this::sendLoop, "proto-sender");
         senderThread.setDaemon(true);
         senderThread.start();
     }
@@ -165,6 +163,8 @@ public class ProtocolHandler {
                 toRadio, expectResponseAfterWrite, 0, result);
         outgoingQueue.offer(frame);
         if (shutdownRequested.get()) {
+            // The sender may already have taken the frame; either way its future must fail.
+            //noinspection ResultOfMethodCallIgnored
             outgoingQueue.remove(frame);
             result.completeExceptionally(new IllegalStateException("Protocol handler closed before write"));
         }
@@ -222,14 +222,14 @@ public class ProtocolHandler {
         // The sender may be recording a packet in embedded H2. Wake take()
         // without interrupting file I/O and closing the shared database channel.
         outgoingQueue.offer(new OutboundFrame(0, 0, MeshProtos.ToRadio.getDefaultInstance(), false, 0, null));
-        incomingQueue.offer(SHUTDOWN_MARKER);
+        incomingQueue.add(SHUTDOWN_MARKER);
     }
 
     private void handleRawPacket(byte[] data) {
         if (shutdownRequested.get()) {
             return;
         }
-        incomingQueue.offer(data);
+        incomingQueue.add(data);
         logIncomingQueueBacklogIfNeeded(incomingQueue.size());
     }
 
@@ -422,7 +422,7 @@ public class ProtocolHandler {
     }
 
     private long deviceQueueRetryDelayMs(int attempt) {
-        long multiplier = 1L << Math.min(8, Math.max(0, attempt - 1));
+        long multiplier = 1L << Math.clamp(attempt - 1, 0, 8);
         return Math.min(DEVICE_QUEUE_RETRY_MAX_DELAY_MS, DEVICE_QUEUE_RETRY_BASE_DELAY_MS * multiplier);
     }
 

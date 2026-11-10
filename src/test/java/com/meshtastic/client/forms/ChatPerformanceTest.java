@@ -28,6 +28,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * Opt-in benchmark using production controls, CSS, H2 and a real JavaFX scene.
@@ -243,7 +245,7 @@ class ChatPerformanceTest {
                     inputAt[0] = start;
                     peakRows[0] = Math.max(peakRows[0], form.loadedMessageRows.size());
                     assertTrue(form.loadedMessages.size() <= FormChatBase.MAX_LOADED_MESSAGES);
-                    assertTrue(form.loadedMessages.stream().map(MeshMessage::getDbId).distinct().count() == form.loadedMessages.size());
+                    assertEquals(form.loadedMessages.size(), form.loadedMessages.stream().map(MeshMessage::getDbId).distinct().count());
                     double delta = frame >= 240 && frame < 300 ? 240 : -320;
                     scrollBy(delta);
                     handlers.add(millis(start));
@@ -342,9 +344,11 @@ class ChatPerformanceTest {
         boolean[] loading = {true};
         while (loading[0] && System.nanoTime() < deadline) {
             fx(() -> loading[0] = form != null && form.isHistoryLoading());
+            // Bounded polling from the test thread lets the FX queue and layout pulses progress.
+            //noinspection BusyWait
             if (loading[0]) Thread.sleep(10);
         }
-        assertTrue(!loading[0], "history loading timed out");
+        assertFalse(loading[0], "history loading timed out");
         // Drain nested runLater chains, then allow actual CSS/layout/render pulses.
         for (int i = 0; i < 14; i++) fx(() -> {});
         CompletableFuture<Void> done = new CompletableFuture<>();

@@ -125,6 +125,7 @@ class VirtualMessagePaneTest {
         double[] neighborOffset = new double[1];
         fx(() -> {
             var anchor = pane.captureAnchor();
+            assertNotNull(anchor);
             neighborId[0] = anchor.dbId() + 1;
             neighborOffset[0] = offset(neighborId[0]);
             messages.removeIf(message -> message.getDbId() == anchor.dbId());

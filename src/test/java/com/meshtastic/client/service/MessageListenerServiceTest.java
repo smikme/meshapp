@@ -1052,7 +1052,7 @@ class MessageListenerServiceTest {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = new ProtocolHandler(connection);
         try {
-            service = new MessageListenerService(state, handler);
+            service = new MessageListenerService(state);
             state.ensureDirectMessageThread("!11111111");
 
             MeshProtos.User user = MeshProtos.User.newBuilder()
