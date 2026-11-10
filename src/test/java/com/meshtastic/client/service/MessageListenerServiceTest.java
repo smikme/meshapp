@@ -1046,17 +1046,19 @@ class MessageListenerServiceTest {
         assertEquals(node.getNodeId(), cached.getNodeId());
     }
 
-    @Test
-    void onMeshPacketCreatesDirectThreadFromDirectedNodeInfoWithoutSeedingContact() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void directedNodeInfoUpdatesTheNodeWithoutCreatingAChat(boolean withName) throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = new ProtocolHandler(connection);
         try {
-            service = new MessageListenerService(state, handler);
+            service = new MessageListenerService(state);
+            state.ensureDirectMessageThread("!11111111");
 
             MeshProtos.User user = MeshProtos.User.newBuilder()
                     .setId("!cafed00d")
-                    .setLongName("Bob")
-                    .setShortName("BOB")
+                    .setLongName(withName ? "Bob" : "")
+                    .setShortName(withName ? "BOB" : "")
                     .setPublicKey(ByteString.copyFrom(new byte[] {9, 8, 7, 6}))
                     .build();
             MeshProtos.MeshPacket packet = MeshProtos.MeshPacket.newBuilder()
@@ -1070,9 +1072,26 @@ class MessageListenerServiceTest {
 
             service.onMeshPacket(packet);
 
-            assertTrue(state.getAllDirectMessages().containsKey("!cafed00d"));
+            assertFalse(state.getAllDirectMessages().containsKey("!cafed00d"),
+                    "service metadata must not create a conversation");
+            assertEquals(List.of("!11111111"), MessageDbService.getInstance()
+                    .getDistinctDmPeers(state.getOwnerNodeId()), "keep explicitly opened empty conversations");
+            NodeData cached = NodeCacheService.getInstance().get("!cafed00d");
+            assertNotNull(cached);
+            if (withName) assertEquals("Bob", cached.getLongName());
+            org.junit.jupiter.api.Assertions.assertArrayEquals(new byte[] {9, 8, 7, 6}, cached.getPublicKey());
             assertFalse(connection.awaitSentFrame(),
                     "Directed NODEINFO_APP must not send AdminMessage.add_contact");
+
+            // An actual message from that node still creates a persistent chat.
+            service.onMeshPacket(packet.toBuilder().setId(8801)
+                    .setDecoded(MeshProtos.Data.newBuilder().setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+                            .setPayload(ByteString.copyFromUtf8("hello after node info"))).build());
+            assertEquals(1, state.getDirectMessages("!cafed00d").size());
+            assertTrue(MessageDbService.getInstance().getDistinctDmPeers(state.getOwnerNodeId())
+                    .contains("!cafed00d"));
+            assertEquals("hello after node info", MessageDbService.getInstance()
+                    .loadLast("dm", "!cafed00d", 10, state.getOwnerNodeId()).getFirst().getText());
         } finally {
             handler.shutdown();
         }

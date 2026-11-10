@@ -15,7 +15,6 @@ import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.model.TelemetryEntry;
 import com.meshtastic.client.notification.NotificationManager;
 import com.meshtastic.client.protocol.FromRadioListener;
-import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.system.AppUi;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +41,6 @@ public class MessageListenerService implements FromRadioListener {
 
     private final DeviceState deviceState;
     private final NotificationManager notificationManager;
-    private final ProtocolHandler protocolHandler;
     private final Object deferredMeshLock = new Object();
     private final List<DeferredMeshPacket> deferredMeshPackets = new ArrayList<>();
     private int deferredMeshWarnBucket;
@@ -52,13 +50,8 @@ public class MessageListenerService implements FromRadioListener {
                                       long receivedAtSeconds) {}
 
     public MessageListenerService(DeviceState deviceState) {
-        this(deviceState, null);
-    }
-
-    public MessageListenerService(DeviceState deviceState, ProtocolHandler protocolHandler) {
         this.deviceState = deviceState;
         this.notificationManager = new NotificationManager(deviceState);
-        this.protocolHandler = protocolHandler;
     }
 
     public NotificationManager getNotificationManager() {
@@ -633,7 +626,8 @@ public class MessageListenerService implements FromRadioListener {
             }
             deviceState.fireNodeUpdateListeners(fromNum);
             NodeCacheService.getInstance().update(node);
-            maybePrepareDirectThreadFromNodeInfo(packet, node);
+            // Directed NodeInfo is service metadata, not a conversation. Keep
+            // names and keys without creating a persistent empty DM thread.
             log.info("Received NODEINFO_APP from !{}: {} (unmessagable={})",
                     Integer.toHexString(fromNum), user.getLongName(),
                     user.hasIsUnmessagable() ? user.getIsUnmessagable() : null);
@@ -728,18 +722,6 @@ public class MessageListenerService implements FromRadioListener {
         if (user.hasIsUnmessagable()) {
             node.setUnmessagable(user.getIsUnmessagable());
         }
-    }
-
-    private void maybePrepareDirectThreadFromNodeInfo(MeshProtos.MeshPacket packet, NodeData node) {
-        if (protocolHandler == null || node == null) { return; }
-        if (packet.getFrom() == 0 || packet.getFrom() == deviceState.getMyNodeNum()) { return; }
-        if (packet.getTo() != deviceState.getMyNodeNum()) { return; }
-
-        String nodeId = node.getNodeId();
-        if (nodeId == null || nodeId.isBlank()) { return; }
-
-        deviceState.ensureDirectMessageThread(nodeId);
-        log.debug("Prepared local direct message thread for {} after directed NODEINFO_APP", nodeId);
     }
 
     private void handlePositionResponse(MeshProtos.MeshPacket packet, MeshProtos.Data data) {

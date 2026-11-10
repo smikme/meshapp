@@ -365,6 +365,122 @@ class MqttProxyServiceTest {
     }
 
     @Test
+    void closingProxyDoesNotInterruptPacketMonitorDatabaseIo() throws Exception {
+        AppPreferences.setMqttDownlinkFilterMode(AppPreferences.MqttDownlinkFilterMode.NO_FILTER);
+        var state = new DeviceState();
+        var handler = new ProtocolHandler("mqtt-close-test", new FakeTransportConnection());
+        var proxy = new MqttProxyService("mqtt-close-test", "MQTT Close Test", handler, state);
+        var monitor = PacketMonitorService.getInstance();
+        monitor.startCapture();
+        var worker = downlinkExecutor(proxy).submit(Thread::currentThread).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        try {
+            // Hold the monitor lock just before its JDBC insert. Thread
+            // interruption here would remain set on entry to embedded H2.
+            synchronized (monitor) {
+                invokeBrokerMessage(proxy, "msh/test/close", new byte[] {1});
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                // Thread monitor contention has no callback; poll it with a fixed deadline.
+                while (worker.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                    //noinspection BusyWait
+                    Thread.sleep(5);
+                }
+                assertEquals(Thread.State.BLOCKED, worker.getState());
+                proxy.close();
+                assertFalse(worker.isInterrupted(), "closing MQTT must not close the shared H2 file channel");
+            }
+            assertTrue(downlinkExecutor(proxy).awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(1, monitor.loadAll(mqttQuery()).size());
+        } finally {
+            proxy.close();
+            handler.shutdown();
+            state.shutdown();
+        }
+    }
+
+    @Test
+    void failedTransportWriteDoesNotRecordDeliveryOrSuppressRedelivery() throws Exception {
+        AppPreferences.setMqttDownlinkFilterMode(AppPreferences.MqttDownlinkFilterMode.FILTERED);
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(LOCAL_NODE_NUM);
+        var transport = new ControlledWriteTransport();
+        ProtocolHandler handler = new ProtocolHandler("mqtt-write-test", transport);
+        var proxy = new MqttProxyService("mqtt-write-test", "MQTT Write Test", handler, state);
+        var monitor = PacketMonitorService.getInstance();
+        monitor.startCapture();
+        byte[] payload = serviceEnvelopePayload(decodedPacket(Portnums.PortNum.TEXT_MESSAGE_APP));
+        try {
+            invokeBrokerMessage(proxy, "msh/test/failed", payload);
+            var failed = transport.writes.poll(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertNotNull(failed);
+            failed.completeExceptionally(new java.io.IOException("test write failure"));
+            awaitDownlinkQueueIdle(proxy);
+            assertTrue(monitor.loadAll(mqttQuery()).isEmpty(), "enqueueing is not delivery to the transport");
+
+            invokeBrokerMessage(proxy, "msh/test/retry", payload);
+            var retried = transport.writes.poll(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertNotNull(retried, "a failed write must not suppress a later broker copy for five minutes");
+            retried.complete(null);
+            assertTrue(awaitMqttEntry(monitor));
+            assertEquals(1, monitor.loadAll(mqttQuery()).size());
+        } finally {
+            proxy.close();
+            handler.shutdown();
+            state.shutdown();
+        }
+    }
+
+    @Test
+    void slowTransportKeepsMqttBacklogInTheBoundedDownlinkQueue() throws Exception {
+        AppPreferences.setMqttDownlinkFilterMode(AppPreferences.MqttDownlinkFilterMode.NO_FILTER);
+        DeviceState state = new DeviceState();
+        var transport = new ControlledWriteTransport();
+        ProtocolHandler handler = new ProtocolHandler("mqtt-backlog-test", transport);
+        var proxy = new MqttProxyService("mqtt-backlog-test", "MQTT Backlog Test", handler, state);
+        var monitor = PacketMonitorService.getInstance();
+        monitor.startCapture();
+        try {
+            invokeBrokerMessage(proxy, "msh/test/one", new byte[] {1});
+            var first = transport.writes.poll(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertNotNull(first);
+            invokeBrokerMessage(proxy, "msh/test/two", new byte[] {2});
+            assertNull(transport.writes.poll(250, java.util.concurrent.TimeUnit.MILLISECONDS),
+                    "only one MQTT transport write may be outstanding");
+            assertTrue(monitor.loadAll(mqttQuery()).isEmpty());
+            first.complete(null);
+            var second = transport.writes.poll(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertNotNull(second);
+            second.complete(null);
+            awaitDownlinkQueueIdle(proxy);
+            assertEquals(2, monitor.loadAll(mqttQuery()).size());
+        } finally {
+            proxy.close();
+            handler.shutdown();
+            state.shutdown();
+        }
+    }
+
+    private static void awaitDownlinkQueueIdle(MqttProxyService proxy) throws Exception {
+        downlinkExecutor(proxy).submit(() -> {}).get(5, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    private static java.util.concurrent.ThreadPoolExecutor downlinkExecutor(MqttProxyService proxy) throws Exception {
+        var field = MqttProxyService.class.getDeclaredField("downlinkExecutor");
+        field.setAccessible(true);
+        return (java.util.concurrent.ThreadPoolExecutor) field.get(proxy);
+    }
+
+    private static class ControlledWriteTransport extends FakeTransportConnection {
+        final java.util.concurrent.BlockingQueue<java.util.concurrent.CompletableFuture<Void>> writes =
+                new java.util.concurrent.LinkedBlockingQueue<>();
+        @Override public void sendBytes(byte[] data) { sendBytesAsync(data, false); }
+        @Override public java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+            var result = new java.util.concurrent.CompletableFuture<Void>();
+            writes.add(result);
+            return result;
+        }
+    }
+
+    @Test
     void mqttMonitorRecordsIncomingDownlinkOnlyAfterFilterPasses() throws Exception {
         AppPreferences.setMqttDownlinkFilterMode(AppPreferences.MqttDownlinkFilterMode.FILTERED);
 
@@ -595,7 +711,7 @@ class MqttProxyServiceTest {
         return buffer.array();
     }
 
-    private static final class FakeTransportConnection implements TransportConnection {
+    private static class FakeTransportConnection implements TransportConnection {
         @Override
         public void connect() {}
 

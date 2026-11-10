@@ -49,6 +49,7 @@ import javafx.scene.text.TextFlow;
 import javafx.stage.Popup;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -208,6 +209,13 @@ public class MessageBubbleFactory {
     private final Map<Integer, Label> pendingStatusLabels;
     private TracerouteView tracerouteView;
     private Popup openReactionPopup;
+    private Node openReactionAnchor;
+    private HBox reusableRow;
+    private static final Object DISPOSE_ACTION = new Object();
+    private final Function<String, Image> previewImageLoader;
+    private final Map<String, Image> completedPreviews = new LinkedHashMap<>(24, .75f, true);
+    private static final int MAX_CACHED_PREVIEWS = 24;
+    private static final long MAX_CACHED_PREVIEW_PIXELS = 4_000_000;
     private Function<String, CompletableFuture<NodeData>> remoteNodeResolver;
     private Supplier<NodeDetailContent.ActionDelegate> remoteNodeActionDelegateSupplier;
 
@@ -221,10 +229,19 @@ public class MessageBubbleFactory {
                                 ReadOnlyDoubleProperty containerWidthProp,
                                 BubbleActions actions,
                                 Map<Integer, Label> pendingStatusLabels) {
+        this(state, containerWidthProp, actions, pendingStatusLabels, url -> new Image(url, true));
+    }
+
+    public MessageBubbleFactory(DeviceState state,
+                                ReadOnlyDoubleProperty containerWidthProp,
+                                BubbleActions actions,
+                                Map<Integer, Label> pendingStatusLabels,
+                                Function<String, Image> previewImageLoader) {
         this.state = state;
         this.containerWidthProp = containerWidthProp;
         this.actions = actions;
         this.pendingStatusLabels = pendingStatusLabels;
+        this.previewImageLoader = previewImageLoader;
     }
 
     /** Updates DeviceState after connection rebind. */
@@ -250,6 +267,7 @@ public class MessageBubbleFactory {
         }
         openReactionPopup.hide();
         openReactionPopup = null;
+        openReactionAnchor = null;
     }
 
     /**
@@ -276,6 +294,37 @@ public class MessageBubbleFactory {
             return buildOutgoingBubble(msg);
         }
         return buildIncomingBubble(msg);
+    }
+
+    public RenderedMessageRow buildRendered(MeshMessage message, HBox recycledRow) {
+        reusableRow = recycledRow;
+        try {
+            return buildRendered(message);
+        } finally {
+            reusableRow = null;
+        }
+    }
+
+    /** Detaches resources before a virtual cell is assigned to another message. */
+    public void disposeRendered(RenderedMessageRow rendered) {
+        if (rendered == null) return;
+        for (Node node = openReactionAnchor; node != null; node = node.getParent()) {
+            if (node == rendered.row) { hideOpenReactionPopup(); break; }
+        }
+        pendingStatusLabels.values().removeIf(label -> label == rendered.statusLabel);
+        disposeNode(rendered.row);
+        rendered.row.getChildren().clear();
+        rendered.row.getStyleClass().clear();
+        rendered.row.setUserData(null);
+    }
+
+    private static void disposeNode(Node node) {
+        Object action = node.getProperties().remove(DISPOSE_ACTION);
+        if (action instanceof Runnable dispose) dispose.run();
+        if (node instanceof Region region) region.maxWidthProperty().unbind();
+        if (node instanceof javafx.scene.Parent parent) {
+            for (Node child : parent.getChildrenUnmodifiable()) disposeNode(child);
+        }
     }
 
     /**
@@ -749,8 +798,11 @@ public class MessageBubbleFactory {
      * @param children row children
      * @return rendered row container
      */
-    private static HBox createMessageRow(Pos alignment, String styleClass, Node... children) {
-        HBox row = new HBox(MESSAGE_ROW_SPACING, children);
+    private HBox createMessageRow(Pos alignment, String styleClass, Node... children) {
+        HBox row = reusableRow != null ? reusableRow : new HBox();
+        reusableRow = null;
+        row.setSpacing(MESSAGE_ROW_SPACING);
+        row.getChildren().setAll(children);
         row.setAlignment(alignment);
         row.setMinHeight(Region.USE_PREF_SIZE);
         row.getStyleClass().add(styleClass);
@@ -927,6 +979,7 @@ public class MessageBubbleFactory {
         if (msg.isReplyToOutgoing()) {
             return true;
         }
+        if (msg.isReplyContextResolved()) return false;
         return Optional.of(msg.getReplyId())
                 .filter(replyId -> replyId != ZERO_VALUE)
                 .map(replyId -> findReplyTargetInCurrentScope(replyId, msg))
@@ -1041,7 +1094,12 @@ public class MessageBubbleFactory {
      * @return preview node that opens the original image when clicked
      */
     private Node createMeshFilesPreview(MeshFilesImage meshImage) {
-        Image previewImage = new Image(meshImage.previewUrl(), true);
+        String previewUrl = meshImage.previewUrl();
+        Image cached = completedPreviews.get(previewUrl);
+        Image previewImage = cached != null ? cached : previewImageLoader.apply(previewUrl);
+        javafx.beans.value.ChangeListener<Number> progressListener = (_, _, _) -> cacheCompletedPreview(previewUrl, previewImage);
+        previewImage.progressProperty().addListener(progressListener);
+        cacheCompletedPreview(previewUrl, previewImage);
 
         ImageView imageView = new ImageView(previewImage);
         imageView.getStyleClass().add("chat-bubble-image");
@@ -1057,7 +1115,7 @@ public class MessageBubbleFactory {
         failedLabel.setVisible(false);
         failedLabel.setManaged(false);
 
-        previewImage.errorProperty().addListener((_, _, isError) -> {
+        javafx.beans.value.ChangeListener<Boolean> errorListener = (_, _, isError) -> {
             if (!isError) {
                 return;
             }
@@ -1065,9 +1123,17 @@ public class MessageBubbleFactory {
             imageView.setManaged(false);
             failedLabel.setVisible(true);
             failedLabel.setManaged(true);
-        });
+        };
+        previewImage.errorProperty().addListener(errorListener);
 
         StackPane frame = new StackPane(imageView, failedLabel);
+        frame.getProperties().put(DISPOSE_ACTION, (Runnable) () -> {
+            previewImage.cancel();
+            previewImage.errorProperty().removeListener(errorListener);
+            previewImage.progressProperty().removeListener(progressListener);
+            imageView.fitWidthProperty().unbind();
+            imageView.setImage(null);
+        });
         frame.getStyleClass().add("chat-bubble-image-preview");
         frame.setCursor(Cursor.HAND);
         frame.setOnMouseClicked(event -> {
@@ -1080,6 +1146,20 @@ public class MessageBubbleFactory {
             event.consume();
         });
         return frame;
+    }
+
+    private void cacheCompletedPreview(String url, Image image) {
+        long pixels = (long) image.getWidth() * (long) image.getHeight();
+        if (image.getProgress() < 1 || image.isError() || pixels <= 0 || pixels > MAX_CACHED_PREVIEW_PIXELS) return;
+        completedPreviews.put(url, image);
+        long totalPixels = completedPreviews.values().stream()
+                .mapToLong(value -> (long) value.getWidth() * (long) value.getHeight()).sum();
+        var iterator = completedPreviews.entrySet().iterator();
+        while (completedPreviews.size() > MAX_CACHED_PREVIEWS || totalPixels > MAX_CACHED_PREVIEW_PIXELS) {
+            Image removed = iterator.next().getValue();
+            totalPixels -= (long) removed.getWidth() * (long) removed.getHeight();
+            iterator.remove();
+        }
     }
 
     /**
@@ -1506,6 +1586,7 @@ public class MessageBubbleFactory {
     }
 
     private void clearOpenReactionPopup(Popup popup) {
+        if (openReactionPopup == popup) openReactionAnchor = null;
         openReactionPopup = openReactionPopup == popup ? null : openReactionPopup;
     }
 
@@ -1528,6 +1609,7 @@ public class MessageBubbleFactory {
         syncReactionPopupTheme(anchor, popup);
         popup.show(anchor, bounds.getMinX(), bounds.getMaxY() + POPUP_VERTICAL_OFFSET);
         openReactionPopup = popup;
+        openReactionAnchor = anchor;
     }
 
     /**
@@ -1720,6 +1802,10 @@ public class MessageBubbleFactory {
      */
     private static void installContextMenu(VBox content, Supplier<ContextMenu> menuSupplier) {
         AtomicReference<ContextMenu> menuRef = new AtomicReference<>();
+        content.getProperties().put(DISPOSE_ACTION, (Runnable) () -> {
+            Optional.ofNullable(menuRef.getAndSet(null)).ifPresent(ContextMenu::hide);
+            content.setOnContextMenuRequested(null);
+        });
         content.setOnContextMenuRequested(ev -> {
             Optional.ofNullable(menuRef.get()).ifPresent(ContextMenu::hide);
             ContextMenu menu = menuSupplier.get();

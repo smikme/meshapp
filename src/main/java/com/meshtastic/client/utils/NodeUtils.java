@@ -14,12 +14,15 @@ import javafx.scene.control.MenuItem;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.Tooltip;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.HBox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Base64;
 
 /**
  * Shared node presentation helpers: lookup, avatar styling, and the node
@@ -240,6 +243,9 @@ public final class NodeUtils {
         rows.add(new String[]{"\uD83D\uDC64", I18n.t("node.detail.name"), node.getLongName()});
         rows.add(new String[]{"\uD83C\uDFF7", I18n.t("node.detail.shortName"), node.getShortName()});
         rows.add(new String[]{"\uD83D\uDD11", I18n.t("node.detail.nodeId"), node.getNodeId()});
+        byte[] publicKey = node.getPublicKey();
+        rows.add(new String[]{"\uD83D\uDD10", I18n.t("node.detail.publicKey"),
+                publicKey != null && publicKey.length > 0 ? Base64.getEncoder().encodeToString(publicKey) : null});
         rows.add(new String[]{"⚙", I18n.t("node.detail.role"),
                 node.getRole() != null ? NodeData.translateRole(node.getRole()) : null});
         rows.add(new String[]{"\uD83D\uDCDF", I18n.t("node.detail.model"), node.getHwModel()});
@@ -342,9 +348,11 @@ public final class NodeUtils {
                     setText(empty ? null : "—");
                     setStyle("-fx-font-weight: bold;");
                     setContextMenu(null);
+                    setTooltip(null);
                 } else {
                     setText(value);
                     setStyle("-fx-font-weight: bold;");
+                    setTooltip(new Tooltip(value));
                     MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
                     copyItem.setOnAction(_ -> {
                         ClipboardContent cc = new ClipboardContent();

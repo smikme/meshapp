@@ -33,9 +33,20 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * Desktop-side MQTT bridge for nodes that proxy MQTT through the connected client.
@@ -72,6 +83,19 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     private final DownlinkDuplicateSuppressor downlinkDuplicateSuppressor =
             new DownlinkDuplicateSuppressor(DOWNLINK_DUPLICATE_TTL_MS, DOWNLINK_DUPLICATE_MAX_ENTRIES);
     private final ThreadPoolExecutor downlinkExecutor;
+    private final AtomicReference<CompletableFuture<Void>> activeDownlinkWrite = new AtomicReference<>();
+    private final ScheduledExecutorService controlExecutor;
+    private ScheduledFuture<?> initialConnectRetry;
+    private ScheduledFuture<?> subscriptionRetry;
+    private long initialRetryDelayMs = 1_000;
+    private long subscriptionRetryDelayMs = 1_000;
+    private final LongAdder receivedDownlinks = new LongAdder();
+    private final LongAdder loopbackDownlinks = new LongAdder();
+    private final LongAdder duplicateDownlinks = new LongAdder();
+    private final LongAdder writtenDownlinks = new LongAdder();
+    private final LongAdder failedDownlinks = new LongAdder();
+    private final Map<String, LongAdder> filteredDownlinks = new ConcurrentHashMap<>();
+    private final AtomicLong nextStatsAtNanos = new AtomicLong();
 
     private volatile boolean closed;
     private volatile boolean listenerRegistered;
@@ -87,6 +111,11 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         this.connectionName = connectionName;
         this.protocolHandler = protocolHandler;
         this.deviceState = deviceState;
+        this.controlExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            var thread = new Thread(r, "mqtt-proxy-control-" + sanitizeThreadSuffix(connectionId));
+            thread.setDaemon(true);
+            return thread;
+        });
         this.downlinkExecutor = new ThreadPoolExecutor(
                 1,
                 1,
@@ -99,16 +128,22 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                     return t;
                 },
                 (task, executor) -> {
-                    if (!executor.isShutdown()) {
+                    if (!executor.isShutdown() && !closed) {
                         log.warn("MQTT downlink queue saturated for '{}'; waiting for radio write backlog to drain",
                                 connectionName);
                         try {
-                            executor.getQueue().put(task);
+                            while (!executor.isShutdown() && !closed) {
+                                if (executor.getQueue().offer(task, 250, TimeUnit.MILLISECONDS)) {
+                                    if (closed && executor.getQueue().remove(task)) break;
+                                    return;
+                                }
+                            }
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
-                            log.warn("Interrupted while waiting to enqueue MQTT downlink for '{}'", connectionName);
+                            throw new RejectedExecutionException("Interrupted while queueing MQTT downlink", e);
                         }
                     }
+                    throw new RejectedExecutionException("MQTT downlink queue closed");
                 }
         );
     }
@@ -138,7 +173,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                         new MemoryPersistence()
                 );
                 mqttClient.setBufferOpts(buildDisconnectedBufferOptions());
-                mqttClient.setCallback(new ProxyCallback());
+                mqttClient.setCallback(new ProxyCallback(mqttClient));
 
                 this.client = mqttClient;
                 this.activeConfig = config;
@@ -150,26 +185,45 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
 
                 log.info("Starting MQTT proxy for '{}' -> broker='{}', root='{}', clientId='{}'",
                         connectionName, brokerUri, config.root(), clientId);
-                mqttClient.connect(buildConnectOptions(config), null, new IMqttActionListener() {
-                    @Override
-                    public void onSuccess(IMqttToken asyncActionToken) {
-                        log.debug("Initial MQTT proxy connect initiated for '{}'", connectionName);
-                    }
-
-                    @Override
-                    public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-                        if (closed) {
-                            return;
-                        }
-                        log.warn("Initial MQTT proxy connect failed for '{}': {}",
-                                connectionName,
-                                exception != null ? exception.getMessage() : "unknown error");
-                    }
-                });
+                logDownlinkSettings();
+                connectInitially(mqttClient, config);
             } catch (Exception e) {
                 log.error("Failed to start MQTT proxy for '{}'", connectionName, e);
-                stopClient(true);
+                stopClient();
             }
+        }
+    }
+
+    private void connectInitially(MqttAsyncClient expectedClient, ProxyConfig config) {
+        synchronized (lifecycleLock) {
+            if (closed || client != expectedClient || expectedClient.isConnected()) return;
+            try {
+                expectedClient.connect(buildConnectOptions(config), null, new IMqttActionListener() {
+                    @Override public void onSuccess(IMqttToken token) {
+                        synchronized (lifecycleLock) { initialRetryDelayMs = 1_000; }
+                    }
+                    @Override public void onFailure(IMqttToken token, Throwable error) {
+                        retryInitialConnect(expectedClient, config, error);
+                    }
+                });
+            } catch (MqttException error) {
+                retryInitialConnect(expectedClient, config, error);
+            }
+        }
+    }
+
+    private void retryInitialConnect(MqttAsyncClient expectedClient, ProxyConfig config, Throwable error) {
+        synchronized (lifecycleLock) {
+            if (closed || client != expectedClient) return;
+            long delay = initialRetryDelayMs;
+            initialRetryDelayMs = Math.min(30_000, delay * 2);
+            if (initialConnectRetry != null) initialConnectRetry.cancel(false);
+            log.warn("Initial MQTT proxy connect failed for '{}': {}; retry in {} ms", connectionName,
+                    error != null ? error.getMessage() : "unknown error", delay);
+            // Paho automatic reconnect starts after connectionLost, not after
+            // the very first failed CONNECT. Keep one bounded retry here.
+            initialConnectRetry = controlExecutor.schedule(() -> connectInitially(expectedClient, config),
+                    delay, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -208,8 +262,15 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             }
             closed = true;
         }
-        stopClient(true);
-        downlinkExecutor.shutdownNow();
+        stopClient();
+        logDownlinkStats(true);
+        var write = activeDownlinkWrite.getAndSet(null);
+        if (write != null) write.cancel(false);
+        downlinkExecutor.getQueue().clear();
+        // Packet monitoring writes to embedded H2 on this worker. Interrupting
+        // it during close could close the database file channel for the whole app.
+        downlinkExecutor.shutdown();
+        controlExecutor.shutdown();
     }
 
     static ProxyConfig loadProxyConfig(DeviceState state) {
@@ -349,15 +410,17 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         return options;
     }
 
-    private void stopClient(boolean removeListener) {
+    private void stopClient() {
         MqttAsyncClient mqttClient;
         synchronized (lifecycleLock) {
             mqttClient = client;
             client = null;
             activeConfig = null;
+            if (initialConnectRetry != null) initialConnectRetry.cancel(false);
+            if (subscriptionRetry != null) subscriptionRetry.cancel(false);
             localEchoSuppressor.clear();
             downlinkDuplicateSuppressor.clear();
-            if (removeListener && listenerRegistered) {
+            if (listenerRegistered) {
                 protocolHandler.removeListener(this);
                 listenerRegistered = false;
             }
@@ -386,6 +449,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         if (topic == null || topic.isBlank() || mqttMessage == null || closed) {
             return;
         }
+        receivedDownlinks.increment();
 
         byte[] payload = mqttMessage.getPayload();
         if (payload == null) {
@@ -395,6 +459,8 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         }
         boolean retained = mqttMessage.isRetained();
         if (localEchoSuppressor.consume(topic, payload)) {
+            loopbackDownlinks.increment();
+            logDownlinkStats(false);
             log.debug("Suppressed MQTT loopback for '{}' topic='{}' bytes={} retained={}",
                     connectionName, topic, payload.length, retained);
             return;
@@ -407,12 +473,16 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                 deviceState
         );
         if (!filterDecision.forward()) {
+            filteredDownlinks.computeIfAbsent(filterDecision.reason(), _ -> new LongAdder()).increment();
+            logDownlinkStats(false);
             log.trace("Dropped MQTT downlink for '{}': topic='{}' bytes={} retained={} mode={} reason={}",
                     connectionName, topic, payload.length, retained, filterMode, filterDecision.reason());
             return;
         }
         DownlinkPacketKey duplicateKey = filterDecision.duplicateKey();
-        if (duplicateKey != null && downlinkDuplicateSuppressor.rememberIfDuplicate(duplicateKey)) {
+        if (duplicateKey != null && !downlinkDuplicateSuppressor.reserve(duplicateKey)) {
+            duplicateDownlinks.increment();
+            logDownlinkStats(false);
             log.trace("Dropped duplicate MQTT downlink for '{}': topic='{}' bytes={} retained={} mode={}",
                     connectionName, topic, payload.length, retained, filterMode);
             return;
@@ -423,28 +493,85 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
                 connectionName, topic, payload.length, retained, queueDepth, DOWNLINK_QUEUE_SIZE);
         byte[] downlinkPayload = payload;
         MeshProtos.MeshPacket monitorPacket = filterDecision.monitorPacket();
-        downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained, monitorPacket));
+        try {
+            downlinkExecutor.execute(() -> forwardBrokerMessageToRadio(topic, downlinkPayload, retained, monitorPacket, duplicateKey));
+        } catch (RejectedExecutionException error) {
+            downlinkDuplicateSuppressor.complete(duplicateKey, false);
+            if (!closed) {
+                failedDownlinks.increment();
+                log.warn("Failed to queue MQTT downlink for '{}'", connectionName, error);
+            }
+        }
+        logDownlinkStats(false);
     }
 
     private void forwardBrokerMessageToRadio(String topic,
                                              byte[] payload,
                                              boolean retained,
-                                             MeshProtos.MeshPacket monitorPacket) {
-        if (closed) {
-            return;
-        }
-        if (!awaitDownlinkSendWindow()) {
-            return;
-        }
+                                             MeshProtos.MeshPacket monitorPacket,
+                                             DownlinkPacketKey duplicateKey) {
+        CompletableFuture<Void> write = null;
+        boolean written = false;
         try {
-            MessageService.sendMqttClientProxyMessage(protocolHandler, topic, payload, retained);
-        } catch (RuntimeException e) {
+            if (closed || !awaitDownlinkSendWindow()) return;
+            write = MessageService.sendMqttClientProxyMessage(protocolHandler, topic, payload, retained);
+            activeDownlinkWrite.set(write);
+            if (closed) write.cancel(false);
+            // Keep pressure in the bounded MQTT queue instead of draining it
+            // into ProtocolHandler's command queue while the transport is busy.
+            write.get();
+            written = true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (ExecutionException | RuntimeException e) {
+            if (closed) return;
             log.warn("Failed to forward MQTT downlink for '{}' topic='{}'", connectionName, topic, e);
             return;
+        } finally {
+            if (write != null) activeDownlinkWrite.compareAndSet(write, null);
+            downlinkDuplicateSuppressor.complete(duplicateKey, written && !closed);
+            if (written) writtenDownlinks.increment();
+            else if (!closed) failedDownlinks.increment();
+            logDownlinkStats(false);
         }
+        if (closed) return;
         recordMqttIncoming(topic, payload, retained, monitorPacket);
-        log.trace("Forwarded MQTT downlink for '{}': topic='{}' bytes={} retained={}",
-                connectionName, topic, payload.length, retained);
+        log.debug("MQTT downlink written to transport for '{}': topic='{}' bytes={} retained={} packetId={} from={}",
+                connectionName, topic, payload.length, retained,
+                monitorPacket != null ? Integer.toUnsignedString(monitorPacket.getId()) : "unknown",
+                monitorPacket != null ? Integer.toUnsignedString(monitorPacket.getFrom()) : "unknown");
+    }
+
+    private void logDownlinkSettings() {
+        String ignoreMqtt = "unknown";
+        var configs = deviceState.getConfigs();
+        synchronized (configs) {
+            for (var config : configs) if (config.hasLora()) {
+                ignoreMqtt = Boolean.toString(config.getLora().getIgnoreMqtt());
+                break;
+            }
+        }
+        var channels = deviceState.getChannels();
+        java.util.List<Integer> downlinkChannels;
+        synchronized (channels) {
+            downlinkChannels = channels.stream()
+                    .filter(channel -> channel.getRole() != org.meshtastic.proto.ChannelProtos.Channel.Role.DISABLED
+                            && channel.getSettings().getDownlinkEnabled())
+                    .map(org.meshtastic.proto.ChannelProtos.Channel::getIndex).toList();
+        }
+        log.info("MQTT receive settings for '{}': filter={}, ignoreMqtt={}, downlinkChannels={}",
+                connectionName, AppPreferences.getMqttDownlinkFilterMode(), ignoreMqtt, downlinkChannels);
+    }
+
+    private void logDownlinkStats(boolean force) {
+        long now = System.nanoTime();
+        long next = nextStatsAtNanos.get();
+        if (!force && (now < next || !nextStatsAtNanos.compareAndSet(next, now + TimeUnit.SECONDS.toNanos(30)))) return;
+        log.info("MQTT receive totals for '{}': received={}, written={}, failed={}, loopback={}, duplicates={}, filtered={}, queued={}, active={}",
+                connectionName, receivedDownlinks.sum(), writtenDownlinks.sum(), failedDownlinks.sum(),
+                loopbackDownlinks.sum(), duplicateDownlinks.sum(), filteredDownlinks,
+                downlinkExecutor.getQueue().size(), downlinkExecutor.getActiveCount());
     }
 
     private void recordMqttIncoming(String topic,
@@ -523,11 +650,13 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
 
         if (safeMode == MqttDownlinkFilterMode.FILTERED_WITH_ENCRYPTED) {
             return DownlinkFilterDecision.forward("encrypted packet")
+                    .withMonitorPacket(packet)
                     .withDuplicateKey(duplicateKey);
         }
 
         if (localNodeNum != 0 && packet.getTo() == localNodeNum) {
             return DownlinkFilterDecision.forward("encrypted packet for local node")
+                    .withMonitorPacket(packet)
                     .withDuplicateKey(duplicateKey);
         }
 
@@ -596,17 +725,46 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
 
     private void subscribeToBroker(ProxyConfig config, boolean reconnect) {
         MqttAsyncClient mqttClient = client;
-        if (mqttClient == null || config == null) {
+        if (closed || mqttClient == null || config == null || !mqttClient.isConnected()) {
             return;
         }
 
         String topicFilter = config.root() + "/#";
         try {
-            mqttClient.subscribe(topicFilter, MQTT_QOS);
-            log.info("MQTT proxy for '{}' {}subscribed to '{}'",
-                    connectionName, reconnect ? "re" : "", topicFilter);
+            mqttClient.subscribe(topicFilter, MQTT_QOS, null, new IMqttActionListener() {
+                @Override public void onSuccess(IMqttToken token) {
+                    synchronized (lifecycleLock) {
+                        if (closed || client != mqttClient) return;
+                        int[] granted = token.getGrantedQos();
+                        if (granted == null || granted.length != 1 || granted[0] == 0x80) {
+                            retrySubscription(mqttClient, config, "broker rejected SUBACK");
+                            return;
+                        }
+                        subscriptionRetryDelayMs = 1_000;
+                        log.info("MQTT proxy for '{}' {}subscribed to '{}' (SUBACK QoS {})",
+                                connectionName, reconnect ? "re" : "", topicFilter, granted[0]);
+                    }
+                }
+                @Override public void onFailure(IMqttToken token, Throwable error) {
+                    retrySubscription(mqttClient, config, error != null ? error.getMessage() : "subscription failed");
+                }
+            });
         } catch (MqttException e) {
-            log.warn("Failed to subscribe MQTT proxy for '{}' to '{}'", connectionName, topicFilter, e);
+            retrySubscription(mqttClient, config, e.getMessage());
+        }
+    }
+
+    private void retrySubscription(MqttAsyncClient expectedClient, ProxyConfig config, String reason) {
+        synchronized (lifecycleLock) {
+            if (closed || client != expectedClient || !expectedClient.isConnected()) return;
+            long delay = subscriptionRetryDelayMs;
+            subscriptionRetryDelayMs = Math.min(30_000, delay * 2);
+            if (subscriptionRetry != null) subscriptionRetry.cancel(false);
+            log.warn("Failed to subscribe MQTT proxy for '{}' to '{}/#': {}; retry in {} ms",
+                    connectionName, config.root(), reason, delay);
+            subscriptionRetry = controlExecutor.schedule(() -> {
+                if (!closed && client == expectedClient) subscribeToBroker(config, true);
+            }, delay, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -708,6 +866,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
         private final int maxEntries;
         private final Deque<RecentDownlinkPacket> recentPackets = new ArrayDeque<>();
         private final Set<DownlinkPacketKey> recentKeys = new HashSet<>();
+        private final Set<DownlinkPacketKey> pendingKeys = new HashSet<>();
 
         /**
          * Creates a duplicate detector.
@@ -720,24 +879,21 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             this.maxEntries = Math.max(1, maxEntries);
         }
 
-        /**
-         * Remembers a packet key and reports whether it has already been seen recently.
-         *
-         * @param key packet identity produced by the downlink filter
-         * @return {@code true} when the packet is a recent duplicate
-         */
-        boolean rememberIfDuplicate(DownlinkPacketKey key) {
-            if (key == null) {
-                return false;
-            }
+        /** Pending writes do not expire while waiting for the bounded worker. */
+        boolean reserve(DownlinkPacketKey key) {
+            if (key == null) return true;
             synchronized (recentPackets) {
-                long nowMillis = System.currentTimeMillis();
-                purgeExpiredPackets(nowMillis);
-                if (recentKeys.contains(key)) {
-                    return true;
-                }
-                remember(key, nowMillis);
-                return false;
+                purgeExpiredPackets(System.currentTimeMillis());
+                if (recentKeys.contains(key)) return false;
+                return pendingKeys.add(key);
+            }
+        }
+
+        /** Failed writes release the reservation so another gateway copy can retry. */
+        void complete(DownlinkPacketKey key, boolean written) {
+            if (key == null) return;
+            synchronized (recentPackets) {
+                if (pendingKeys.remove(key) && written) remember(key, System.currentTimeMillis());
             }
         }
 
@@ -748,6 +904,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
             synchronized (recentPackets) {
                 recentPackets.clear();
                 recentKeys.clear();
+                pendingKeys.clear();
             }
         }
 
@@ -839,17 +996,26 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
     }
 
     private final class ProxyCallback implements MqttCallbackExtended {
+        private final MqttAsyncClient expectedClient;
+
+        private ProxyCallback(MqttAsyncClient expectedClient) { this.expectedClient = expectedClient; }
 
         @Override
         public void connectComplete(boolean reconnect, String serverURI) {
-            ProxyConfig config = activeConfig;
-            log.info("MQTT proxy for '{}' connected to '{}'", connectionName, serverURI);
-            subscribeToBroker(config, reconnect);
+            synchronized (lifecycleLock) {
+                if (closed || client != expectedClient) return;
+                if (initialConnectRetry != null) initialConnectRetry.cancel(false);
+                if (subscriptionRetry != null) subscriptionRetry.cancel(false);
+                initialRetryDelayMs = 1_000;
+                subscriptionRetryDelayMs = 1_000;
+                log.info("MQTT proxy for '{}' connected to '{}'", connectionName, serverURI);
+                subscribeToBroker(activeConfig, reconnect);
+            }
         }
 
         @Override
         public void connectionLost(Throwable cause) {
-            if (closed) {
+            if (closed || client != expectedClient) {
                 return;
             }
             if (cause == null) {
@@ -861,7 +1027,7 @@ public final class MqttProxyService implements FromRadioListener, AutoCloseable 
 
         @Override
         public void messageArrived(String topic, MqttMessage message) {
-            onBrokerMessage(topic, message);
+            if (client == expectedClient) onBrokerMessage(topic, message);
         }
 
         @Override

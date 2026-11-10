@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,7 +89,7 @@ class NodeDetailContentTest {
             return null;
         });
 
-        assertEquals(14, onFxThread(() -> content.lookupAll(".table-row-cell").size()));
+        assertEquals(15, onFxThread(() -> content.lookupAll(".table-row-cell").size()));
     }
 
     @Test
@@ -112,7 +113,7 @@ class NodeDetailContentTest {
 
             assertNotNull(emojiCell);
             assertEquals(ContentDisplay.GRAPHIC_ONLY, emojiCell.getContentDisplay());
-            assertTrue(emojiCell.getGraphic() instanceof ImageView);
+            assertInstanceOf(ImageView.class, emojiCell.getGraphic());
             return null;
         });
     }

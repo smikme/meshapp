@@ -563,7 +563,13 @@ class ConnectionManagerTest {
             manager.connect(entry.getId());
             manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
 
-            manager.disconnectForDeviceReboot(entry.getId());
+            assertTrue(manager.disconnectForDeviceReboot(entry.getId()));
+
+            // A concurrent transport error can own cleanup while disconnect()
+            // returns through the stale-callback path. Wait until that callback
+            // has published the reconnect task before checking its final state.
+            assertTrue(waitUntil(() -> pendingReconnects().containsKey(entry.getId()), 5_000),
+                    "Device reboot must schedule reconnect after transport cleanup");
 
             assertFalse(entry.isConnected());
             assertTrue(entry.isReconnecting());

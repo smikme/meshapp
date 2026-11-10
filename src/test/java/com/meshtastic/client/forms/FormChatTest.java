@@ -535,6 +535,22 @@ class FormChatTest {
     }
 
     @Test
+    void statusOnlyUpdateKeepsTheHydratedReplyMention() {
+        MeshMessage loaded = incoming("reply");
+        loaded.setDbId(88);
+        loaded.setReplyId(42);
+        loaded.setReplyToOutgoing(true);
+        loaded.setReplyContextResolved(true);
+        MeshMessage updated = incoming("reply");
+        updated.setDbId(88);
+        updated.setReplyId(42);
+        updated.setStatus(MeshMessage.DeliveryStatus.DELIVERED);
+        FormChatMessages.copyLoadedMessageMetadata(loaded, updated);
+        assertTrue(loaded.isReplyToOutgoing());
+        assertTrue(loaded.isReplyContextResolved());
+    }
+
+    @Test
     void copyLoadedMessageMetadataAcceptsRetryPacketIdChangeWhenDbIdMatches() {
         MeshMessage loaded = outgoing("retry me");
         loaded.setDbId(88);

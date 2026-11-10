@@ -632,19 +632,19 @@ abstract class FormChatData extends FormChatRequests {
                 preview != null ? preview : "",
                 confirmed -> {
                     if (!confirmed) { return; }
-                    deleteMessageFromCurrentChat(msg, bubbleRow);
+                    deleteMessageFromCurrentChat(msg);
                 }
         );
     }
 
-    private void deleteMessageFromCurrentChat(MeshMessage msg, HBox bubbleRow) {
+    private void deleteMessageFromCurrentChat(MeshMessage msg) {
         MessageDbService.getInstance().deleteMessage(msg.getDbId());
         selectedMessageDbIds.remove(msg.getDbId());
         loadedMessages.removeIf(loaded -> loaded.getDbId() == msg.getDbId());
         loadedMessageRows.remove(msg.getDbId());
         loadedRenderedMessageRows.remove(msg.getDbId());
         recalcLoadedBounds();
-        messageContainer.getChildren().remove(bubbleRow);
+        synchronizeMessageViewport();
         updateMessageSelectionBar();
         refreshMessageSearchResults();
         reloadChatList();
@@ -706,10 +706,7 @@ abstract class FormChatData extends FormChatRequests {
     }
 
     private List<Long> selectedLoadedMessageDbIds() {
-        return loadedMessages.stream()
-                .map(MeshMessage::getDbId)
-                .filter(selectedMessageDbIds::contains)
-                .toList();
+        return List.copyOf(selectedMessageDbIds);
     }
 
     private void deleteMessagesFromCurrentChat(Collection<Long> dbIds) {
@@ -731,10 +728,7 @@ abstract class FormChatData extends FormChatRequests {
         loadedMessages.removeIf(loaded -> targetDbIds.contains(loaded.getDbId()));
         targetDbIds.forEach(loadedRenderedMessageRows::remove);
         targetDbIds.forEach(selectedMessageDbIds::remove);
-        targetDbIds.stream()
-                .map(loadedMessageRows::remove)
-                .filter(Objects::nonNull)
-                .forEach(messageContainer.getChildren()::remove);
+        synchronizeMessageViewport();
 
         recalcLoadedBounds();
         updateMessageSelectionBar();
