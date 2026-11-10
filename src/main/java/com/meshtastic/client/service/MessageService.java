@@ -113,7 +113,7 @@ public final class MessageService {
         String chatType = "channel";
         String chatKey = String.valueOf(channelIndex);
         hydrateReplyText(state, msg, ownerNodeId, chatType, chatKey);
-        MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
+        persistOutgoingMessage(msg, chatType, chatKey, ownerNodeId);
         state.addMessage(msg);
         state.registerPendingAck(packetId, msg);
         handler.sendToRadio(toRadio);
@@ -178,7 +178,7 @@ public final class MessageService {
         String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
         String chatType = "dm";
         hydrateReplyText(state, msg, ownerNodeId, chatType, peerNodeId);
-        MessageDbService.getInstance().save(msg, chatType, peerNodeId, ownerNodeId);
+        persistOutgoingMessage(msg, chatType, peerNodeId, ownerNodeId);
         state.addDirectMessage(msg, peerNodeId);
         if (usePkiTransport) {
             preparePeerForPkiDirectMessage(handler, state, peerNode)
@@ -203,6 +203,16 @@ public final class MessageService {
                     packetId, directChannel, false, msg);
         }
         return msg;
+    }
+
+    private static void persistOutgoingMessage(MeshMessage message, String chatType, String chatKey, String owner) {
+        MessageDbService.getInstance().save(message, chatType, chatKey, owner);
+        // A new outgoing message starts with dbId=0. Do not send it and clear
+        // the editor if the database rejected the insert: the chat could never
+        // load that message back. The UI already preserves drafts on failure.
+        if (message.getDbId() <= 0) {
+            throw new IllegalStateException(com.meshtastic.client.i18n.I18n.t("chat.messageSaveFailed"));
+        }
     }
 
     private static void hydrateReplyText(DeviceState state,
@@ -549,13 +559,14 @@ public final class MessageService {
     /**
      * Proxies an MQTT payload from the desktop/phone client to the device.
      * Payload is always sent as bytes so binary data is not lost.
+     * @return completion of the transport write, not an acknowledgement from firmware or the mesh
      */
-    public static void sendMqttClientProxyMessage(ProtocolHandler handler,
+    public static CompletableFuture<Void> sendMqttClientProxyMessage(ProtocolHandler handler,
                                                   String topic,
                                                   byte[] payload,
                                                   boolean retained) {
         if (handler == null || topic == null || topic.isBlank() || payload == null) {
-            return;
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Missing MQTT proxy message or protocol handler"));
         }
 
         MeshProtos.MqttClientProxyMessage proxyMessage = MeshProtos.MqttClientProxyMessage.newBuilder()
@@ -564,7 +575,7 @@ public final class MessageService {
                 .setRetained(retained)
                 .build();
 
-        handler.sendToRadio(MeshProtos.ToRadio.newBuilder()
+        return handler.sendToRadioAsync(MeshProtos.ToRadio.newBuilder()
                 .setMqttClientProxyMessage(proxyMessage)
                 .build(), false);
     }

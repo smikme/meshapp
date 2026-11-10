@@ -159,16 +159,17 @@ public final class ChatMessageSearchService implements AutoCloseable {
      * Starts a new generation and cancels any unfinished search task.
      */
     public long beginWork() {
+        long next = generation.incrementAndGet();
         cancelCurrentTask();
-        return generation.incrementAndGet();
+        return next;
     }
 
     /**
      * Invalidates pending responses without necessarily starting new work.
      */
     public void invalidate() {
-        cancelCurrentTask();
         generation.incrementAndGet();
+        cancelCurrentTask();
     }
 
     /**
@@ -200,7 +201,9 @@ public final class ChatMessageSearchService implements AutoCloseable {
                             BiConsumer<Long, Exception> onFailure) {
         currentTask = executor.submit(() -> {
             try {
-                onSuccess.accept(task.get());
+                if (!isCurrent(requestGeneration)) return;
+                T result = task.get();
+                if (isCurrent(requestGeneration)) onSuccess.accept(result);
             } catch (Exception e) {
                 if (isCurrent(requestGeneration)) {
                     onFailure.accept(requestGeneration, e);
@@ -361,7 +364,9 @@ public final class ChatMessageSearchService implements AutoCloseable {
     private void cancelCurrentTask() {
         Optional.ofNullable(currentTask)
                 .filter(task -> !task.isDone())
-                .ifPresent(task -> task.cancel(true));
+                // Embedded H2 disk I/O must never be interrupted: the file
+                // channel is shared with writers and other application services.
+                .ifPresent(task -> task.cancel(false));
     }
 
     /**
@@ -369,7 +374,7 @@ public final class ChatMessageSearchService implements AutoCloseable {
      */
     @Override
     public void close() {
-        cancelCurrentTask();
-        executor.shutdownNow();
+        invalidate();
+        executor.shutdown();
     }
 }

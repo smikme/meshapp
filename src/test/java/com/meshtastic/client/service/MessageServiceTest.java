@@ -63,6 +63,36 @@ class MessageServiceTest {
     }
 
     @Test
+    void unavailableDatabaseDoesNotSendAnInvisibleChannelMessage() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        DatabaseProvider.getConnection().close();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> MessageService.sendChannelMessage(handler, state, 0, "keep this draft", 0));
+        assertNull(connection.lastSentBytes, "never transmit a message which failed local persistence");
+        assertTrue(state.getMessageStore().getPendingAcks().isEmpty());
+    }
+
+    @Test
+    void unavailableDatabaseDoesNotSendAnInvisibleDirectMessage() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        var peer = new com.meshtastic.client.model.NodeData(0x23456789);
+        peer.setNodeId("!23456789");
+        state.getNodeDb().put(peer.getNodeNum(), peer);
+        NodeCacheService.getInstance();
+        DatabaseProvider.getConnection().close();
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> MessageService.sendDirectMessage(handler, state, "!23456789", "keep this draft", 0));
+        assertNull(connection.lastSentBytes);
+        assertTrue(state.getMessageStore().getPendingAcks().isEmpty());
+    }
+
+    @Test
     void requestSessionPasskeyKeepsWantResponseEnabled() throws Exception {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = track(new ProtocolHandler(connection));

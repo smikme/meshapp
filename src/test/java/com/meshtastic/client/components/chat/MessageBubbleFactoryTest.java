@@ -44,6 +44,55 @@ class MessageBubbleFactoryTest {
     }
 
     @Test
+    void recyclingReusesCompletedPreviewAndEvictsOldImagesAtThePixelBudget() {
+        onFxThread(() -> {
+            int[] loads = {0};
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(), new HashMap<>(), _ -> {
+                        loads[0]++;
+                        return new javafx.scene.image.WritableImage(1000, 1000);
+                    });
+            java.util.function.IntFunction<MeshMessage> message = id -> new MeshMessage("!2", "!ffffffff", 0,
+                    "https://d.privatepractice.app/test00" + id, 1, false);
+            var first = factory.buildRendered(message.apply(1));
+            HBox root = first.row();
+            factory.disposeRendered(first);
+            var repeated = factory.buildRendered(message.apply(1), root);
+            assertEquals(root, repeated.row());
+            assertEquals(1, loads[0], "returning to a loaded preview must not start another image load");
+            factory.disposeRendered(repeated);
+            for (int id = 2; id <= 6; id++) factory.disposeRendered(factory.buildRendered(message.apply(id), root));
+            factory.disposeRendered(factory.buildRendered(message.apply(1), root));
+            assertEquals(7, loads[0], "old previews must be evicted to respect the decoded pixel budget");
+        });
+    }
+
+    @Test
+    void recycledRootDispatchesReplyToItsCurrentMessageAndKeepsItsContextMenu() {
+        onFxThread(() -> {
+            AtomicReference<MeshMessage> replied = new AtomicReference<>();
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions() { @Override public void startReply(MeshMessage message) { replied.set(message); } },
+                    new HashMap<>());
+            MeshMessage old = new MeshMessage("!2", "!ffffffff", 0, "old", 1, false);
+            MeshMessage current = new MeshMessage("!3", "!ffffffff", 0, "current", 2, false);
+            var first = factory.buildRendered(old);
+            HBox root = first.row();
+            factory.disposeRendered(first);
+            var second = factory.buildRendered(current, root);
+            VBox bubble = findNodeWithStyle(second.row(), "chat-bubble-incoming", VBox.class).orElseThrow();
+            assertNotNull(bubble.getOnContextMenuRequested());
+            bubble.getOnMouseClicked().handle(new javafx.scene.input.MouseEvent(
+                    javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0, 0, 0, 0,
+                    javafx.scene.input.MouseButton.PRIMARY, 2, false, false, false, false,
+                    false, false, false, false, false, false, null));
+            assertEquals(current, replied.get());
+            factory.disposeRendered(second);
+            assertNull(bubble.getOnContextMenuRequested());
+        });
+    }
+
+    @Test
     void outgoingBubbleHasPrimaryClickHandlerForSelectionMode() {
         onFxThread(() -> {
             MessageBubbleFactory factory = new MessageBubbleFactory(
@@ -259,7 +308,7 @@ class MessageBubbleFactoryTest {
         void run() throws Exception;
     }
 
-    private static final class NoOpBubbleActions implements MessageBubbleFactory.BubbleActions {
+    private static class NoOpBubbleActions implements MessageBubbleFactory.BubbleActions {
         @Override public void startReply(MeshMessage msg) {}
         @Override public void sendReaction(MeshMessage msg, String emoji) {}
         @Override public void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {}

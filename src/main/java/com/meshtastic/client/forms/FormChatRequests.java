@@ -49,7 +49,7 @@ abstract class FormChatRequests extends FormChatMessages {
                 pc.prefix + " ⏱ " + pc.remaining[0], System.currentTimeMillis() / 1000, false);
         tmp.setSystemMessage(true);
         HBox bubble = bubbleFactory.build(tmp);
-        messageContainer.getChildren().add(bubble);
+        messageContainer.addAccessory(bubble);
         scrollToBottom();
         // buildSystemBubble returns HBox(botAvatar, VBox(textLabel, timeLabel)).
         VBox content = (VBox) bubble.getChildren().get(1);

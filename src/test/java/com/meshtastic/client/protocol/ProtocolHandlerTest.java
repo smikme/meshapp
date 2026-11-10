@@ -36,6 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -60,6 +62,56 @@ class ProtocolHandlerTest {
             handler.shutdown();
         }
         TestEnvironmentSupport.resetSingletons();
+    }
+
+    @Test
+    void trackedWriteReportsActualTransportCompletionAndFailure() throws Exception {
+        var entered = new CountDownLatch(1);
+        var transportResult = new java.util.concurrent.CompletableFuture<Void>();
+        var connection = new FakeConnection() {
+            @Override public java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+                entered.countDown();
+                return transportResult;
+            }
+        };
+        var handler = track(new ProtocolHandler(connection));
+        var result = handler.sendToRadioAsync(MeshProtos.ToRadio.newBuilder().setWantConfigId(17).build(), false);
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        assertFalse(result.isDone());
+        var failure = new java.io.IOException("test failure");
+        transportResult.completeExceptionally(failure);
+        assertSame(failure, assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> result.get(5, TimeUnit.SECONDS)).getCause());
+    }
+
+    @Test
+    void shutdownCompletesPendingWritesWithoutInterruptingActiveIo() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var interrupted = new java.util.concurrent.CompletableFuture<Boolean>();
+        var connection = new FakeConnection() {
+            @Override public java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+                entered.countDown();
+                try { release.await(); interrupted.complete(Thread.currentThread().isInterrupted()); }
+                catch (InterruptedException error) { interrupted.complete(true); }
+                return java.util.concurrent.CompletableFuture.completedFuture(null);
+            }
+        };
+        var handler = track(new ProtocolHandler(connection));
+        try {
+            var message = MeshProtos.ToRadio.newBuilder().setWantConfigId(17).build();
+            var active = handler.sendToRadioAsync(message, false);
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            var queued = handler.sendToRadioAsync(message, false);
+            handler.shutdown();
+            assertThrows(java.util.concurrent.ExecutionException.class, () -> active.get(5, TimeUnit.SECONDS));
+            assertThrows(java.util.concurrent.ExecutionException.class, () -> queued.get(5, TimeUnit.SECONDS));
+            assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> handler.sendToRadioAsync(message, false).get(5, TimeUnit.SECONDS));
+        } finally {
+            release.countDown();
+        }
+        assertFalse(interrupted.get(5, TimeUnit.SECONDS));
     }
 
     @Test
@@ -513,7 +565,7 @@ class ProtocolHandlerTest {
         return condition.getAsBoolean();
     }
 
-    private static final class FakeConnection implements MeshtasticConnection {
+    private static class FakeConnection implements MeshtasticConnection {
         // Minimal in-memory transport for deterministic dispatcher and heartbeat tests.
         private volatile Consumer<byte[]> dataListener;
         private volatile ConnectionListener connectionListener;

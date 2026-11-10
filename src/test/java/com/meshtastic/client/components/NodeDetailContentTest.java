@@ -88,7 +88,7 @@ class NodeDetailContentTest {
             return null;
         });
 
-        assertEquals(14, onFxThread(() -> content.lookupAll(".table-row-cell").size()));
+        assertEquals(15, onFxThread(() -> content.lookupAll(".table-row-cell").size()));
     }
 
     @Test

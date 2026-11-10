@@ -13,6 +13,7 @@ import com.meshtastic.client.components.chat.ChatNameResolver;
 import com.meshtastic.client.components.chat.MeshFilesImage;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.components.chat.VirtualMessagePane;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.modal.Toast;
@@ -605,6 +606,17 @@ abstract class FormChatUi extends FormChatBase {
         bubbleFactory.setTracerouteView(tracerouteView);
 
         messageScrollPane = createMessageScrollPane();
+        messageContainer.configure(messageScrollPane, (message, row) -> {
+            var rendered = bubbleFactory.buildRendered(message, row);
+            applyMessageSearchHighlight(rendered.row(), message.getDbId());
+            loadedMessageRows.put(message.getDbId(), rendered.row());
+            loadedRenderedMessageRows.put(message.getDbId(), rendered);
+            return rendered;
+        }, rendered -> {
+            loadedMessageRows.values().removeIf(row -> row == rendered.row());
+            loadedRenderedMessageRows.values().removeIf(row -> row == rendered);
+            bubbleFactory.disposeRendered(rendered);
+        });
         messageArea = new StackPane(messageScrollPane, scrollDownWrapper);
         registerMessageScrollListeners();
         chatInputBar = createChatInputBar();
@@ -773,12 +785,8 @@ abstract class FormChatUi extends FormChatBase {
         return hasText(script.getIcon()) ? script.getIcon().trim() : LuaScript.DEFAULT_ICON;
     }
 
-    private VBox createMessageContainer() {
-        VBox container = new VBox(6);
-        container.setPadding(new Insets(10, 15, 10, 15));
-        container.getStyleClass().add("chat-message-container");
-        container.setAlignment(Pos.BOTTOM_LEFT);
-        return container;
+    private VirtualMessagePane createMessageContainer() {
+        return new VirtualMessagePane();
     }
 
     private TracerouteView createTracerouteView() {
@@ -814,9 +822,13 @@ abstract class FormChatUi extends FormChatBase {
                         FormChatUi.this.showMeshFilesImage(image);
                     }
                 },
-                pendingStatusLabels);
+                pendingStatusLabels, this::loadPreviewImage);
         factory.setRemoteNodeDetailsProvider(this::resolveRemoteNodeForDetails, this::remoteNodeActionDelegate);
         return factory;
+    }
+
+    protected Image loadPreviewImage(String url) {
+        return new Image(url, true);
     }
 
     // The connection manager owns the shared RPC client.
@@ -987,6 +999,7 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private StackPane scrollDownWrapper;
+    private boolean scrollIndicatorRefreshQueued;
 
     private void createScrollDownWrapper() {
         scrollDownBtn = new Button("↓");
@@ -1021,12 +1034,22 @@ abstract class FormChatUi extends FormChatBase {
     private void registerMessageScrollListeners() {
         messageScrollPane.vvalueProperty().addListener((_, _, newVal) ->
                 handleMessageScroll(newVal.doubleValue()));
-        messageContainer.heightProperty().addListener((_, _, _) ->
-                keepLiveTailPinnedAfterResize());
+        messageContainer.heightProperty().addListener((_, _, _) -> {
+            keepLiveTailPinnedAfterResize();
+            refreshScrollIndicatorAfterLayout();
+        });
+        messageScrollPane.viewportBoundsProperty().addListener((_, _, _) ->
+                refreshScrollIndicatorAfterLayout());
     }
 
     private void handleMessageScroll(double vvalue) {
         if (!formVisible || isScrollStateSyncSuspended()) {
+            return;
+        }
+        if (messageContainer.isAdjustingViewport()) {
+            // Virtual layout changes vvalue while applying its pixel anchor.
+            // Refresh controls after that layout, without treating it as user input.
+            refreshScrollIndicatorAfterLayout();
             return;
         }
         loadAdjacentPagesIfNeeded(vvalue);
@@ -1036,13 +1059,20 @@ abstract class FormChatUi extends FormChatBase {
         saveScrollStateAfterUserScroll();
     }
 
+    private void refreshScrollIndicatorAfterLayout() {
+        if (!formVisible || scrollIndicatorRefreshQueued) return;
+        scrollIndicatorRefreshQueued = true;
+        Platform.runLater(() -> {
+            scrollIndicatorRefreshQueued = false;
+            if (!formVisible || isScrollStateSyncSuspended()) return;
+            // Read the current chat and geometry; a queued refresh may outlive a switch.
+            refreshUnreadTailIndicator();
+            if (!loadedMessages.isEmpty()) markSelectedChatReadWhenViewingTail();
+        });
+    }
+
     private void loadAdjacentPagesIfNeeded(double vvalue) {
-        if (vvalue < PAGE_LOAD_EDGE_THRESHOLD && !allHistoryLoaded && !loadingOlderMessages) {
-            loadOlderMessages();
-        }
-        if (vvalue > 1.0 - PAGE_LOAD_EDGE_THRESHOLD && !allNewerHistoryLoaded && !loadingNewerMessages) {
-            loadNewerMessages();
-        }
+        prefetchAdjacentHistory(vvalue);
     }
 
     private void refreshTailState(boolean atBottom) {
@@ -1079,7 +1109,10 @@ abstract class FormChatUi extends FormChatBase {
         long generation = scrollOperationGeneration;
         Platform.runLater(() -> {
             if (isCurrentScrollOperation(generation) && !isScrollStateSyncSuspended() && isAtLiveTail()) {
-                messageScrollPane.setVvalue(1.0);
+                // Keep the virtual viewport's pending bottom anchor. Setting
+                // vvalue before the new page is laid out looks like user input
+                // and can replace that anchor with the old empty geometry.
+                scrollToBottom();
             }
         });
     }
@@ -1418,12 +1451,13 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     protected void openChat(ChatItem chat) {
+        chatRequestGeneration++;
+        beginScrollOperation();
         suspendScrollStateSync();
         try {
             closeMessageSearch();
             hideMeshFilesImage();
             bubbleFactory.hideOpenReactionPopup();
-            scrollOperationGeneration++;
             this.selectedChat = chat;
             rememberSelectedChatForBoundConnection();
 
@@ -1438,10 +1472,13 @@ abstract class FormChatUi extends FormChatBase {
 
             // Show header, messages, and input controls.
             applyChatDetailGrowthConstraints();
-            detailPane.getChildren().clear();
-            detailPane.getChildren().addAll(
-                    chatHeader, headerSep, messageSelectionBar, messageArea,
-                    chatInputBar.getInputSeparator(), chatInputBar);
+            if (!detailPane.getChildren().contains(messageArea)) {
+                // These controls are shared across chats. Detaching them from
+                // the scene invalidates CSS for the entire input/viewport tree.
+                detailPane.getChildren().setAll(
+                        chatHeader, headerSep, messageSelectionBar, messageArea,
+                        chatInputBar.getInputSeparator(), chatInputBar);
+            }
 
             // Leaving a chat also leaves reply mode.
             chatInputBar.cancelPendingImageUpload();
@@ -1449,9 +1486,6 @@ abstract class FormChatUi extends FormChatBase {
 
             // Load the latest messages from the database.
             loadInitialMessages(true);
-            // Restore pending request bubbles such as traceroute and node info.
-            restorePendingCountdowns();
-
             updateInputEnabled();
             updateResponsiveChatLayout();
             chatInputBar.focusInput();
@@ -1476,11 +1510,13 @@ abstract class FormChatUi extends FormChatBase {
 
     protected void closeChat() {
         saveCurrentChatScrollState();
+        cancelHistoryLoading();
         closeMessageSearch();
         hideMeshFilesImage();
         chatInputBar.cancelPendingImageUpload();
         bubbleFactory.hideOpenReactionPopup();
-        scrollOperationGeneration++;
+        chatRequestGeneration++;
+        beginScrollOperation();
         this.selectedChat = null;
         clearLoadedMessageState();
         detailPane.getChildren().clear();

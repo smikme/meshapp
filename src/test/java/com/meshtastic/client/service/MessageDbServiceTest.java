@@ -43,6 +43,134 @@ class MessageDbServiceTest {
     }
 
     @Test
+    void backgroundHistoryUsesIdCursorsAndExactPageBoundaries() throws Exception {
+        var scope = new ChatHistoryLoader.Scope("connection", "!owner", "channel", "0", 1);
+        for (int i = 1; i <= 120; i++) {
+            service.save(message("item " + i, i, 120 - i), "channel", "0", "!owner");
+            service.save(message("other owner " + i, 1000 + i, i), "channel", "0", "!other");
+        }
+        var latest = service.loadHistoryPage(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.LATEST, 0, 50));
+        assertEquals(50, latest.messages().size());
+        assertEquals("item 71", latest.messages().getFirst().getText());
+        assertFalse(latest.first());
+        assertTrue(latest.last());
+        var previous = service.loadHistoryPage(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.BEFORE, latest.messages().getFirst().getDbId(), 50));
+        assertEquals("item 21", previous.messages().getFirst().getText());
+        var first = service.loadHistoryPage(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.BEFORE, previous.messages().getFirst().getDbId(), 50));
+        assertEquals(20, first.messages().size());
+        assertTrue(first.first());
+        var exactEnd = service.loadHistoryPage(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.AFTER, previous.messages().getLast().getDbId(), 50));
+        assertEquals(50, exactEnd.messages().size());
+        assertTrue(exactEnd.last(), "exactly full final page must not need an extra empty request");
+        assertEquals(latest.messages().stream().map(MeshMessage::getDbId).toList(), exactEnd.messages().stream().map(MeshMessage::getDbId).toList());
+        var around = service.loadHistoryPage(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.AROUND, previous.messages().get(30).getDbId(), 50));
+        assertEquals(50, around.messages().size());
+        assertEquals(latest.latestId(), around.latestId());
+        assertFalse(around.first());
+        assertFalse(around.last());
+    }
+
+    @Test
+    void historyHydratesQuotesAndReactionsInAnIndependentReadTransaction() throws Exception {
+        MeshMessage original = new MeshMessage("!owner", "!ffffffff", 0, "quoted original", 1, true);
+        original.setPacketId(1);
+        service.save(original, "channel", "0", "!owner");
+        MeshMessage reply = message("reply", 2, 2);
+        reply.setReplyId(1);
+        service.save(reply, "channel", "0", "!owner");
+        var reaction = new MessageReaction(2, "!sender", "👍", 3, false);
+        reaction.setPacketId(3);
+        service.saveReaction(reaction, "channel", "0", "!owner");
+        var scope = new ChatHistoryLoader.Scope("connection", "!owner", "channel", "0", 1);
+        var connection = DatabaseProvider.getConnection();
+        connection.setAutoCommit(false);
+        try {
+            service.save(message("not committed", 4, 4), "channel", "0", "!owner");
+            try (var loader = new ChatHistoryLoader()) {
+                var page = loader.load(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.LATEST, 0, 1))
+                        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+                assertFalse(connection.getAutoCommit());
+                assertEquals("reply", page.messages().getFirst().getText(), "reader must not commit or observe the writer's transaction");
+                assertEquals("quoted original", page.messages().getFirst().getReplyText());
+                assertTrue(page.messages().getFirst().isReplyToOutgoing());
+                assertTrue(page.messages().getFirst().isReplyContextResolved());
+                assertEquals("👍", page.messages().getFirst().getReactions().getFirst().getEmoji());
+            }
+        } finally {
+            connection.rollback();
+            connection.setAutoCommit(true);
+        }
+        service.deleteMessage(original.getDbId());
+        assertEquals("quoted original", service.loadLast("channel", "0", 1, "!owner").getFirst().getReplyText(),
+                "resolved quote must remain persisted after the original is deleted");
+    }
+
+    @Test
+    void unavailableHistoryCompletesExceptionallyAndNeverMasqueradesAsEndOfHistory() throws Exception {
+        var scope = new ChatHistoryLoader.Scope("connection", "!owner", "channel", "0", 1);
+        service.prepareForDatabaseReset();
+        try (var loader = new ChatHistoryLoader()) {
+            var future = loader.load(new ChatHistoryLoader.Request(scope, ChatHistoryLoader.Direction.LATEST, 0, 50));
+            var error = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> future.get(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(error.getCause() instanceof java.sql.SQLException);
+        }
+    }
+
+    @Test
+    void unreadCountsStayCurrentAfterInsertsDuplicatesAndDeletes() {
+        assertEquals(0, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+        MeshMessage first = message("incoming", 101, 10);
+        service.save(first, "channel", "0", "!owner");
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+        service.save(first, "channel", "0", "!owner");
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+        MeshMessage outgoing = new MeshMessage("!owner", "!ffffffff", 0, "sent", 20, true);
+        outgoing.setPacketId(102);
+        service.save(outgoing, "channel", "0", "!owner");
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+        service.deleteMessage(first.getDbId());
+        assertEquals(0, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+        service.save(message("next", 103, 30), "channel", "0", "!owner");
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+        service.deleteChat("channel", "0", "!owner");
+        assertEquals(0, service.getUnreadEligibleMessageCount("channel", "0", "!owner"));
+    }
+
+    @Test
+    void unreadCountCacheSeparatesOwnersAndChatTypesAndNormalizesNullOwner() {
+        service.save(message("channel A", 1, 10), "channel", "0", "!a");
+        service.save(message("dm A", 2, 10), "dm", "0", "!a");
+        service.save(message("channel B", 3, 10), "channel", "0", "!b");
+        service.save(message("no owner", 4, 10), "channel", "0", null);
+        for (String owner : List.of("!a", "!b", "")) {
+            assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", owner));
+        }
+        assertEquals(1, service.getUnreadEligibleMessageCount("dm", "0", "!a"));
+        service.deleteChat("channel", "0", "!a");
+        assertEquals(0, service.getUnreadEligibleMessageCount("channel", "0", "!a"));
+        assertEquals(1, service.getUnreadEligibleMessageCount("dm", "0", "!a"));
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!b"));
+        service.save(message("another", 5, 10), "channel", "0", "");
+        assertEquals(2, service.getUnreadEligibleMessageCount("channel", "0", null));
+    }
+
+    @Test
+    void unreadCountCacheDoesNotSurviveDatabaseReset() throws Exception {
+        service.save(message("before reset", 1, 10), "channel", "0", "!a");
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!a"));
+        service.prepareForDatabaseReset();
+        assertEquals(0, service.getUnreadEligibleMessageCount("channel", "0", "!a"));
+        try (var statement = DatabaseProvider.getConnection().createStatement()) {
+            statement.executeUpdate("DELETE FROM messages");
+        }
+        service.reinitializeAfterDatabaseReset();
+        assertEquals(0, service.getUnreadEligibleMessageCount("channel", "0", "!a"));
+        service.save(message("after reset", 2, 20), "channel", "0", "!a");
+        assertEquals(1, service.getUnreadEligibleMessageCount("channel", "0", "!a"));
+    }
+
+    @Test
     void saveAndLoadLastAreScopedByOwnerNodeId() {
         MeshMessage ownerAFirst = message("a-1", 101, 10);
         MeshMessage ownerASecond = message("a-2", 102, 20);

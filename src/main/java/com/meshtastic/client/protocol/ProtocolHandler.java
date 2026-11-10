@@ -8,7 +8,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -62,6 +64,7 @@ public class ProtocolHandler {
     private final BlockingQueue<byte[]> incomingQueue = new LinkedBlockingQueue<>();
     /** Outgoing packet queue, prioritizing normal commands over MQTT downlink. */
     private final PriorityBlockingQueue<OutboundFrame> outgoingQueue = new PriorityBlockingQueue<>();
+    private final Set<CompletableFuture<Void>> pendingWrites = ConcurrentHashMap.newKeySet();
     private final Thread dispatcherThread;
     private final Thread senderThread;
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
@@ -145,8 +148,27 @@ public class ProtocolHandler {
                 outboundSequence.getAndIncrement(),
                 toRadio,
                 expectResponseAfterWrite,
-                0
+                0,
+                null
         ));
+    }
+
+    /** Completes after the transport write, not after queueing or a radio/network acknowledgement. */
+    public CompletableFuture<Void> sendToRadioAsync(MeshProtos.ToRadio toRadio, boolean expectResponseAfterWrite) {
+        if (toRadio == null || shutdownRequested.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Protocol handler is closed or message is null"));
+        }
+        var result = new CompletableFuture<Void>();
+        pendingWrites.add(result);
+        result.whenComplete((_, _) -> pendingWrites.remove(result));
+        var frame = new OutboundFrame(classifyOutboundPriority(toRadio), outboundSequence.getAndIncrement(),
+                toRadio, expectResponseAfterWrite, 0, result);
+        outgoingQueue.offer(frame);
+        if (shutdownRequested.get()) {
+            outgoingQueue.remove(frame);
+            result.completeExceptionally(new IllegalStateException("Protocol handler closed before write"));
+        }
+        return result;
     }
 
     /**
@@ -195,8 +217,11 @@ public class ProtocolHandler {
         connection.setDataListener(null);
         incomingQueue.clear();
         outgoingQueue.clear();
+        pendingWrites.forEach(write -> write.completeExceptionally(new IllegalStateException("Protocol handler closed")));
         pendingDeviceQueueStatus.clear();
-        senderThread.interrupt();
+        // The sender may be recording a packet in embedded H2. Wake take()
+        // without interrupting file I/O and closing the shared database channel.
+        outgoingQueue.offer(new OutboundFrame(0, 0, MeshProtos.ToRadio.getDefaultInstance(), false, 0, null));
         incomingQueue.offer(SHUTDOWN_MARKER);
     }
 
@@ -277,6 +302,16 @@ public class ProtocolHandler {
     }
 
     private void sendOutboundFrame(OutboundFrame outbound) {
+        try {
+            writeOutboundFrame(outbound);
+        } catch (RuntimeException error) {
+            if (outbound.writeResult() != null) outbound.writeResult().completeExceptionally(error);
+            throw error;
+        }
+    }
+
+    private void writeOutboundFrame(OutboundFrame outbound) {
+        if (outbound.writeResult() != null && outbound.writeResult().isCompletedExceptionally()) return;
         if (delayForDeviceQueueBackoff(outbound)) {
             return;
         }
@@ -292,7 +327,15 @@ public class ProtocolHandler {
         if (packetId != 0) {
             trackPendingDeviceQueueStatus(packetId, outbound);
         }
-        connection.sendBytes(frame, outbound.expectResponseAfterWrite());
+        if (shutdownRequested.get()) return;
+        if (outbound.writeResult() == null) {
+            connection.sendBytes(frame, outbound.expectResponseAfterWrite());
+        } else {
+            connection.sendBytesAsync(frame, outbound.expectResponseAfterWrite()).whenComplete((_, error) -> {
+                if (error == null) outbound.writeResult().complete(null);
+                else outbound.writeResult().completeExceptionally(error);
+            });
+        }
     }
 
     private void trackPendingDeviceQueueStatus(int packetId, OutboundFrame outbound) {
@@ -509,7 +552,8 @@ public class ProtocolHandler {
                                  long sequence,
                                  MeshProtos.ToRadio toRadio,
                                  boolean expectResponseAfterWrite,
-                                 int deviceQueueAttempts) implements Comparable<OutboundFrame> {
+                                 int deviceQueueAttempts,
+                                 CompletableFuture<Void> writeResult) implements Comparable<OutboundFrame> {
 
         private boolean hasMeshPacket() {
             return toRadio != null && toRadio.hasPacket();
@@ -520,7 +564,7 @@ public class ProtocolHandler {
         }
 
         private OutboundFrame withDeviceQueueAttempts(int attempts) {
-            return new OutboundFrame(priority, sequence, toRadio, expectResponseAfterWrite, attempts);
+            return new OutboundFrame(priority, sequence, toRadio, expectResponseAfterWrite, attempts, writeResult);
         }
 
         @Override

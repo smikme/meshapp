@@ -55,6 +55,7 @@ public class MeshMessage {
     private long dbId;
     private List<MessageReaction> reactions = Collections.emptyList();
     private boolean replyToOutgoing;
+    private transient boolean replyContextResolved;
 
     /**
      * Creates a message with its core fields.
@@ -135,6 +136,8 @@ public class MeshMessage {
 
     public boolean isReplyToOutgoing() { return replyToOutgoing; }
     public void setReplyToOutgoing(boolean replyToOutgoing) { this.replyToOutgoing = replyToOutgoing; }
+    public boolean isReplyContextResolved() { return replyContextResolved; }
+    public void setReplyContextResolved(boolean resolved) { replyContextResolved = resolved; }
 
     /**
      * Returns whether hop count can be calculated safely.
