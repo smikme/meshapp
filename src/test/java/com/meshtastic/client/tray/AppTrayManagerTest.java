@@ -295,6 +295,12 @@ class AppTrayManagerTest {
             input[0] = new TextField("Unsent message");
             scene[0] = stage.getScene();
             ((StackPane) scene[0].getRoot()).getChildren().setAll(input[0]);
+            // Skin creation and the first scene focus change select all text.
+            // Complete both before simulating the user's selection so a later
+            // JavaFX pulse cannot overwrite it during the tray transition.
+            scene[0].getRoot().applyCss();
+            input[0].requestFocus();
+            assertSame(input[0], scene[0].getFocusOwner());
             input[0].selectRange(2, 7);
             fireCloseRequest();
         });
@@ -303,6 +309,7 @@ class AppTrayManagerTest {
         onFxThread(() -> {
             assertTrue(stage.isShowing());
             assertSame(scene[0], stage.getScene());
+            assertSame(input[0], scene[0].getFocusOwner());
             assertEquals("Unsent message", input[0].getText());
             assertEquals(2, input[0].getSelection().getStart());
             assertEquals(7, input[0].getSelection().getEnd());
