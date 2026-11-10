@@ -638,8 +638,10 @@ class FormChatViewportTest {
             pulse();
             fx(() -> found[0] = form.loadedMessageRows.containsKey(target.getDbId()));
             // Bounded polling also pumps FX layout; there is no single search/render completion event.
-            //noinspection BusyWait
-            if (!found[0]) Thread.sleep(10);
+            if (!found[0]) {
+                //noinspection BusyWait
+                Thread.sleep(10);
+            }
         }
         assertTrue(found[0], "search must load its result from outside the current window");
         drain();
@@ -730,8 +732,10 @@ class FormChatViewportTest {
         while (loading[0] && System.nanoTime() < deadline) {
             fx(() -> { form.applyCss(); form.layout(); loading[0] = form.isHistoryLoading(); });
             // Yield outside the FX thread while waiting for database work and layout together.
-            //noinspection BusyWait
-            if (loading[0]) Thread.sleep(10);
+            if (loading[0]) {
+                //noinspection BusyWait
+                Thread.sleep(10);
+            }
         }
         assertFalse(loading[0], "history reader did not complete");
         for (int i = 0; i < 6; i++) fx(() -> { form.applyCss(); form.layout(); });

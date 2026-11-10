@@ -345,8 +345,10 @@ class ChatPerformanceTest {
         while (loading[0] && System.nanoTime() < deadline) {
             fx(() -> loading[0] = form != null && form.isHistoryLoading());
             // Bounded polling from the test thread lets the FX queue and layout pulses progress.
-            //noinspection BusyWait
-            if (loading[0]) Thread.sleep(10);
+            if (loading[0]) {
+                //noinspection BusyWait
+                Thread.sleep(10);
+            }
         }
         assertFalse(loading[0], "history loading timed out");
         // Drain nested runLater chains, then allow actual CSS/layout/render pulses.
