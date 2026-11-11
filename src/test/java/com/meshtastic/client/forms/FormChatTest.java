@@ -48,6 +48,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class FormChatTest {
 
+    @Test
+    void imageViewerLoadsBinaryUrlAndReleasesImageOnClose() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            var requested = new AtomicReference<String>();
+            var descriptor = new com.meshtastic.client.components.chat.ChatImage("feZ",
+                    "https://meshpic.org/feZ", "https://meshpic.org/image/feZ?s=t",
+                    "https://meshpic.org/image/feZ", null);
+            form.showChatImage(descriptor, url -> {
+                requested.set(url);
+                return new javafx.scene.image.WritableImage(2, 2);
+            });
+            assertEquals(descriptor.fullUrl(), requested.get());
+            StackPane overlay = readField(form, "imageViewerOverlay");
+            var view = (javafx.scene.image.ImageView) overlay.lookup(".chat-image-viewer-image");
+            assertNotNull(view.getImage());
+            assertTrue(view.isVisible());
+            ((javafx.scene.control.Button) overlay.lookup(".chat-image-viewer-close")).fire();
+            assertNull(view.getImage());
+            assertFalse(view.fitWidthProperty().isBound());
+            assertFalse(form.messageArea.getChildren().contains(overlay));
+        });
+    }
+
+    @Test
+    void imageViewerKeepsPublicLinkWhenImageCannotBeDecoded() {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            var descriptor = new com.meshtastic.client.components.chat.ChatImage("feZ",
+                    "https://meshpic.org/feZ", "https://meshpic.org/image/feZ?s=t",
+                    "https://meshpic.org/image/feZ", null);
+            form.showChatImage(descriptor, _ -> new javafx.scene.image.Image(new java.io.ByteArrayInputStream(new byte[]{1})));
+            StackPane overlay = readField(form, "imageViewerOverlay");
+            var link = (javafx.scene.control.Hyperlink) overlay.lookup(".hyperlink");
+            assertEquals(descriptor.shareUrl(), link.getText());
+            assertTrue(link.getParent().isVisible());
+            assertFalse(overlay.lookup(".chat-image-viewer-image").isVisible());
+            ((javafx.scene.control.Button) overlay.lookup(".chat-image-viewer-close")).fire();
+        });
+    }
+
     @TempDir
     Path tempHome;
 
