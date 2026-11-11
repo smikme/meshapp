@@ -3,7 +3,6 @@ package com.meshtastic.client.utils;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
 
-import java.util.List;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 import javafx.beans.property.ReadOnlyBooleanProperty;
