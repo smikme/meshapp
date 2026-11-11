@@ -6,10 +6,13 @@ import groovy.util.Node
 import groovy.util.NodeList
 import groovy.xml.XmlNodePrinter
 import groovy.xml.XmlParser
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.security.KeyFactory
 import java.security.spec.X509EncodedKeySpec
 import java.time.LocalDate
@@ -326,21 +329,22 @@ if (releaseVersionInfo == null) {
 	def counterFile = new File(projectDir, '.gradle/meshapp-local-build-number')
 	if (reserve || counterFile.exists()) {
 		counterFile.parentFile.mkdirs()
-		try (def counter = java.nio.channels.FileChannel.open(counterFile.toPath(),
-				java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.READ, java.nio.file.StandardOpenOption.WRITE);
-			 def lock = counter.lock()) {
-			def buffer = java.nio.ByteBuffer.allocate(64)
-			counter.read(buffer)
-			buffer.flip()
-			def stored = StandardCharsets.UTF_8.decode(buffer).toString().trim()
-			localBuildNumber = stored ? Long.parseLong(stored) : 0L
-			if (reserve) {
-				localBuildNumber++
-				nativeBuildVersion(localBuildNumber) // fail before wrapping an installer version
-				counter.truncate(0)
-				counter.position(0)
-				counter.write(StandardCharsets.UTF_8.encode("${localBuildNumber}\n"))
-				counter.force(true)
+		FileChannel.open(counterFile.toPath(),
+				StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE).withCloseable { counter ->
+			counter.lock().withCloseable {
+				def buffer = ByteBuffer.allocate(64)
+				counter.read(buffer)
+				buffer.flip()
+				def stored = StandardCharsets.UTF_8.decode(buffer).toString().trim()
+				localBuildNumber = stored ? Long.parseLong(stored) : 0L
+				if (reserve) {
+					localBuildNumber++
+					nativeBuildVersion(localBuildNumber) // fail before wrapping an installer version
+					counter.truncate(0)
+					counter.position(0)
+					counter.write(StandardCharsets.UTF_8.encode("${localBuildNumber}\n"))
+					counter.force(true)
+				}
 			}
 		}
 	}
@@ -508,11 +512,11 @@ tasks.register('generateVersionProperties') {
 		// participate in the public update channel. Keep in sync with scripts/ci/release.py.
 		def versionCode = 0
 		if (releaseVersionInfo != null) {
-			def parts = releaseVersionInfo.baseVersion.tokenize('.').collect { it.toInteger() }
-			if (parts[0] > 255 || parts[1] > 255 || parts[2] > 999) {
+			List<Integer> parts = releaseVersionInfo.baseVersion.toString().tokenize('.').collect { it.toInteger() }
+			if (parts.get(0) > 255 || parts.get(1) > 255 || parts.get(2) > 999) {
 				throw new GradleException('Release version must fit major/minor 0..255 and patch 0..999')
 			}
-			versionCode = parts[0] * 1000000 + parts[1] * 1000 + parts[2]
+			versionCode = parts.get(0) * 1000000 + parts.get(1) * 1000 + parts.get(2)
 			if (releaseVersionInfo.unstable) {
 				versionCode--
 			}

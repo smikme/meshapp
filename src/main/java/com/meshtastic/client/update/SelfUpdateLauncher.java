@@ -137,10 +137,6 @@ public final class SelfUpdateLauncher {
         return plan.bundledVersion();
     }
 
-    static Process startPayload(PayloadPlan plan, String currentVersion, String[] args) throws IOException {
-        return startPayload(plan, currentVersion, args, null);
-    }
-
     static Process startPayload(PayloadPlan plan,
                                 String currentVersion,
                                 String[] args,
@@ -222,7 +218,7 @@ public final class SelfUpdateLauncher {
         }
 
         for (String entry : classPath.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
-            if (entry == null || entry.isBlank()) {
+            if (entry.isBlank()) {
                 continue;
             }
             Path path;
@@ -243,7 +239,7 @@ public final class SelfUpdateLauncher {
         }
 
         for (String entry : classPath.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator))) {
-            if (entry == null || entry.isBlank()) {
+            if (entry.isBlank()) {
                 continue;
             }
             try {
@@ -253,7 +249,7 @@ public final class SelfUpdateLauncher {
                         && Files.isDirectory(parent)
                         && path.getFileName() != null
                         && path.getFileName().toString().endsWith(".jar")) {
-                    return Optional.of(new PackagedApp(parent, launcherPath(properties, null)));
+                    return Optional.of(new PackagedApp(parent, launcherPath(properties)));
                 }
             } catch (Exception ignored) {}
         }
@@ -277,11 +273,7 @@ public final class SelfUpdateLauncher {
         return Optional.empty();
     }
 
-    private static String launcherPath(Properties properties, Path macAppBundle) {
-        if (macAppBundle != null) {
-            return macAppBundle.toString();
-        }
-
+    private static String launcherPath(Properties properties) {
         String configured = firstNonBlank(properties.getProperty("jpackage.app-path"));
         if (configured != null) {
             Optional<Path> appBundle = macBundleFromExecutable(Path.of(configured));
@@ -394,7 +386,7 @@ public final class SelfUpdateLauncher {
         try (Stream<Path> stream = Files.list(libDir)) {
             List<Path> jars = stream
                     .filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".jar"))
-                    .sorted((left, right) -> jarPriority(left).compareTo(jarPriority(right)))
+                    .sorted(Comparator.comparing(SelfUpdateLauncher::jarPriority))
                     .toList();
             for (Path jar : jars) {
                 Optional<VersionInfo> info = jarVersionInfo(jar);

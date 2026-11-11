@@ -24,6 +24,7 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
 import javafx.stage.Window;
 
+import java.util.Objects;
 import java.util.concurrent.CompletionException;
 
 /**
@@ -48,7 +49,7 @@ public class About extends VBox {
         projectBox.setPadding(new Insets(10));
         projectBox.setStyle(BORDER_STYLE);
 
-        Region projectLogo = createMeshIcon(42);
+        Region projectLogo = createMeshIcon();
 
         Label projectName = new Label("MeshApp");
         projectName.getStyleClass().add("item-title");
@@ -79,7 +80,8 @@ public class About extends VBox {
         partnerTitle.getStyleClass().add("section-title");
 
         ImageView partnerLogo = new ImageView(
-                new Image(About.class.getResourceAsStream("/icons/onemesh.png")));
+                new Image(Objects.requireNonNull(About.class.getResource("/icons/onemesh.png"),
+                        "Missing partner logo: /icons/onemesh.png").toExternalForm()));
         partnerLogo.setFitWidth(36);
         partnerLogo.setFitHeight(36);
         partnerLogo.setPreserveRatio(true);
@@ -124,7 +126,7 @@ public class About extends VBox {
         updateStatus.getStyleClass().add("muted-note-label");
         updateStatus.setWrapText(true);
         setUpdateStatus(updateStatus, null);
-        checkUpdatesButton.setOnAction(event -> checkForUpdates(checkUpdatesButton, updateStatus));
+        checkUpdatesButton.setOnAction(_ -> checkForUpdates(checkUpdatesButton, updateStatus));
 
         Region versionSpacer = new Region();
         HBox.setHgrow(versionSpacer, Priority.ALWAYS);
@@ -149,7 +151,7 @@ public class About extends VBox {
         Button reportButton = new Button(I18n.t("about.support.report"));
         reportButton.getStyleClass().add("report-problem-button");
         reportButton.setMaxWidth(Double.MAX_VALUE);
-        reportButton.setOnAction(event -> openProblemReportFlow());
+        reportButton.setOnAction(_ -> openProblemReportFlow());
 
         reportBox.getChildren().addAll(reportTitle, reportDesc, reportButton);
 
@@ -160,7 +162,8 @@ public class About extends VBox {
      * MeshApp logo mark matching meshapp.ru: three primary nodes, three
      * secondary nodes, and links between them.
      */
-    private Region createMeshIcon(double size) {
+    private Region createMeshIcon() {
+        double size = 42;
         double s = size / 32.0;
 
         // Secondary lines are drawn first, below the nodes.
@@ -214,7 +217,7 @@ public class About extends VBox {
     private Hyperlink createLink(String text, String url) {
         Hyperlink link = new Hyperlink(text);
         link.setPadding(new Insets(0));
-        link.setOnAction(e -> openUrl(url));
+        link.setOnAction(_ -> openUrl(url));
         return link;
     }
 

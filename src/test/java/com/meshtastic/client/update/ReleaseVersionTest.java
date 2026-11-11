@@ -2,13 +2,14 @@ package com.meshtastic.client.update;
 
 import org.junit.jupiter.api.Test;
 import java.util.List;
+import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ReleaseVersionTest {
     @Test
     void ordersBuildsNumericallyAndStableAfterUnstable() {
-        var versions = List.of("v2.4.0-unstable.9", "v2.4.0-unstable.10", "v2.4.0",
-                "v2.4.0+build.11", "v2.4.0+build.12", "v2.4.1-unstable.13").stream()
+        var versions = Stream.of("v2.4.0-unstable.9", "v2.4.0-unstable.10", "v2.4.0",
+                "v2.4.0+build.11", "v2.4.0+build.12", "v2.4.1-unstable.13")
                 .map(v -> ReleaseVersion.parse(v).orElseThrow()).toList();
         assertEquals(versions, versions.stream().sorted().toList());
         assertEquals(2003999, versions.getFirst().legacyCode());

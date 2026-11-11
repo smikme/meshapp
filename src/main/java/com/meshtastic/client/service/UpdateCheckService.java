@@ -97,7 +97,7 @@ public final class UpdateCheckService {
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .thenApply(response -> {
                     // A channel can be absent before its first signed publication.
-                    if (response.statusCode() == 404) return Optional.<UpdateInfo>empty();
+                    if (response.statusCode() == 404) return Optional.empty();
                     if (response.statusCode() != 200) {
                         log.warn("Update check: HTTP {}", response.statusCode());
                         throw new IllegalStateException("HTTP " + response.statusCode());
@@ -106,13 +106,9 @@ public final class UpdateCheckService {
                 });
     }
 
-    static Optional<UpdateInfo> availableUpdate(String body, int localVersionCode) {
-        return availableUpdate(body, null, localVersionCode, "stable");
-    }
-
     static Optional<UpdateInfo> availableUpdate(String body, String localVersion, int localVersionCode, String channel) {
         UpdateInfo info = GSON.fromJson(body, UpdateInfo.class);
-        if (info != null && (!info.hasConsistentVersionMetadata() || !channel.equals(info.getChannel()))) {
+        if (info != null && (info.hasInconsistentVersionMetadata() || !channel.equals(info.getChannel()))) {
             throw new IllegalArgumentException("Update manifest version/channel metadata does not match its feed");
         }
         if (info != null && info.getVersionCode() > 0 && ReleaseVersion.compare(info.getVersion(), info.getVersionCode(),

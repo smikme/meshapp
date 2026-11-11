@@ -46,12 +46,8 @@ public final class UpdateSignatureVerifier {
         return new UpdateSignatureVerifier(publicKey, false);
     }
 
-    static UpdateSignatureVerifier allowUnsignedForTests() {
-        return new UpdateSignatureVerifier(null, true);
-    }
-
     public boolean isTrusted(UpdateInfo info, SelfUpdateArtifact artifact) {
-        if (info == null || artifact == null || !info.hasConsistentVersionMetadata()) {
+        if (info == null || artifact == null || info.hasInconsistentVersionMetadata()) {
             return false;
         }
         if (publicKey == null) {

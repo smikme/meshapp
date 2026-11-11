@@ -19,15 +19,23 @@ import java.util.Set;
  */
 public class UpdateInfo {
 
+    @SerializedName("version")
     private String version;
+    @SerializedName("versionCode")
     private int versionCode;
+    @SerializedName("buildNumber")
     private Long buildNumber;
+    @SerializedName("channel")
     private String channel;
+    @SerializedName("releaseVersion")
     private String releaseVersion;
+    @SerializedName("releaseNotes")
     private String releaseNotes;
     @SerializedName("releaseNotes_ru")
     private String releaseNotesRu;
+    @SerializedName("downloads")
     private Map<String, String> downloads;
+    @SerializedName("selfUpdate")
     private Map<String, SelfUpdateArtifact> selfUpdate;
 
     public String getVersion() { return version; }
@@ -40,17 +48,14 @@ public class UpdateInfo {
     }
 
     /** The signed version string is authoritative; duplicated metadata must agree with it. */
-    public boolean hasConsistentVersionMetadata() {
-        if (buildNumber == null && channel == null && releaseVersion == null) return true;
+    public boolean hasInconsistentVersionMetadata() {
+        if (buildNumber == null && channel == null && releaseVersion == null) return false;
         return ReleaseVersion.parse(version).map(v ->
-                (buildNumber == null || buildNumber == v.buildNumber())
-                        && (channel == null || channel.equals(v.channel()))
-                        && (releaseVersion == null || releaseVersion.equals(v.baseVersion()))
-                        && versionCode == v.legacyCode()).orElse(false);
+                (buildNumber != null && buildNumber != v.buildNumber())
+                        || (channel != null && !channel.equals(v.channel()))
+                        || (releaseVersion != null && !releaseVersion.equals(v.baseVersion()))
+                        || versionCode != v.legacyCode()).orElse(true);
     }
-    public String getReleaseNotes() { return releaseNotes; }
-    public String getReleaseNotesRu() { return releaseNotesRu; }
-    public Map<String, String> getDownloads() { return downloads; }
     public Map<String, SelfUpdateArtifact> getSelfUpdate() { return selfUpdate; }
 
     /**

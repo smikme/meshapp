@@ -59,7 +59,7 @@ import org.slf4j.LoggerFactory;
 public class MeshApp extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(MeshApp.class);
-    private static final AppVersion.Info APPLICATION_INFO = AppVersion.resolve(MeshApp.class);
+    private static final AppVersion.Info APPLICATION_INFO = AppVersion.resolve();
 
     public static final String APPLICATION_VERSION = APPLICATION_INFO.version();
     public static final int VERSION_CODE = APPLICATION_INFO.versionCode();

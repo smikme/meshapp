@@ -6,6 +6,7 @@ import com.meshtastic.client.update.ReleaseVersion;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,8 +18,8 @@ final class AppVersion {
 
     private AppVersion() {}
 
-    static Info resolve(Class<?> resourceAnchor) {
-        return resolve(System.getenv(), System.getProperties(), resourceAnchor);
+    static Info resolve() {
+        return resolve(System.getenv(), System.getProperties(), MeshApp.class);
     }
 
     static Info resolve(Map<String, String> env,
@@ -28,11 +29,8 @@ final class AppVersion {
                 SelfUpdateEnvironment.from(env, properties);
         if (updateEnvironment.isPresent()) {
             SelfUpdateEnvironment selfUpdate = updateEnvironment.get();
-            Optional<Info> managedInfo = managedPayloadInfo(selfUpdate);
-            if (managedInfo.isPresent()) {
-                return managedInfo.get();
-            }
-            return new Info(selfUpdate.version(), 0);
+            return managedPayloadInfo(selfUpdate)
+                    .orElseGet(() -> new Info(selfUpdate.version(), 0));
         }
 
         return embeddedInfo(resourceAnchor);
@@ -50,7 +48,7 @@ final class AppVersion {
         try (Stream<Path> stream = Files.list(libDir)) {
             List<Path> jars = stream
                     .filter(path -> Files.isRegularFile(path) && path.getFileName().toString().endsWith(".jar"))
-                    .sorted((left, right) -> jarPriority(left).compareTo(jarPriority(right)))
+                    .sorted(Comparator.comparing(AppVersion::jarPriority))
                     .toList();
             for (Path jar : jars) {
                 Optional<Info> info = jarInfo(jar);

@@ -48,7 +48,7 @@ class UpdateCheckServiceTest {
     void availableUpdateReturnsInfoForNewerManifest() {
         Optional<UpdateInfo> update = UpdateCheckService.availableUpdate(
                 "{\"version\":\"1.2.4\",\"versionCode\":124}",
-                123
+                null, 123, "stable"
         );
 
         assertTrue(update.isPresent());
@@ -59,7 +59,7 @@ class UpdateCheckServiceTest {
     void availableUpdateReturnsEmptyForCurrentManifest() {
         Optional<UpdateInfo> update = UpdateCheckService.availableUpdate(
                 "{\"version\":\"1.2.3\",\"versionCode\":123}",
-                123
+                null, 123, "stable"
         );
 
         assertTrue(update.isEmpty());
@@ -80,16 +80,16 @@ class UpdateCheckServiceTest {
 
     @Test
     void fetchesOnlyAllowedChannelsAndPromotesUnstableToStable() throws Exception {
-        var stable = new AtomicReference<>("{\"version\":\"v2.4.0+build.128\",\"versionCode\":2004000}");
-        var unstable = new AtomicReference<>("{\"version\":\"v2.4.0-unstable.127\",\"versionCode\":2003999}");
+        var stable = new AtomicReference<>(Optional.of("{\"version\":\"v2.4.0+build.128\",\"versionCode\":2004000}"));
+        var unstable = Optional.of("{\"version\":\"v2.4.0-unstable.127\",\"versionCode\":2003999}");
         var requests = new CopyOnWriteArrayList<String>();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/updates/", exchange -> {
             String path = exchange.getRequestURI().getPath();
             requests.add(path);
-            String body = path.equals("/updates/stable/meshapp.json") ? stable.get() : unstable.get();
-            byte[] bytes = (body == null ? "missing" : body).getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(body == null ? 404 : 200, bytes.length);
+            Optional<String> body = path.equals("/updates/stable/meshapp.json") ? stable.get() : unstable;
+            byte[] bytes = body.orElse("missing").getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(body.isPresent() ? 200 : 404, bytes.length);
             try (var output = exchange.getResponseBody()) { output.write(bytes); }
         });
         server.start();
@@ -104,7 +104,7 @@ class UpdateCheckServiceTest {
                     .get(5, TimeUnit.SECONDS).orElseThrow();
             assertEquals("v2.4.0+build.128", result.getVersion());
             assertEquals(2, requests.size());
-            stable.set(null);
+            stable.set(Optional.empty());
             result = UpdateCheckService.checkForUpdateAsync(client, root, "v2.4.0-unstable.126", 2003999)
                     .get(5, TimeUnit.SECONDS).orElseThrow();
             assertEquals(127, result.getBuildNumber());
