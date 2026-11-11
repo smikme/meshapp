@@ -20,6 +20,32 @@ import java.util.function.Consumer;
 // runtime() registers every session for cleanup in @AfterEach, including failed assertions.
 @SuppressWarnings({"resource", "SqlNoDataSourceInspection", "SqlResolve"})
 class MeshCoreCompanionProtocolRuntimeTest {
+    @Test
+    void compactTextFitsOnWireAndRetryRechecksTheCurrentChoice() throws Exception {
+        Radio radio = new Radio();
+        var rt = runtime(radio);
+        int limit = rt.maxTextBytes(false);
+        String original = "а".repeat(limit);
+        var message = rt.sendChannelMessage(0, original, 0, true);
+        assertNotNull(message);
+        assertEquals(original, message.getText());
+        byte[] payload = radio.sent.getLast();
+        assertEquals("a".repeat(limit), new String(payload, 7, payload.length - 7, StandardCharsets.UTF_8));
+        radio.feed(new byte[]{1, 2});
+        int before = radio.sent.size();
+        assertFalse(rt.retryMessage(message, false));
+        assertEquals(before, radio.sent.size());
+        assertTrue(rt.retryMessage(message, true));
+        payload = radio.sent.getLast();
+        assertEquals(limit + 7, payload.length);
+        radio.feed(new byte[]{0});
+        String peer = rt.getState().getContacts().keySet().iterator().next();
+        var direct = rt.sendDirectMessage(peer, "а".repeat(160), 0, true);
+        assertNotNull(direct);
+        payload = radio.sent.getLast();
+        assertEquals("a".repeat(160), new String(payload, 13, payload.length - 13, StandardCharsets.UTF_8));
+    }
+
     @TempDir Path home;
     final List<MeshCoreCompanionProtocolRuntime> runtimes = new ArrayList<>();
 

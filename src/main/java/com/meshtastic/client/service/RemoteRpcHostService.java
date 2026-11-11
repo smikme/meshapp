@@ -1300,7 +1300,7 @@ public final class RemoteRpcHostService {
         ActiveHostConnection active = activeHostConnection();
         String chatType = requiredText(params, "chatType");
         String chatKey = requiredText(params, "chatKey");
-        String text = requiredText(params, "text");
+        String text = requiredText(params, params.has("originalText") ? "originalText" : "text");
         int replyId = boundedInt(params, "replyId", Integer.MIN_VALUE, Integer.MAX_VALUE, 0);
         String ownerId = active.state().getOwnerNodeId();
         String clientRequestId = firstText(textField(params, "clientRequestId"), "");
@@ -1311,19 +1311,20 @@ public final class RemoteRpcHostService {
             return chatSendResult(active, chatType, chatKey, cached);
         }
 
+        boolean compact = compactCyrillic(params);
         MeshMessage sent;
         if (active.meshCoreRuntime() != null) {
             sent = "channel".equals(chatType)
-                    ? active.meshCoreRuntime().sendChannelMessage(Integer.parseInt(chatKey), text, replyId)
-                    : active.meshCoreRuntime().sendDirectMessage(chatKey, text, replyId);
+                    ? active.meshCoreRuntime().sendChannelMessage(Integer.parseInt(chatKey), text, replyId, compact)
+                    : active.meshCoreRuntime().sendDirectMessage(chatKey, text, replyId, compact);
         } else {
             ProtocolHandler handler = active.handler();
             if (handler == null) {
                 throw new IllegalStateException("selected host connection cannot send messages");
             }
             sent = "channel".equals(chatType)
-                    ? MessageService.sendChannelMessage(handler, active.state(), Integer.parseInt(chatKey), text, replyId)
-                    : MessageService.sendDirectMessage(handler, active.state(), chatKey, text, replyId);
+                    ? MessageService.sendChannelMessage(handler, active.state(), Integer.parseInt(chatKey), text, replyId, compact)
+                    : MessageService.sendDirectMessage(handler, active.state(), chatKey, text, replyId, compact);
         }
         if (sent == null) {
             throw new IllegalStateException("message was not sent");
@@ -1334,6 +1335,19 @@ public final class RemoteRpcHostService {
                     new CachedChatSend(now, chatType, chatKey, sent.getPacketId()));
         }
         return chatSendResult(active, chatType, chatKey, sent);
+    }
+
+    /**
+     * Resolves the requesting client's compaction choice, falling back to the host
+     * preference for older clients that omit the field.
+     *
+     * @param params chat send or retry request parameters
+     * @return whether this request should compact outgoing Cyrillic text
+     */
+    private static boolean compactCyrillic(JsonObject params) {
+        return params.has("compactCyrillic")
+                ? booleanField(params, "compactCyrillic")
+                : AppPreferences.isCyrillicCompactionEnabled();
     }
 
     private JsonObject chatSendResult(ActiveHostConnection active, String chatType, String chatKey, MeshMessage sent) {
@@ -1376,7 +1390,7 @@ public final class RemoteRpcHostService {
         if (!message.isOutgoing() || message.getStatus() != MeshMessage.DeliveryStatus.FAILED) {
             throw new IllegalArgumentException("only failed outgoing messages can be retried");
         }
-        if (!MessageService.retryMessage(handler, active.state(), message)) {
+        if (!MessageService.retryMessage(handler, active.state(), message, compactCyrillic(params))) {
             throw new IllegalStateException("message retry was not started");
         }
 

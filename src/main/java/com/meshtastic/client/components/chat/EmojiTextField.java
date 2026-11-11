@@ -12,6 +12,8 @@ import javafx.beans.property.ReadOnlyIntegerWrapper;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.event.EventHandler;
+import javafx.geometry.Bounds;
+import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
@@ -25,6 +27,7 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.StackPane;
+import javafx.scene.shape.Path;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.scene.text.Text;
@@ -32,11 +35,15 @@ import javafx.scene.text.TextFlow;
 import javafx.util.Duration;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
 
 /**
  * Custom multi-line text field that renders emoji as images.
@@ -45,7 +52,8 @@ import java.util.function.Predicate;
  * through Meshtastic. Visually, the field is rendered as a {@link TextFlow}
  * composed of {@link Text} and {@link ImageView} nodes. Text wraps by words,
  * the field grows vertically up to {@code MAX_HEIGHT}, and the control supports
- * text input, caret movement, selection, clipboard actions, and arrow-key navigation.
+ * text input, word and line navigation, selection, clipboard actions, undo/redo,
+ * and offline spelling. All edits share the same UTF-8 limit and draft validation.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -74,21 +82,37 @@ public class EmojiTextField extends StackPane {
     private Predicate<KeyEvent> keyPressedInterceptor;
     private boolean disabled = false;
     private IntSupplier maxBytesSupplier;
+    private ToIntFunction<String> byteCounter = value -> value.getBytes(StandardCharsets.UTF_8).length;
     private ContextMenu contextMenu;
+    private Predicate<String> editValidator = _ -> true;
+    private final Deque<EditState> undoHistory = new ArrayDeque<>();
+    private final Deque<EditState> redoHistory = new ArrayDeque<>();
+    private boolean applyingEdit;
+    private double preferredCaretX = Double.NaN;
+    private boolean caretLeading = true;
+    private final ChatSpellingSupport spelling;
+    /**
+     * Snapshot of a draft and its UTF-16 selection offsets.
+     *
+     * @param text original draft
+     * @param caret caret position
+     * @param anchor selection anchor, or minus one if absent
+     * @param start selection start, or minus one if absent
+     * @param end selection end, or minus one if absent
+     */
+    private record EditState(String text, int caret, int anchor, int start, int end) {}
 
     // Selection state.
     private int selectionAnchor = -1;
     private int selectionStart = -1;
     private int selectionEnd = -1;
-    private final List<Rectangle> selectionRects = new ArrayList<>();
+    private final List<Path> selectionRects = new ArrayList<>();
 
     // Segments map the backing text to visual nodes.
     private List<VisualSegment> segments = new ArrayList<>();
 
     // Vertical scrolling, implemented through translateY when content overflows.
     private double verticalOffset = 0;
-    // Width tracking for height recalculation after resizing.
-    private double lastLayoutWidth = -1;
 
     // Drag gesture tracking for mouse selection.
     private boolean dragging = false;
@@ -98,6 +122,9 @@ public class EmojiTextField extends StackPane {
     /** Caret position in 2D coordinates. */
     private record CaretPos(double x, double y) {}
 
+    /**
+     * Creates an empty emoji editor with keyboard editing, history and offline spelling support.
+     */
     public EmojiTextField() {
         getStyleClass().add("emoji-text-field");
         setFocusTraversable(true);
@@ -159,6 +186,7 @@ public class EmojiTextField extends StackPane {
         setOnKeyPressed(this::handleKeyPressed);
         setOnMousePressed(this::handleMousePressed);
         buildContextMenu();
+        spelling = new ChatSpellingSupport(this, contentFlow, this::toFlowIndex, this::replaceRange);
 
         // Scene-level drag handling guarantees MOUSE_DRAGGED delivery regardless
         // of the drag target chosen by JavaFX. Installing it on the component is
@@ -179,19 +207,20 @@ public class EmojiTextField extends StackPane {
         text.addListener((obs, oldVal, newVal) -> {
             rebuild();
             updatePromptVisibility();
+            spelling.textChanged();
         });
 
         // Refresh the caret when it moves.
         caretPosition.addListener((obs, oldVal, newVal) -> {
             updateCaretVisual();
+            requestLayout();
             resetBlink();
         });
 
         TypographyManager.chatFontSizeProperty().addListener((obs, oldValue, newValue) ->
                 applyTypography());
 
-        setMinHeight(scaledMinHeight());
-        setPrefHeight(scaledMinHeight());
+        setMinHeight(USE_PREF_SIZE);
         setMaxHeight(scaledMaxHeight());
 
         updatePromptVisibility();
@@ -199,8 +228,6 @@ public class EmojiTextField extends StackPane {
 
     private void applyTypography() {
         caret.setHeight(scaledValue(16));
-        setMinHeight(scaledMinHeight());
-        setPrefHeight(Math.max(getPrefHeight(), scaledMinHeight()));
         setMaxHeight(scaledMaxHeight());
         rebuild();
         updatePromptVisibility();
@@ -231,6 +258,15 @@ public class EmojiTextField extends StackPane {
         return scaledValue(MIN_HEIGHT);
     }
 
+    /**
+     * Returns the minimum single-line height at the current chat font scale.
+     *
+     * @return height used to anchor adjacent input controls
+     */
+    double getSingleLineHeight() {
+        return scaledMinHeight();
+    }
+
     private double scaledMaxHeight() {
         return scaledValue(MAX_HEIGHT);
     }
@@ -241,49 +277,105 @@ public class EmojiTextField extends StackPane {
 
     // === Public API ===
 
+    /**
+     * Returns the original Unicode draft, including emoji sequences.
+     *
+     * @return non-null draft text
+     */
     public String getText() {
         return text.get();
     }
 
+    /**
+     * Replaces the draft programmatically and clears user editing history.
+     * This setter sanitizes text but bypasses edit validation; owner property listeners
+     * may reject the replacement. Use {@link #replaceSelection(String)} for user edits.
+     *
+     * @param value new draft, or null to clear it
+     */
     public void setText(String value) {
+        caretLeading = true;
         String sanitized = UnicodeTextUtils.sanitize(value != null ? value : "");
         text.set(sanitized != null ? sanitized : "");
         caretPosition.set(clampCaret(Math.min(caretPosition.get(), text.get().length())));
+        if (!applyingEdit) {
+            undoHistory.clear();
+            redoHistory.clear();
+            clearSelection();
+        }
     }
 
+    /**
+     * Exposes the original draft for observation and programmatic replacement.
+     *
+     * @return mutable draft property
+     */
     public StringProperty textProperty() {
         return text;
     }
 
+    /**
+     * Returns the caret offset in the backing Unicode string.
+     *
+     * @return UTF-16 offset, not an index into the emoji-rendering flow
+     */
     public int getCaretPosition() {
         return caretPosition.get();
     }
 
+    /**
+     * Exposes caret movement for input-panel integrations.
+     *
+     * @return read-only UTF-16 caret offset property
+     */
     public ReadOnlyIntegerProperty caretPositionProperty() {
         return caretPosition.getReadOnlyProperty();
     }
 
+    /**
+     * Moves the caret to a valid code-point boundary and clears the selection.
+     *
+     * @param pos requested UTF-16 offset, clamped to the draft
+     */
     public void positionCaret(int pos) {
+        clearSelection();
+        caretLeading = true;
         caretPosition.set(clampCaret(pos));
+        preferredCaretX = Double.NaN;
     }
 
+    /**
+     * Inserts a validated, undoable edit without replacing the selected text.
+     * Rejected edits and edits to a disabled field leave the draft unchanged.
+     *
+     * @param index requested UTF-16 insertion offset
+     * @param insertion text to insert; null and empty strings are ignored
+     */
     public void insertText(int index, String insertion) {
         if (disabled || insertion == null || insertion.isEmpty()) { return; }
         String safeInsertion = UnicodeTextUtils.sanitize(insertion);
         if (safeInsertion == null || safeInsertion.isEmpty()) { return; }
-        String t = text.get();
         int idx = clampCaret(index);
-        text.set(t.substring(0, idx) + safeInsertion + t.substring(idx));
-        caretPosition.set(idx + safeInsertion.length());
+        replaceRange(idx, idx, safeInsertion);
     }
 
+    /**
+     * Clears the draft, selection, scrolling and editing history after send or reset.
+     */
     public void clear() {
         text.set("");
         caretPosition.set(0);
         clearSelection();
         verticalOffset = 0;
+        undoHistory.clear();
+        redoHistory.clear();
     }
 
+    /**
+     * Sets the placeholder displayed for an empty draft.
+     *
+     * @param prompt placeholder text, or null to remove it
+     */
     public void setPromptText(String prompt) {
         String sanitized = UnicodeTextUtils.sanitize(prompt != null ? prompt : "");
         this.promptText = sanitized != null ? sanitized : "";
@@ -291,6 +383,11 @@ public class EmojiTextField extends StackPane {
         updatePromptVisibility();
     }
 
+    /**
+     * Sets the action invoked when Enter is handled as submission.
+     *
+     * @param handler submission callback, receiving null; null removes the callback
+     */
     public void setOnAction(Consumer<Void> handler) {
         this.onAction = handler;
     }
@@ -299,11 +396,18 @@ public class EmojiTextField extends StackPane {
      * Sets an external pre-handler for {@code KEY_PRESSED}.
      * If the predicate returns {@code true}, the field skips its internal logic
      * and treats the event as handled.
+     *
+     * @param interceptor external key handler, or null to use only built-in handling
      */
     public void setKeyPressedInterceptor(Predicate<KeyEvent> interceptor) {
         this.keyPressedInterceptor = interceptor;
     }
 
+    /**
+     * Enables or disables user edits together with the JavaFX node.
+     *
+     * @param value true to reject edits and history actions
+     */
     public void setFieldDisabled(boolean value) {
         this.disabled = value;
         super.setDisable(value);
@@ -311,10 +415,146 @@ public class EmojiTextField extends StackPane {
 
     /**
      * Sets the supplier for the maximum allowed UTF-8 byte length.
-     * Used by {@link #paste()} to trim clipboard text to the limit.
+     * Applied to typing, clipboard insertion, replacements and history restoration.
+     * The configured byte counter determines the transmitted size.
+     *
+     * @param supplier current byte budget; null disables size validation
      */
     public void setMaxBytesSupplier(IntSupplier supplier) {
         this.maxBytesSupplier = supplier;
+    }
+
+    /**
+     * Sets how complete candidate drafts are measured, including context-sensitive wire encoding.
+     * The default counter uses unmodified UTF-8 bytes.
+     *
+     * @param counter non-null function returning the transmitted byte count
+     * @throws NullPointerException if counter is null
+     */
+    public void setByteCounter(ToIntFunction<String> counter) {
+        this.byteCounter = java.util.Objects.requireNonNull(counter);
+    }
+
+    /**
+     * Sets additional validation for complete candidate drafts, including history restores.
+     * The predicate can protect attachment URLs without modifying the candidate.
+     *
+     * @param validator acceptance predicate; null removes additional validation
+     */
+    public void setEditValidator(Predicate<String> validator) {
+        editValidator = validator != null ? validator : _ -> true;
+    }
+
+    /**
+     * Returns the selected portion of the backing Unicode draft.
+     *
+     * @return selected text, or an empty string when no selection exists
+     */
+    public String getSelectedText() {
+        return hasSelection() ? text.get().substring(selectionStart, selectionEnd) : "";
+    }
+
+    /**
+     * Replaces the current selection, or inserts at the caret, as one validated edit.
+     *
+     * @param insertion replacement text; null deletes a selection
+     */
+    public void replaceSelection(String insertion) {
+        replaceRange(hasSelection() ? selectionStart : getCaretPosition(),
+                hasSelection() ? selectionEnd : getCaretPosition(), insertion);
+    }
+
+    /**
+     * Captures the draft and selection for an atomic undo or redo step.
+     *
+     * @return immutable editor snapshot
+     */
+    private EditState captureEditState() {
+        return new EditState(text.get(), getCaretPosition(), selectionAnchor, selectionStart, selectionEnd);
+    }
+
+    /**
+     * Checks the current byte budget and additional draft validator.
+     * A draft already over budget may shrink even if it still exceeds the limit.
+     *
+     * @param candidate complete proposed draft
+     * @return whether the edit may be applied
+     */
+    private boolean acceptsEdit(String candidate) {
+        return (maxBytesSupplier == null || byteCounter.applyAsInt(candidate) <= maxBytesSupplier.getAsInt()
+                || byteCounter.applyAsInt(candidate) < byteCounter.applyAsInt(text.get()))
+                && editValidator.test(candidate);
+    }
+
+    /**
+     * Applies a range replacement as one undoable edit if all current constraints pass.
+     * The caret and selection are preserved when validation rejects the edit.
+     *
+     * @param start inclusive UTF-16 offset
+     * @param end exclusive UTF-16 offset, not before start
+     * @param insertion replacement text; null deletes the range
+     * @return whether the draft was changed
+     */
+    boolean replaceRange(int start, int end, String insertion) {
+        if (disabled) { return false; }
+        start = clampCaret(start);
+        end = clampCaret(end);
+        String safe = UnicodeTextUtils.sanitize(insertion == null ? "" : insertion);
+        String candidate = text.get().substring(0, start) + safe + text.get().substring(end);
+        if (!acceptsEdit(candidate) || candidate.equals(text.get())) { return false; }
+        EditState before = captureEditState();
+        applyingEdit = true;
+        try {
+            text.set(candidate);
+            if (!candidate.equals(text.get())) { return false; }
+            clearSelection();
+            caretLeading = true;
+            caretPosition.set(start + safe.length());
+            preferredCaretX = Double.NaN;
+            undoHistory.push(before);
+            if (undoHistory.size() > 100) { undoHistory.removeLast(); }
+            redoHistory.clear();
+            return true;
+        } finally {
+            applyingEdit = false;
+        }
+    }
+
+    /**
+     * Restores the previous edit when it satisfies current limits and draft validation.
+     */
+    public void undo() { restoreHistory(undoHistory, redoHistory); }
+    /**
+     * Reapplies an undone edit when it satisfies current limits and draft validation.
+     */
+    public void redo() { restoreHistory(redoHistory, undoHistory); }
+
+    /**
+     * Restores a validated snapshot and transfers the current state to the opposite history.
+     *
+     * @param source history containing the requested state
+     * @param target history receiving the current state
+     */
+    private void restoreHistory(Deque<EditState> source, Deque<EditState> target) {
+        if (disabled || source.isEmpty() || !acceptsEdit(source.peek().text())) { return; }
+        EditState current = captureEditState();
+        EditState previous = source.peek();
+        applyingEdit = true;
+        try {
+            text.set(previous.text());
+            if (!previous.text().equals(text.get())) { return; }
+            source.pop();
+            target.push(current);
+            selectionAnchor = previous.anchor();
+            selectionStart = previous.start();
+            selectionEnd = previous.end();
+            caretLeading = true;
+            caretPosition.set(previous.caret());
+            preferredCaretX = Double.NaN;
+            requestLayout();
+        } finally {
+            applyingEdit = false;
+        }
     }
 
     // === Input Handlers ===
@@ -323,19 +563,8 @@ public class EmojiTextField extends StackPane {
         if (disabled) { return; }
         String ch = UnicodeTextUtils.sanitize(e.getCharacter());
         if (ch == null || ch.isEmpty() || Character.isISOControl(ch.charAt(0))
-                || e.isControlDown() || e.isMetaDown()) {
-            return;
-        }
-        deleteSelection();
-        String t = text.get();
-        int pos = caretPosition.get();
-        text.set(t.substring(0, pos) + ch + t.substring(pos));
-            // If an external listener (ChatInputBar) rolled the text back, keep the caret in place.
-        if (text.get().equals(t)) {
-            caretPosition.set(pos);
-        } else {
-            caretPosition.set(Math.min(pos + ch.length(), text.get().length()));
-        }
+                || e.isMetaDown() || (e.isControlDown() && !e.isAltDown())) { return; }
+        replaceSelection(ch);
         e.consume();
     }
 
@@ -345,135 +574,58 @@ public class EmojiTextField extends StackPane {
             e.consume();
             return;
         }
+        boolean mac = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
+        boolean shortcut = mac ? e.isMetaDown() : e.isControlDown();
+        boolean word = mac ? e.isAltDown() : e.isControlDown();
         boolean shift = e.isShiftDown();
-        boolean shortcutDown = e.isMetaDown() || e.isControlDown();
-
+        int pos = getCaretPosition();
         switch (e.getCode()) {
             case BACK_SPACE -> {
-                if (hasSelection()) {
-                    deleteSelection();
-                } else {
-                    deleteBack();
-                }
-                e.consume();
+                if (hasSelection()) { deleteSelection(); }
+                else { replaceRange(word ? previousWord(pos) : prevCharBoundary(text.get(), pos), pos, ""); }
             }
             case DELETE -> {
-                if (hasSelection()) {
-                    deleteSelection();
-                } else {
-                    deleteForward();
-                }
-                e.consume();
+                if (shift && !word && !shortcut) { cutSelection(); }
+                else if (hasSelection()) { deleteSelection(); }
+                else { replaceRange(pos, word ? nextWordEnd(pos) : nextCharBoundary(text.get(), pos), ""); }
             }
-            case LEFT -> {
-                if (shift) {
-                    moveCaretWithSelection(-1);
-                } else {
-                    if (hasSelection()) {
-                        caretPosition.set(selectionStart);
-                        clearSelection();
-                    } else {
-                        moveCaret(-1);
-                    }
-                }
-                e.consume();
+            case INSERT -> {
+                if (shift) { paste(); }
+                else if (shortcut) { copySelection(); }
             }
-            case RIGHT -> {
-                if (shift) {
-                    moveCaretWithSelection(1);
-                } else {
-                    if (hasSelection()) {
-                        caretPosition.set(selectionEnd);
-                        clearSelection();
-                    } else {
-                        moveCaret(1);
-                    }
+            case LEFT, RIGHT -> {
+                boolean left = e.getCode() == KeyCode.LEFT;
+                if (mac && shortcut) {
+                    moveToLineBoundary(!left, shift);
+                    break;
                 }
-                e.consume();
+                int target;
+                if (!shift && hasSelection() && !word) { target = left ? selectionStart : selectionEnd; }
+                else if (word) { target = left ? previousWord(pos) : mac ? nextWordEnd(pos) : nextWord(pos); }
+                else { target = left ? prevCharBoundary(text.get(), pos) : nextCharBoundary(text.get(), pos); }
+                moveTo(target, shift);
             }
-            case UP -> {
-                if (shift) {
-                    moveCaretVerticalWithSelection(-1);
-                } else {
-                    clearSelection();
-                    moveCaretVertically(-1);
-                }
-                e.consume();
+            case UP, DOWN -> {
+                if (shortcut) { moveTo(e.getCode() == KeyCode.UP ? 0 : text.get().length(), shift); }
+                else { moveVertically(e.getCode() == KeyCode.UP ? -1 : 1, shift); }
             }
-            case DOWN -> {
-                if (shift) {
-                    moveCaretVerticalWithSelection(1);
-                } else {
-                    clearSelection();
-                    moveCaretVertically(1);
-                }
-                e.consume();
+            case PAGE_UP, PAGE_DOWN -> moveVertically(
+                    (e.getCode() == KeyCode.PAGE_UP ? -1 : 1)
+                            * Math.max(1, (int) (getHeight() / scaledLineHeight()) - 1), shift);
+            case HOME, END -> {
+                if (shortcut) { moveTo(e.getCode() == KeyCode.HOME ? 0 : text.get().length(), shift); }
+                else { moveToLineBoundary(e.getCode() == KeyCode.END, shift); }
             }
-            case HOME -> {
-                if (shift) {
-                    extendSelectionTo(0);
-                } else {
-                    clearSelection();
-                    caretPosition.set(0);
-                }
-                e.consume();
-            }
-            case END -> {
-                if (shift) {
-                    extendSelectionTo(text.get().length());
-                } else {
-                    clearSelection();
-                    caretPosition.set(text.get().length());
-                }
-                e.consume();
-            }
-            case ENTER -> {
-                if (onAction != null) {
-                    onAction.accept(null);
-                }
-                e.consume();
-            }
-            case A -> {
-                if (shortcutDown) {
-                    selectAll();
-                    e.consume();
-                } else if (isTextProducingKeyPress(e)) {
-                    e.consume();
-                }
-            }
-            case C -> {
-                if (shortcutDown) {
-                    copySelection();
-                    e.consume();
-                } else if (isTextProducingKeyPress(e)) {
-                    e.consume();
-                }
-            }
-            case X -> {
-                if (shortcutDown) {
-                    cutSelection();
-                    e.consume();
-                } else if (isTextProducingKeyPress(e)) {
-                    e.consume();
-                }
-            }
-            case V -> {
-                if (shortcutDown) {
-                    paste();
-                    e.consume();
-                } else if (isTextProducingKeyPress(e)) {
-                    e.consume();
-                }
-            }
-            default -> {
-                if (isTextProducingKeyPress(e)) {
-            // Paste is handled in KEY_TYPED. KEY_PRESSED must still be consumed;
-            // otherwise macOS/JavaFX 25 plays the invalid-input sound for this
-            // custom field, which is not a TextInputControl.
-                    e.consume();
-                }
-            }
+            case ENTER -> { if (onAction != null) { onAction.accept(null); } }
+            case A -> { if (shortcut) { selectAll(); } }
+            case C -> { if (shortcut) { copySelection(); } }
+            case X -> { if (shortcut) { cutSelection(); } }
+            case V -> { if (shortcut) { paste(); } }
+            case Z -> { if (shortcut) { if (shift) { redo(); } else { undo(); } } }
+            case Y -> { if (shortcut) { redo(); } }
+            default -> { if (!isTextProducingKeyPress(e)) { return; } }
         }
+        e.consume();
     }
 
     private boolean isTextProducingKeyPress(KeyEvent e) {
@@ -513,11 +665,40 @@ public class EmojiTextField extends StackPane {
         }
 
         requestFocus();
+        caretLeading = true;
         int pos = hitTestCaret(e.getX(), e.getY());
 
                 // Right-clicking inside the selection keeps it for the context menu.
         if (e.isSecondaryButtonDown() && hasSelection()
                 && pos >= selectionStart && pos <= selectionEnd) {
+            e.consume();
+            return;
+        }
+
+        if (e.isPrimaryButtonDown() && e.getClickCount() >= 3) {
+            selectAll();
+            e.consume();
+            return;
+        }
+        if (e.isPrimaryButtonDown() && e.getClickCount() == 2) {
+            int start = pos;
+            int end = pos;
+            while (start > 0 && isWordAt(prevCharBoundary(text.get(), start))) {
+                start = prevCharBoundary(text.get(), start);
+            }
+            while (end < text.get().length() && isWordAt(end)) {
+                end = nextCharBoundary(text.get(), end);
+            }
+            if (start == end) { end = nextCharBoundary(text.get(), start); }
+            selectionAnchor = start;
+            setSelection(start, end);
+            caretPosition.set(end);
+            e.consume();
+            return;
+        }
+        if (e.isShiftDown() && e.isPrimaryButtonDown()) {
+            moveTo(pos, true);
+            dragging = true;
             e.consume();
             return;
         }
@@ -560,98 +741,80 @@ public class EmojiTextField extends StackPane {
 
     // === Caret Navigation ===
 
-    private void moveCaret(int direction) {
-        String t = text.get();
-        int pos = caretPosition.get();
-        if (direction < 0 && pos > 0) {
-            caretPosition.set(prevCharBoundary(t, pos));
-        } else if (direction > 0 && pos < t.length()) {
-            caretPosition.set(nextCharBoundary(t, pos));
-        }
-    }
-
-    private void moveCaretWithSelection(int direction) {
-        if (selectionAnchor < 0) {
-            selectionAnchor = caretPosition.get();
-        }
-        moveCaret(direction);
-        int pos = caretPosition.get();
-        int start = Math.min(selectionAnchor, pos);
-        int end = Math.max(selectionAnchor, pos);
-        if (start != end) {
-            setSelection(start, end);
+    private void moveTo(int target, boolean extend) {
+        caretLeading = true;
+        if (extend) {
+            if (selectionAnchor < 0) { selectionAnchor = getCaretPosition(); }
+            caretPosition.set(clampCaret(target));
+            selectionStart = Math.min(selectionAnchor, getCaretPosition());
+            selectionEnd = Math.max(selectionAnchor, getCaretPosition());
+            updateSelectionVisual();
         } else {
             clearSelection();
+            caretPosition.set(clampCaret(target));
         }
+        preferredCaretX = Double.NaN;
+        requestLayout();
     }
 
-    /** Moves the caret one visual line up (-1) or down (+1). */
-    private void moveCaretVertically(int direction) {
-        CaretPos cp = computeCaretPos(caretPosition.get());
-
-        // Use actual line Y positions from layout rather than the LINE_HEIGHT constant.
-        List<Double> lineYs = new ArrayList<>();
-        for (VisualSegment seg : segments) {
-            double y = seg.node.getLayoutY();
-            if (lineYs.isEmpty() || Math.abs(lineYs.getLast() - y) > 2) {
-                lineYs.add(y);
-            }
-        }
-        if (lineYs.isEmpty()) { return; }
-
-        // Find the caret's current line.
-        int currentLine = 0;
-        double minDist = Double.MAX_VALUE;
-        for (int i = 0; i < lineYs.size(); i++) {
-            double dist = Math.abs(lineYs.get(i) - cp.y);
-            if (dist < minDist) {
-                minDist = dist;
-                currentLine = i;
-            }
-        }
-
-        // Target line.
-        int targetLine = currentLine + direction;
-        if (targetLine < 0 || targetLine >= lineYs.size()) { return; }
-
-        // hitTestCaret expects screen coordinates, so convert them.
-        // adjustedY = clickY - PAD_TOP + verticalOffset
-        // adjustedY should point to the middle of the target line.
-        double nodeH = segments.getFirst().node.getBoundsInLocal().getHeight();
-        double screenX = cp.x + scaledPadLeft();
-        double screenY = lineYs.get(targetLine) + nodeH / 2 + scaledPadTop() - verticalOffset;
-        int newPos = hitTestCaret(screenX, screenY);
-        caretPosition.set(newPos);
+    private boolean isWordAt(int index) {
+        if (index < 0 || index >= text.get().length()) { return false; }
+        int cp = text.get().codePointAt(index);
+        return Character.isLetterOrDigit(cp) || Character.getType(cp) == Character.NON_SPACING_MARK || cp == '_';
     }
 
-    private void moveCaretVerticalWithSelection(int direction) {
-        if (selectionAnchor < 0) {
-            selectionAnchor = caretPosition.get();
+    private int previousWord(int pos) {
+        int index = pos;
+        while (index > 0 && !isWordAt(prevCharBoundary(text.get(), index))) {
+            index = prevCharBoundary(text.get(), index);
         }
-        moveCaretVertically(direction);
-        int pos = caretPosition.get();
-        int start = Math.min(selectionAnchor, pos);
-        int end = Math.max(selectionAnchor, pos);
-        if (start != end) {
-            setSelection(start, end);
-        } else {
-            clearSelection();
+        while (index > 0 && isWordAt(prevCharBoundary(text.get(), index))) {
+            index = prevCharBoundary(text.get(), index);
         }
+        return index;
     }
 
-    private void extendSelectionTo(int target) {
-        if (selectionAnchor < 0) {
-            selectionAnchor = caretPosition.get();
+    private int nextWord(int pos) {
+        int index = nextWordEnd(pos);
+        while (index < text.get().length() && !isWordAt(index)) {
+            index = nextCharBoundary(text.get(), index);
         }
-        caretPosition.set(target);
-        int start = Math.min(selectionAnchor, target);
-        int end = Math.max(selectionAnchor, target);
-        if (start != end) {
-            setSelection(start, end);
-        } else {
-            clearSelection();
-        }
+        return index;
     }
+
+    private int nextWordEnd(int pos) {
+        int index = pos;
+        while (index < text.get().length() && !isWordAt(index)) {
+            index = nextCharBoundary(text.get(), index);
+        }
+        while (index < text.get().length() && isWordAt(index)) {
+            index = nextCharBoundary(text.get(), index);
+        }
+        return index;
+    }
+
+    private void moveToLineBoundary(boolean end, boolean extend) {
+        layoutContent();
+        CaretPos pos = computeCaretPos(getCaretPosition());
+        var hit = contentFlow.hitTest(new Point2D(end ? contentFlow.getWidth() : 0,
+                pos.y + caret.getHeight() / 2));
+        moveTo(fromFlowIndex(hit.getInsertionIndex()), extend);
+        caretLeading = hit.isLeading();
+    }
+
+    private void moveVertically(int lines, boolean extend) {
+        layoutContent();
+        CaretPos pos = computeCaretPos(getCaretPosition());
+        double desiredX = Double.isNaN(preferredCaretX) ? pos.x : preferredCaretX;
+        Bounds shape = caretBounds(getCaretPosition());
+        double lineHeight = Math.max(1, shape.getHeight());
+        var hit = contentFlow.hitTest(new Point2D(desiredX,
+                pos.y + lineHeight / 2 + lines * lineHeight));
+        moveTo(fromFlowIndex(hit.getInsertionIndex()), extend);
+        caretLeading = hit.isLeading();
+        preferredCaretX = desiredX;
+    }
+
 
     /** Previous character boundary, respecting surrogate pairs and ZWJ sequences. */
     private int prevCharBoundary(String text, int pos) {
@@ -675,25 +838,6 @@ public class EmojiTextField extends StackPane {
             }
         }
         return UnicodeTextUtils.nextCodePointBoundary(text, pos);
-    }
-
-    // === Deletion ===
-
-    private void deleteBack() {
-        String t = text.get();
-        int pos = caretPosition.get();
-        if (pos <= 0) { return; }
-        int prev = prevCharBoundary(t, pos);
-        text.set(t.substring(0, prev) + t.substring(pos));
-        caretPosition.set(prev);
-    }
-
-    private void deleteForward() {
-        String t = text.get();
-        int pos = caretPosition.get();
-        if (pos >= t.length()) { return; }
-        int next = nextCharBoundary(t, pos);
-        text.set(t.substring(0, pos) + t.substring(next));
     }
 
     // === Selection ===
@@ -724,13 +868,7 @@ public class EmojiTextField extends StackPane {
     }
 
     private void deleteSelection() {
-        if (!hasSelection()) { return; }
-        String t = text.get();
-        int start = clampCaret(selectionStart);
-        int end = clampCaret(selectionEnd);
-        text.set(t.substring(0, start) + t.substring(end));
-        caretPosition.set(start);
-        clearSelection();
+        if (hasSelection()) { replaceRange(selectionStart, selectionEnd, ""); }
     }
 
     // === Clipboard ===
@@ -757,45 +895,32 @@ public class EmojiTextField extends StackPane {
         clip = UnicodeTextUtils.sanitize(clip.replace("\n", " ").replace("\r", ""));
         if (clip == null || clip.isEmpty()) { return; }
 
-            // Trim clipboard text to the byte limit when one is configured.
+        // Measure the entire candidate: links and commands can change the encoding of surrounding text.
         if (maxBytesSupplier != null) {
-            int maxBytes = maxBytesSupplier.getAsInt();
             String current = text.get();
-            int selectionStart = clampCaret(this.selectionStart);
-            int selectionEnd = clampCaret(this.selectionEnd);
-            int selBytes = hasSelection()
-                    ? current.substring(selectionStart, selectionEnd)
-                             .getBytes(StandardCharsets.UTF_8).length
-                    : 0;
-            int usedBytes = current.getBytes(StandardCharsets.UTF_8).length - selBytes;
-            int availBytes = maxBytes - usedBytes;
-            if (availBytes <= 0) { return; }
-            clip = truncateToUtf8Bytes(clip, availBytes);
+            String before = current.substring(0, hasSelection() ? selectionStart : getCaretPosition());
+            String after = current.substring(hasSelection() ? selectionEnd : getCaretPosition());
+            int budget = Math.max(maxBytesSupplier.getAsInt(), byteCounter.applyAsInt(current) - 1);
+            // Every Unicode code point needs at least one byte. Bound work even for a huge clipboard.
+            int maxPoints = Math.max(0, budget - before.codePointCount(0, before.length())
+                    - after.codePointCount(0, after.length()));
+            int end = clip.offsetByCodePoints(0, Math.min(maxPoints, clip.codePointCount(0, clip.length())));
+            while (end > 0 && byteCounter.applyAsInt(before + clip.substring(0, end) + after) > budget) {
+                end = clip.offsetByCodePoints(end, -1);
+            }
+            clip = clip.substring(0, end);
             if (clip.isEmpty()) { return; }
         }
 
-        deleteSelection();
-        String t = text.get();
-        int pos = caretPosition.get();
-        text.set(t.substring(0, pos) + clip + t.substring(pos));
-            // If an external listener rolled the text back, keep the caret in place.
-        if (text.get().equals(t)) {
-            caretPosition.set(pos);
-        } else {
-            caretPosition.set(Math.min(pos + clip.length(), text.get().length()));
-        }
+        replaceSelection(clip);
     }
 
-    /** Trims a string to fit within the UTF-8 byte limit without splitting characters. */
-    private static String truncateToUtf8Bytes(String s, int limit) {
-        byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
-        if (bytes.length <= limit) { return s; }
-        // Decode back; incomplete multibyte characters become U+FFFD.
-        return new String(bytes, 0, limit, StandardCharsets.UTF_8)
-                .replace("\uFFFD", "");
-    }
 
     private void buildContextMenu() {
+        MenuItem undoItem = new MenuItem(I18n.t("common.undo"));
+        undoItem.setOnAction(_ -> undo());
+        MenuItem redoItem = new MenuItem(I18n.t("common.redo"));
+        redoItem.setOnAction(_ -> redo());
         MenuItem cutItem = new MenuItem(I18n.t("common.cut"));
         cutItem.setOnAction(e -> cutSelection());
 
@@ -808,12 +933,15 @@ public class EmojiTextField extends StackPane {
         MenuItem selectAllItem = new MenuItem(I18n.t("common.selectAll"));
         selectAllItem.setOnAction(e -> selectAll());
 
-        contextMenu = new ContextMenu(cutItem, copyItem, pasteItem,
+        List<MenuItem> baseItems = List.of(undoItem, redoItem, new SeparatorMenuItem(), cutItem, copyItem, pasteItem,
                 new SeparatorMenuItem(), selectAllItem);
+        contextMenu = new ContextMenu();
 
         contextMenu.setOnShowing(e -> {
             boolean hasSel = hasSelection();
             boolean hasClip = Clipboard.getSystemClipboard().hasString();
+            undoItem.setDisable(disabled || undoHistory.isEmpty() || !acceptsEdit(undoHistory.peek().text()));
+            redoItem.setDisable(disabled || redoHistory.isEmpty() || !acceptsEdit(redoHistory.peek().text()));
             cutItem.setDisable(!hasSel);
             copyItem.setDisable(!hasSel);
             pasteItem.setDisable(!hasClip);
@@ -821,6 +949,10 @@ public class EmojiTextField extends StackPane {
         });
 
         setOnContextMenuRequested(e -> {
+            if (disabled) { return; }
+            contextMenu.getItems().setAll(baseItems);
+            int index = e.isKeyboardTrigger() ? getCaretPosition() : hitTestCaret(e.getX(), e.getY());
+            spelling.populateMenu(contextMenu, index);
             contextMenu.show(this, e.getScreenX(), e.getScreenY());
             e.consume();
         });
@@ -841,7 +973,7 @@ public class EmojiTextField extends StackPane {
             return;
         }
         if (t == null || t.isEmpty()) {
-            updateHeight();
+            requestLayout();
             updateCaretVisual();
             return;
         }
@@ -868,10 +1000,10 @@ public class EmojiTextField extends StackPane {
             }
         }
 
-        // Recalculate layout and height.
-        updateHeight();
+        // Invalidate the preferred height even though contentFlow is unmanaged.
+        requestLayout();
+        layoutContent();
         updateCaretVisual();
-        ensureCaretVisible();
     }
 
     /**
@@ -923,74 +1055,43 @@ public class EmojiTextField extends StackPane {
         }
     }
 
-    /**
-     * Recalculates the field height from its content.
-     * <p>
-     * A helper {@link Text} node with {@code wrappingWidth} is used for reliable
-     * measurement: it computes multi-line text height without depending on the
-     * current layout state of the {@link TextFlow}.
-     * <p>
-     * {@code setMinHeight(target)} is required so the parent HBox
-     * reserves space. {@code setPrefHeight} alone is not enough because HBox may
-     * allocate only the minimum height.
-     */
-    private void updateHeight() {
+    @Override
+    public Orientation getContentBias() {
+        return Orientation.HORIZONTAL;
+    }
+
+    @Override
+    protected double computePrefWidth(double height) {
+        return scaledPadLeft() + contentFlow.prefWidth(-1) + scaledPadRight();
+    }
+
+    @Override
+    protected double computePrefHeight(double width) {
+        double flowWidth = (width < 0 ? getWidth() : width) - scaledPadLeft() - scaledPadRight();
+        if (flowWidth <= 0) { return scaledMinHeight(); }
+        // Report the wrapped height before parents allocate space, including emoji images.
+        double contentH = Math.max(scaledLineHeight(), contentFlow.prefHeight(flowWidth));
+        return Math.max(scaledMinHeight(),
+                Math.min(contentH + scaledPadTop() * 2, scaledMaxHeight()));
+    }
+
+    private void layoutContent() {
         double flowWidth = getWidth() - scaledPadLeft() - scaledPadRight();
         if (flowWidth <= 0) { return; }
-
-        String t = text.get();
-        double contentH;
-        if (t == null || t.isEmpty()) {
-            contentH = scaledLineHeight();
-        } else {
-        // Measure text height with a Text node and wrappingWidth; this is more
-        // reliable than reading TextFlow child positions.
-            Text helper = new Text(UnicodeTextUtils.sanitize(t));
-            helper.setFont(Font.font("Roboto", currentFontSize()));
-            helper.setWrappingWidth(flowWidth);
-            contentH = helper.getBoundsInLocal().getHeight();
-        }
-
-        double target = Math.max(scaledMinHeight(),
-                Math.min(contentH + scaledPadTop() * 2, scaledMaxHeight()));
-        if (Math.abs(getPrefHeight() - target) > 1) {
-            setPrefHeight(target);
-            setMinHeight(target);
-        }
-
-        // Lay out contentFlow so children such as the caret and selection can be positioned.
-        contentFlow.setMinWidth(flowWidth);
-        contentFlow.setPrefWidth(flowWidth);
-        contentFlow.setMaxWidth(flowWidth);
-        contentFlow.resize(flowWidth, Math.max(contentH, scaledMaxHeight()));
-        contentFlow.requestLayout();
+        // Explicitly size the unmanaged TextFlow so caret and selection positions are current.
+        contentFlow.resize(flowWidth, contentFlow.prefHeight(flowWidth));
         contentFlow.layout();
     }
 
     @Override
     protected void layoutChildren() {
         super.layoutChildren();
-        double w = getWidth();
-        double flowWidth = w - scaledPadLeft() - scaledPadRight();
-
-        if (flowWidth > 0) {
-            contentFlow.setMinWidth(flowWidth);
-            contentFlow.setPrefWidth(flowWidth);
-            contentFlow.setMaxWidth(flowWidth);
-        // Explicitly size the unmanaged TextFlow so line wrapping is correct.
-            contentFlow.resize(flowWidth, scaledMaxHeight() * 10);
-            contentFlow.layout();
-        }
+        layoutContent();
+        ensureCaretVisible();
 
         // Position contentFlow with the current vertical scroll offset.
         contentFlow.setLayoutX(scaledPadLeft());
         contentFlow.setLayoutY(scaledPadTop() - verticalOffset);
-
-        // Width changes reflow text, so recalculate height.
-        if (Math.abs(w - lastLayoutWidth) > 1) {
-            lastLayoutWidth = w;
-            updateHeight();
-        }
 
         // Prompt.
         if (promptNode.isVisible()) {
@@ -1000,6 +1101,7 @@ public class EmojiTextField extends StackPane {
 
         updateCaretVisual();
         updateSelectionVisual();
+        spelling.layout(scaledPadLeft(), scaledPadTop() - verticalOffset);
     }
 
     // === Caret Positioning (2D) ===
@@ -1016,71 +1118,63 @@ public class EmojiTextField extends StackPane {
         caret.setLayoutY(cp.y + scaledPadTop() - verticalOffset);
     }
 
+    private Bounds caretBounds(int pos) {
+        int index = toFlowIndex(pos);
+        boolean leading = pos != getCaretPosition() || caretLeading || index == 0;
+        return new Path(contentFlow.caretShape(leading ? index : index - 1, leading)).getLayoutBounds();
+    }
+
     private CaretPos computeCaretPos(int pos) {
         if (segments.isEmpty()) { return new CaretPos(0, 0); }
+        Bounds bounds = caretBounds(pos);
+        return new CaretPos(bounds.getMinX(), bounds.getMinY());
+    }
 
+    // TextFlow counts each embedded emoji image as one character.
+    private int toFlowIndex(int textIndex) {
+        int visual = 0;
         for (VisualSegment seg : segments) {
-            if (pos >= seg.charStart && pos <= seg.charEnd) {
-                Node node = seg.node;
-                double nodeX = node.getLayoutX();
-                double nodeY = node.getLayoutY();
+            if (textIndex <= seg.charStart) { return visual; }
+            int length = seg.isEmoji ? 1 : seg.charEnd - seg.charStart;
+            if (textIndex < seg.charEnd) { return visual + (seg.isEmoji ? 0 : textIndex - seg.charStart); }
+            visual += length;
+        }
+        return visual;
+    }
 
-                if (seg.isEmoji) {
-                    if (pos <= seg.charStart) {
-                        return new CaretPos(nodeX, nodeY);
-                    } else {
-                        return new CaretPos(nodeX + node.getBoundsInLocal().getWidth(), nodeY);
-                    }
-                } else {
-                    Text textNode = (Text) node;
-                    int offset = UnicodeTextUtils.clampToCodePointBoundary(
-                            textNode.getText(),
-                            pos - seg.charStart
-                    );
-                    String sub = textNode.getText().substring(0, offset);
-                    Text measure = new Text(sub);
-                    measure.setFont(textNode.getFont());
-                    return new CaretPos(nodeX + measure.getBoundsInLocal().getWidth(), nodeY);
-                }
+    private int fromFlowIndex(int visualIndex) {
+        int visual = 0;
+        for (VisualSegment seg : segments) {
+            int length = seg.isEmoji ? 1 : seg.charEnd - seg.charStart;
+            if (visualIndex < visual + length) {
+                return clampCaret(seg.charStart + (seg.isEmoji ? 0 : Math.max(0, visualIndex - visual)));
             }
+            visual += length;
         }
-
-        // After the last segment.
-        if (!segments.isEmpty()) {
-            VisualSegment last = segments.getLast();
-            Node node = last.node;
-            return new CaretPos(
-                    node.getLayoutX() + node.getBoundsInLocal().getWidth(),
-                    node.getLayoutY()
-            );
-        }
-        return new CaretPos(0, 0);
+        return text.get().length();
     }
 
     /**
      * Keeps the caret visible by adjusting vertical scroll.
-     * <p>
-     * Uses {@code getPrefHeight()} (the target height) rather than
-     * {@code getHeight()} (the current height), because layout may not have
-     * applied the new height after {@code updateHeight()}. Otherwise
-     * {@code ensureCaretVisible()} sees the stale height and scrolls upward by mistake.
+     * Called after layout assigns the field's height and reflows the text.
      */
     private void ensureCaretVisible() {
         CaretPos cp = computeCaretPos(caretPosition.get());
         double caretY = cp.y;
-        double viewH = getPrefHeight() - scaledPadTop() * 2;
+        double viewH = getHeight() - scaledPadTop() * 2;
 
         if (viewH <= 0) { return; }
+
+        double maxOffset = Math.max(0, contentFlow.getHeight() - viewH);
+        verticalOffset = Math.min(verticalOffset, maxOffset);
 
         // Caret is below the visible area.
         if (caretY - verticalOffset + scaledLineHeight() > viewH) {
             verticalOffset = caretY + scaledLineHeight() - viewH;
-            requestLayout();
         }
         // Caret is above the visible area.
         else if (caretY - verticalOffset < 0) {
             verticalOffset = Math.max(0, caretY);
-            requestLayout();
         }
     }
 
@@ -1089,121 +1183,15 @@ public class EmojiTextField extends StackPane {
             blinkTimeline.playFromStart();
             caret.setVisible(true);
         }
-        ensureCaretVisible();
     }
 
     // === Hit testing (2D) ===
 
-    /** Resolves the caret position from click coordinates. */
+    /** Resolves the caret using JavaFX's shaped text, including wrapped words. */
     private int hitTestCaret(double clickX, double clickY) {
-        double adjustedX = clickX - scaledPadLeft();
-        double adjustedY = clickY - scaledPadTop() + verticalOffset;
-
-        if (segments.isEmpty()) { return 0; }
-
-        // Find a segment on the same visual line by Y, then by X.
-        VisualSegment bestOnLine = null;
-        double bestDistOnLine = Double.MAX_VALUE;
-
-        for (VisualSegment seg : segments) {
-            Node node = seg.node;
-            double nodeY = node.getLayoutY();
-            double nodeH = node.getBoundsInLocal().getHeight();
-            double nodeX = node.getLayoutX();
-            double nodeW = node.getBoundsInLocal().getWidth();
-
-            // Check whether the click landed on this node's line.
-            if (adjustedY >= nodeY && adjustedY < nodeY + nodeH) {
-                // Direct X hit.
-                if (adjustedX >= nodeX && adjustedX <= nodeX + nodeW) {
-                    if (seg.isEmoji) {
-                        double mid = nodeX + nodeW / 2;
-                        return adjustedX < mid ? seg.charStart : seg.charEnd;
-                    } else {
-                        return findCharInTextNode(seg, adjustedX);
-                    }
-                }
-            // Same line but outside this node; remember the nearest segment.
-                double dist = Math.min(Math.abs(adjustedX - nodeX),
-                        Math.abs(adjustedX - (nodeX + nodeW)));
-                if (dist < bestDistOnLine) {
-                    bestDistOnLine = dist;
-                    bestOnLine = seg;
-                }
-            }
-        }
-
-            // Found the line without hitting a node exactly; snap to the nearest edge.
-        if (bestOnLine != null) {
-            double nodeX = bestOnLine.node.getLayoutX();
-            return adjustedX <= nodeX ? bestOnLine.charStart : bestOnLine.charEnd;
-        }
-
-        // Click above or below all content; find the nearest line.
-        double closestLineDist = Double.MAX_VALUE;
-        double closestLineY = 0;
-        for (VisualSegment seg : segments) {
-            double nodeY = seg.node.getLayoutY();
-            double dist = Math.abs(adjustedY - nodeY);
-            if (dist < closestLineDist) {
-                closestLineDist = dist;
-                closestLineY = nodeY;
-            }
-        }
-
-        // Among segments on the nearest line, resolve by X.
-        VisualSegment bestNear = null;
-        double bestNearDist = Double.MAX_VALUE;
-        for (VisualSegment seg : segments) {
-            if (Math.abs(seg.node.getLayoutY() - closestLineY) < 1) {
-                double nodeX = seg.node.getLayoutX();
-                double nodeW = seg.node.getBoundsInLocal().getWidth();
-                if (adjustedX >= nodeX && adjustedX <= nodeX + nodeW) {
-                    if (seg.isEmoji) {
-                        return adjustedX < nodeX + nodeW / 2 ? seg.charStart : seg.charEnd;
-                    } else {
-                        return findCharInTextNode(seg, adjustedX);
-                    }
-                }
-                double dist = Math.min(Math.abs(adjustedX - nodeX),
-                        Math.abs(adjustedX - (nodeX + nodeW)));
-                if (dist < bestNearDist) {
-                    bestNearDist = dist;
-                    bestNear = seg;
-                }
-            }
-        }
-
-        if (bestNear != null) {
-            double nodeX = bestNear.node.getLayoutX();
-            return adjustedX <= nodeX ? bestNear.charStart : bestNear.charEnd;
-        }
-
-        return text.get().length();
-    }
-
-    /** Finds the character inside a text node by X coordinate. */
-    private int findCharInTextNode(VisualSegment seg, double adjustedX) {
-        Text textNode = (Text) seg.node;
-        String content = textNode.getText();
-        double nodeX = textNode.getLayoutX();
-        double bestDist = Double.MAX_VALUE;
-        int bestPos = seg.charStart;
-        for (int i = 0; ; i = UnicodeTextUtils.nextCodePointBoundary(content, i)) {
-            String sub = content.substring(0, i);
-            Text measure = new Text(sub);
-            measure.setFont(textNode.getFont());
-            double charX = nodeX + measure.getBoundsInLocal().getWidth();
-            double dist = Math.abs(charX - adjustedX);
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestPos = seg.charStart + i;
-            }
-            if (i >= content.length()) {
-                break;
-            }
-        }
-        return bestPos;
+        layoutContent();
+        return fromFlowIndex(contentFlow.hitTest(new Point2D(clickX - scaledPadLeft(),
+                clickY - scaledPadTop() + verticalOffset)).getInsertionIndex());
     }
 
     // === Selection Visuals ===
@@ -1211,65 +1199,22 @@ public class EmojiTextField extends StackPane {
     private void updateSelectionVisual() {
         clearSelectionRects();
         if (!hasSelection()) { return; }
-
-        int insertIdx = getChildren().indexOf(contentFlow);
-
-        for (VisualSegment seg : segments) {
-            int overlapStart = Math.max(selectionStart, seg.charStart);
-            int overlapEnd = Math.min(selectionEnd, seg.charEnd);
-            if (overlapStart >= overlapEnd) { continue; }
-
-            // Read coordinates directly from the segment node. computeCaretPos()
-            // can return the previous segment's position at segment boundaries.
-            Node node = seg.node;
-            double nodeX = node.getLayoutX();
-            double nodeY = node.getLayoutY();
-            double x1;
-            double x2;
-
-            if (seg.isEmoji) {
-                double nodeW = node.getBoundsInLocal().getWidth();
-                x1 = overlapStart <= seg.charStart ? nodeX : nodeX + nodeW;
-                x2 = overlapEnd >= seg.charEnd ? nodeX + nodeW : nodeX;
-            } else {
-                Text textNode = (Text) node;
-                int startOff = UnicodeTextUtils.clampToCodePointBoundary(
-                        textNode.getText(),
-                        overlapStart - seg.charStart
-                );
-                Text m1 = new Text(textNode.getText().substring(0, startOff));
-                m1.setFont(textNode.getFont());
-                x1 = nodeX + m1.getBoundsInLocal().getWidth();
-
-                int endOff = UnicodeTextUtils.clampToCodePointBoundary(
-                        textNode.getText(),
-                        overlapEnd - seg.charStart
-                );
-                Text m2 = new Text(textNode.getText().substring(0, endOff));
-                m2.setFont(textNode.getFont());
-                x2 = nodeX + m2.getBoundsInLocal().getWidth();
-            }
-
-            double w = Math.max(1, x2 - x1);
-            Rectangle rect = new Rectangle(w, caret.getHeight());
-            rect.setLayoutX(x1 + scaledPadLeft());
-            rect.setLayoutY(nodeY + scaledPadTop() - verticalOffset);
-            rect.getStyleClass().add("emoji-text-field-selection");
-        // The selection color comes from CSS (.emoji-text-field-selection).
-            rect.setManaged(false);
-            rect.setMouseTransparent(true);
-            selectionRects.add(rect);
-            getChildren().add(insertIdx, rect);
-            insertIdx++;
-        }
+        Path selection = new Path(contentFlow.rangeShape(toFlowIndex(selectionStart), toFlowIndex(selectionEnd)));
+        selection.getStyleClass().add("emoji-text-field-selection");
+        selection.setStroke(null);
+        selection.setManaged(false);
+        selection.setMouseTransparent(true);
+        selection.setLayoutX(scaledPadLeft());
+        selection.setLayoutY(scaledPadTop() - verticalOffset);
+        selectionRects.add(selection);
+        getChildren().add(getChildren().indexOf(contentFlow), selection);
     }
 
     private void clearSelectionRects() {
-        for (Rectangle rect : selectionRects) {
-            getChildren().remove(rect);
-        }
+        getChildren().removeAll(selectionRects);
         selectionRects.clear();
     }
+
 
     private int clampCaret(int pos) {
         String current = UnicodeTextUtils.sanitize(text.get());

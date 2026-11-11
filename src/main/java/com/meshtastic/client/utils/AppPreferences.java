@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -40,6 +42,8 @@ public class AppPreferences {
     public static final String KEY_MEMORY_LIMIT_MB = "memoryLimitMb";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
     public static final String KEY_CHAT_FONT_SIZE = "chatFontSize";
+    /** Preference key for optional Cyrillic homoglyph substitution in outgoing text. */
+    public static final String KEY_CYRILLIC_COMPACTION = "cyrillicCompaction";
     public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
     public static final String KEY_PACKET_MONITOR_WINDOW_Y = "packetMonitorWindowY";
     public static final String KEY_PACKET_MONITOR_WINDOW_WIDTH = "packetMonitorWindowWidth";
@@ -80,6 +84,7 @@ public class AppPreferences {
     public static final int DEFAULT_REMOTE_RPC_SERVER_PORT = 44030;
 
     private static Preferences state;
+    private static final ReadOnlyBooleanWrapper cyrillicCompaction = new ReadOnlyBooleanWrapper(false);
 
     public enum MqttDownlinkFilterMode {
         NO_FILTER("none", "settings.mqttFilter.mode.none"),
@@ -123,6 +128,7 @@ public class AppPreferences {
 
     public static void init() {
         state = Preferences.userRoot().node(preferencesRootPath());
+        cyrillicCompaction.set(state.getBoolean(KEY_CYRILLIC_COMPACTION, false));
     }
 
     private static String preferencesRootPath() {
@@ -143,6 +149,35 @@ public class AppPreferences {
 
     public static Preferences getState() {
         return state();
+    }
+
+    /**
+     * Reads the saved compaction choice independently of the interface language.
+     *
+     * @return whether compaction is enabled; defaults to {@code false}
+     */
+    public static boolean isCyrillicCompactionEnabled() {
+        return state().getBoolean(KEY_CYRILLIC_COMPACTION, false);
+    }
+
+    /**
+     * Saves the compaction choice and notifies observers immediately on the calling thread.
+     *
+     * @param enabled whether outgoing Cyrillic text should use homoglyph substitution
+     */
+    public static void setCyrillicCompactionEnabled(boolean enabled) {
+        state().putBoolean(KEY_CYRILLIC_COMPACTION, enabled);
+        cyrillicCompaction.set(enabled);
+    }
+
+    /**
+     * Exposes changes made by {@link #setCyrillicCompactionEnabled(boolean)} or preference initialization.
+     *
+     * @return read-only property used to refresh open editors without restarting
+     */
+    public static ReadOnlyBooleanProperty cyrillicCompactionProperty() {
+        state();
+        return cyrillicCompaction.getReadOnlyProperty();
     }
 
     public static boolean isDarkMode() {

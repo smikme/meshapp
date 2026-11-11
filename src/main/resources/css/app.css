@@ -3208,6 +3208,12 @@
     -fx-fill: rgba(51, 144, 255, 0.4);
 }
 
+.chat-spelling-underline {
+    -fx-stroke: #ed5555;
+    -fx-stroke-width: 1;
+    -fx-fill: transparent;
+}
+
 /* ContextMenu */
 .context-menu {
     -fx-background-color: -color-bg-default;

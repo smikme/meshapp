@@ -186,8 +186,13 @@ abstract class FormChatRequests extends FormChatMessages {
             reloadChatList();
             return true;
         }
-        if (!MessageService.retryMessage(protocolHandler, state, msg)) {
-            showRetryFailedToast(msg);
+        try {
+            if (!MessageService.retryMessage(protocolHandler, state, msg)) {
+                showRetryFailedToast(msg);
+                return false;
+            }
+        } catch (IllegalArgumentException error) {
+            Toast.show(Toast.Type.WARNING, error.getMessage());
             return false;
         }
 

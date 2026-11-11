@@ -9,6 +9,7 @@ import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import java.util.function.DoubleConsumer;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -123,6 +124,7 @@ public final class ApplicationSettingsPanelFactory {
             appearanceHeader,
             typographyGroup,
             createLanguageSettingRow(),
+            createCyrillicCompactionSetting(),
             enableEffectsCb,
             softwareRenderingCb,
             minimizeToTrayCb,
@@ -455,6 +457,34 @@ public final class ApplicationSettingsPanelFactory {
         restartLabel.setWrapText(true);
 
         return new VBox(6, titleLabel, descriptionLabel, inputRow, restartLabel);
+    }
+
+    /**
+     * Creates the persisted compaction toggle and its explanation.
+     * The group is visible and managed only for the effective Russian locale;
+     * hiding it does not reset the saved choice.
+     *
+     * @return settings group whose visibility follows locale changes
+     */
+    static VBox createCyrillicCompactionSetting() {
+        var russian = Bindings.createBooleanBinding(
+                () -> I18n.LANGUAGE_RU.equals(I18n.locale().getLanguage()), I18n.localeProperty());
+        CheckBox enabled = new CheckBox();
+        enabled.setId("cyrillic-compaction");
+        enabled.textProperty().bind(Bindings.createStringBinding(
+                () -> russian.get() ? I18n.t("settings.cyrillicCompaction.title") : "", I18n.localeProperty()));
+        enabled.setSelected(AppPreferences.isCyrillicCompactionEnabled());
+        enabled.selectedProperty().addListener((_, _, selected) ->
+                AppPreferences.setCyrillicCompactionEnabled(selected));
+        Label description = new Label();
+        description.textProperty().bind(Bindings.createStringBinding(
+                () -> russian.get() ? I18n.t("settings.cyrillicCompaction.description") : "", I18n.localeProperty()));
+        description.getStyleClass().add("muted-note-label");
+        description.setWrapText(true);
+        VBox group = new VBox(6, enabled, description);
+        group.visibleProperty().bind(russian);
+        group.managedProperty().bind(group.visibleProperty());
+        return group;
     }
 
     private static VBox createLanguageSettingRow() {

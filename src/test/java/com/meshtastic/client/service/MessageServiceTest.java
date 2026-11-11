@@ -12,6 +12,8 @@ import com.meshtastic.client.model.LogEntry;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.OutgoingText;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,98 @@ import org.slf4j.LoggerFactory;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 class MessageServiceTest {
+
+    @Test
+    void compactsChannelRepliesOnWireAndValidatesRetriesBeforeChangingHistory() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        String original = "а".repeat(223);
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!12345678");
+        try {
+            AppPreferences.setCyrillicCompactionEnabled(true);
+            MeshMessage message = MessageService.sendChannelMessage(handler, state, 0, original, 42);
+            var data = connection.nextPacket().getPacket().getDecoded();
+            assertEquals(original, message.getText());
+            assertEquals(OutgoingText.byteLength(original), data.getPayload().size());
+            assertEquals("a".repeat(223), data.getPayload().toStringUtf8());
+            assertEquals(42, data.getReplyId());
+            assertEquals(233, data.getSerializedSize());
+            long dbId = message.getDbId();
+            message.setStatus(MeshMessage.DeliveryStatus.FAILED);
+            assertTrue(MessageService.retryMessage(handler, state, message));
+            assertEquals(dbId, message.getDbId());
+            assertEquals("a".repeat(223), connection.nextPacket().getPacket().getDecoded().getPayload().toStringUtf8());
+            message.setStatus(MeshMessage.DeliveryStatus.FAILED);
+            int packetId = message.getPacketId();
+            byte[] lastPacket = connection.lastSentBytes;
+            AppPreferences.setCyrillicCompactionEnabled(false);
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> MessageService.retryMessage(handler, state, message));
+            assertSame(lastPacket, connection.lastSentBytes);
+            assertEquals(packetId, message.getPacketId());
+            assertEquals(MeshMessage.DeliveryStatus.FAILED, message.getStatus());
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> MessageService.sendChannelMessage(handler, state, 0, "а".repeat(224), 42, true));
+        } finally {
+            AppPreferences.setCyrillicCompactionEnabled(false);
+            state.shutdown();
+        }
+    }
+
+    @Test
+    void directMessagesUseExplicitClientChoiceAndKeepOriginalText() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        var peer = new com.meshtastic.client.model.NodeData(0x23456789);
+        peer.setNodeId("!23456789");
+        state.getNodeDb().put(peer.getNodeNum(), peer);
+        String text = "Всему свое время";
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!12345678");
+        var message = MessageService.sendDirectMessage(handler, state, peer.getNodeId(), text, 0, true);
+        assertEquals(text, message.getText());
+        assertEquals(21, connection.nextPacket().getPacket().getDecoded().getPayload().size());
+        message.setStatus(MeshMessage.DeliveryStatus.FAILED);
+        assertTrue(MessageService.retryMessage(handler, state, message, true));
+        assertEquals(21, connection.nextPacket().getPacket().getDecoded().getPayload().size());
+        MessageService.sendDirectMessage(handler, state, peer.getNodeId(), text, 0, false);
+        assertEquals(30, connection.nextPacket().getPacket().getDecoded().getPayload().size());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> MessageService.sendDirectMessage(handler, state, peer.getNodeId(), "а".repeat(229), 0, true));
+        state.shutdown();
+    }
+
+    @Test
+    void compactRepliesReserveAuthenticationBytesOnFirstSendAndRetry() throws Exception {
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!12345678");
+        state.setDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder()
+                .setFirmwareVersion("2.8.2.d5f1619").setHasXeddsa(true).build());
+        state.addConfig(ConfigProtos.Config.newBuilder().setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
+                .setPacketSignaturePolicy(ConfigProtos.Config.SecurityConfig.PacketSignaturePolicy.PACKET_SIGNATURE_POLICY_STRICT)).build());
+        state.addChannel(org.meshtastic.proto.ChannelProtos.Channel.newBuilder().setIndex(0)
+                .setRole(org.meshtastic.proto.ChannelProtos.Channel.Role.PRIMARY)
+                .setSettings(org.meshtastic.proto.ChannelProtos.ChannelSettings.newBuilder().setUseAead(true)).build());
+        try {
+            for (int channel : new int[]{0, 1}) {
+                int overhead = channel == 0 ? 12 : 66;
+                String text = "а".repeat(223 - overhead);
+                var message = MessageService.sendChannelMessage(handler, state, channel, text, 42, true);
+                assertEquals(233, connection.nextPacket().getPacket().getDecoded().getSerializedSize() + overhead);
+                message.setStatus(MeshMessage.DeliveryStatus.FAILED);
+                assertTrue(MessageService.retryMessage(handler, state, message, true));
+                assertEquals(233, connection.nextPacket().getPacket().getDecoded().getSerializedSize() + overhead);
+                org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                        () -> MessageService.sendChannelMessage(handler, state, channel, text + "а", 42, true));
+            }
+        } finally { state.shutdown(); }
+    }
 
     @TempDir
     Path tempHome;
@@ -504,7 +598,14 @@ class MessageServiceTest {
 
     private static final class RecordingConnection implements MeshtasticConnection {
         private volatile byte[] lastSentBytes;
+        private final java.util.concurrent.BlockingQueue<byte[]> sentFrames = new java.util.concurrent.LinkedBlockingQueue<>();
         private final CountDownLatch firstSend = new CountDownLatch(1);
+
+        MeshProtos.ToRadio nextPacket() throws Exception {
+            byte[] frame = sentFrames.poll(2, TimeUnit.SECONDS);
+            assertNotNull(frame, "Timed out waiting for the next outbound frame");
+            return MeshProtos.ToRadio.parseFrom(java.util.Arrays.copyOfRange(frame, 4, frame.length));
+        }
 
         @Override
         public void connect() {
@@ -524,6 +625,7 @@ class MessageServiceTest {
         @Override
         public void sendBytes(byte[] data) {
             lastSentBytes = data;
+            sentFrames.add(data);
             firstSend.countDown();
         }
 

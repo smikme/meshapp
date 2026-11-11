@@ -1,6 +1,6 @@
 package com.meshtastic.client.terminal;
 
-import java.nio.charset.StandardCharsets;
+import com.meshtastic.client.utils.OutgoingText;
 
 /**
  * Shared terminal chat input limits matching the GUI message payload budget.
@@ -27,12 +27,13 @@ final class TerminalInputLimits {
     }
 
     /**
-     * Counts the UTF-8 bytes used by the text payload.
+     * Counts the UTF-8 bytes used by the text payload after applying the current
+     * Cyrillic compaction preference, matching the GUI counter and sending services.
      *
      * @param text input text, may be {@code null}
-     * @return UTF-8 byte length, or {@code 0} for {@code null}
+     * @return transmitted text size without protocol overhead, or {@code 0} for {@code null}
      */
     static int textByteLength(String text) {
-        return text == null ? 0 : text.getBytes(StandardCharsets.UTF_8).length;
+        return OutgoingText.byteLength(text);
     }
 }

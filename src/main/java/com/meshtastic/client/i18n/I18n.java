@@ -14,6 +14,8 @@ import java.util.Locale;
 import java.util.MissingResourceException;
 import java.util.Properties;
 import java.util.ResourceBundle;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
 
 /**
  * Central access point for localized UI strings.
@@ -37,6 +39,7 @@ public final class I18n {
 
     private static volatile String languageTag = LANGUAGE_SYSTEM;
     private static volatile ResourceBundle bundle = loadBundle(resolveLocale(LANGUAGE_SYSTEM));
+    private static final ReadOnlyObjectWrapper<Locale> currentLocale = new ReadOnlyObjectWrapper<>(bundle.getLocale());
 
     public static void initFromPreferences() {
         setCurrentLanguageTag(AppPreferences.getLanguageTag());
@@ -46,8 +49,22 @@ public final class I18n {
         return languageTag;
     }
 
+    /**
+     * Returns the effective resource-bundle locale after system-language and fallback resolution.
+     *
+     * @return locale currently used to format and translate interface text
+     */
     public static Locale locale() {
-        return bundle.getLocale();
+        return currentLocale.get();
+    }
+
+    /**
+     * Exposes effective locale changes for language-dependent interface bindings.
+     *
+     * @return read-only property with the same value as {@link #locale()}
+     */
+    public static ReadOnlyObjectProperty<Locale> localeProperty() {
+        return currentLocale.getReadOnlyProperty();
     }
 
     public static void setLanguageTag(String tag) {
@@ -128,6 +145,7 @@ public final class I18n {
         String normalized = normalizeLanguageTag(tag);
         languageTag = normalized;
         bundle = loadBundle(resolveLocale(normalized));
+        currentLocale.set(bundle.getLocale());
     }
 
     private static ResourceBundle loadBundle(Locale locale) {

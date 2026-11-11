@@ -7,8 +7,14 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.service.MeshpicUploadService;
+import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.UnicodeTextUtils;
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.OutgoingText;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
+import javafx.beans.binding.Bindings;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -36,7 +42,6 @@ import javafx.scene.shape.Rectangle;
 import javafx.stage.FileChooser;
 
 import java.io.File;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -56,6 +61,10 @@ import java.util.function.Predicate;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChatInputBar extends VBox {
+    private final ChangeListener<Boolean> compactionListener = (_, _, _) -> {
+        if (Platform.isFxApplicationThread()) { updateCharCount(); }
+        else { Platform.runLater(this::updateCharCount); }
+    };
 
     /**
      * Maximum serialized Data protobuf size from mesh.proto DATA_PAYLOAD_LEN.
@@ -169,6 +178,8 @@ public class ChatInputBar extends VBox {
                 : ChatBotCommandHelper::suggestBots;
         this.nodeSuggestionProvider = nodeSuggestionProvider;
         getStyleClass().add("chat-input-wrapper");
+        // Reserve the full draft height when the message history competes for space.
+        setMinHeight(Region.USE_PREF_SIZE);
         setMaxHeight(Region.USE_PREF_SIZE);
         addEventFilter(DragEvent.DRAG_OVER, this::handleImageDragOver);
         addEventFilter(DragEvent.DRAG_DROPPED, this::handleImageDragDropped);
@@ -201,10 +212,13 @@ public class ChatInputBar extends VBox {
         messageInput = new EmojiTextField();
         messageInput.setPromptText(defaultPromptText());
         messageInput.setMaxBytesSupplier(this::getMaxTextBytes);
+        messageInput.setByteCounter(OutgoingText::byteLength);
+        messageInput.setEditValidator(this::isProtectedImageTextIntact);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
         // Send button with a circular fill indicator.
         sendRing = new SendButtonWithRing(this::doSend);
+        AppPreferences.cyrillicCompactionProperty().addListener(new WeakChangeListener<>(compactionListener));
 
         messageInput.focusedProperty().addListener((_, _, isFocused) -> {
             if (!isFocused) {
@@ -223,11 +237,14 @@ public class ChatInputBar extends VBox {
                 refreshInputState(newVal);
                 return;
             }
-            if (newVal != null && textByteLength(newVal) > getMaxTextBytes()) {
+            if (newVal != null && textByteLength(newVal) > getMaxTextBytes()
+                    && textByteLength(newVal) >= textByteLength(oldVal)) {
                 // Revert to the previous text as a whole instead of trimming the
                 // end; otherwise inserting in the middle appears to work by
                 // deleting the final character.
-                messageInput.setText(oldVal != null ? oldVal : "");
+                restoringProtectedImageText = true;
+                try { messageInput.setText(oldVal != null ? oldVal : ""); }
+                finally { restoringProtectedImageText = false; }
                 return;
             }
             if (!isProtectedImageTextIntact(newVal)) {
@@ -247,8 +264,10 @@ public class ChatInputBar extends VBox {
 
         messageInput.setOnAction(_ -> doSend());
 
-        HBox inputBar = new HBox(8, emojiBtn, imageBtn, messageInput, sendRing);
-        inputBar.setAlignment(Pos.CENTER_LEFT);
+        HBox inputBar = new HBox(8, createInputControlSlot(emojiBtn), createInputControlSlot(imageBtn),
+                messageInput, createInputControlSlot(sendRing));
+        inputBar.setAlignment(Pos.BOTTOM_LEFT);
+        inputBar.setFillHeight(false);
         inputBar.setPadding(new Insets(8, 15, 8, 15));
         inputBar.getStyleClass().add("chat-input-bar");
         inputBar.setMaxHeight(Region.USE_PREF_SIZE);
@@ -320,6 +339,23 @@ public class ChatInputBar extends VBox {
         getChildren().addAll(replyBar, imagePreviewBar, inputStack);
     }
 
+    /**
+     * Centers a control in a fixed single-line slot so a growing draft does not lift it.
+     *
+     * @param control emoji, attachment or send control
+     * @return slot sized from the control and current single-line input height
+     */
+    private StackPane createInputControlSlot(Region control) {
+        StackPane slot = new StackPane(control);
+        // Keep the original centered position within a single-line row, even as the draft grows.
+        slot.prefHeightProperty().bind(Bindings.createDoubleBinding(
+                () -> Math.max(messageInput.getSingleLineHeight(), control.prefHeight(-1)),
+                TypographyManager.chatFontSizeProperty(), control.layoutBoundsProperty()));
+        slot.setMinHeight(Region.USE_PREF_SIZE);
+        slot.setMaxHeight(Region.USE_PREF_SIZE);
+        return slot;
+    }
+
     /** Returns the separator placed above the input panel. */
     public Separator getInputSeparator() {
         return inputSep;
@@ -338,8 +374,7 @@ public class ChatInputBar extends VBox {
     public void setInputEnabled(boolean enabled) {
         inputEnabled = enabled;
         messageInput.setFieldDisabled(!enabled);
-        sendRing.setSendDisable(!enabled
-                || messageInput.getText().trim().isEmpty());
+        updateCharCount();
         updateImageButtonState();
         if (!enabled) {
             cancelActiveNodePick();
@@ -870,6 +905,11 @@ public class ChatInputBar extends VBox {
         return files.stream().filter(ChatInputBar::isSupportedImageFile).findFirst();
     }
 
+    /**
+     * Sets the authentication bytes reserved from the Meshtastic payload budget.
+     *
+     * @param supplier current overhead in bytes; null reserves no authentication bytes
+     */
     public void setAuthenticationOverheadSupplier(java.util.function.IntSupplier supplier) {
         authenticationOverhead = supplier != null ? supplier : () -> 0;
         updateCharCount();
@@ -877,6 +917,11 @@ public class ChatInputBar extends VBox {
 
     /** Maximum text byte length after protobuf overhead and reply mode are accounted for. */
     private java.util.function.IntSupplier protocolTextLimit = () -> -1;
+    /**
+     * Overrides the input byte budget for protocols with their own text limits.
+     *
+     * @param supplier non-null supplier; a negative value selects the Meshtastic budget
+     */
     public void setProtocolTextLimit(java.util.function.IntSupplier supplier) { protocolTextLimit = supplier; updateCharCount(); }
     private int getMaxTextBytes() {
         int protocolLimit=protocolTextLimit.getAsInt();
@@ -927,13 +972,9 @@ public class ChatInputBar extends VBox {
 
     private void insertEmoji(String emoji) {
         String text = messageInput.getText();
-        int maxBytes = getMaxTextBytes();
-        if (textByteLength(text) + textByteLength(emoji) > maxBytes) {
-            return;
-        }
         int caret = Math.min(savedCaretPosition, text.length());
         messageInput.insertText(caret, emoji);
-        savedCaretPosition = caret + emoji.length();
+        savedCaretPosition = messageInput.getCaretPosition();
         Platform.runLater(() -> {
             messageInput.requestFocus();
             messageInput.positionCaret(savedCaretPosition);
@@ -946,17 +987,19 @@ public class ChatInputBar extends VBox {
         int byteLen = text != null ? textByteLength(text) : 0;
         int maxBytes = getMaxTextBytes();
         sendRing.update(byteLen, maxBytes);
+        sendRing.setSendDisable(!inputEnabled || text == null || text.trim().isEmpty() || byteLen > maxBytes);
+        sendRing.getSendButton().getTooltip().setText(byteLen > maxBytes
+                ? I18n.t("chat.messageTooLong", maxBytes) : I18n.t("chat.send"));
     }
 
     private void refreshInputState(String text) {
         updateCharCount();
-        sendRing.setSendDisable(text == null || text.trim().isEmpty());
         Platform.runLater(this::refreshCommandSuggestions);
     }
 
-    /** Returns string length in UTF-8 bytes. */
+    /** Returns the size of the wire representation without changing the draft. */
     private static int textByteLength(String text) {
-        return text.getBytes(StandardCharsets.UTF_8).length;
+        return OutgoingText.byteLength(text);
     }
 
     private void refreshCommandSuggestions() {

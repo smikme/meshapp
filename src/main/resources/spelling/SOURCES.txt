@@ -1,0 +1,18 @@
+Hunspell dictionaries from https://github.com/LibreOffice/dictionaries
+Revision: c0865a85eb67dc377f2cf8e8fe2c4fa9e53f0dcb
+
+ru_RU/ru_RU.aff -> ru.aff.gz
+ru_RU/ru_RU.dic -> ru.dic.gz
+en/en_US.aff -> en.aff.gz
+en/en_US.dic -> en.dic.gz
+de/de_DE_frami.aff -> de.aff.gz
+de/de_DE_frami.dic -> de.dic.gz
+ru_RU/README_ru_RU.txt -> LICENSE-ru.txt
+en/README_en_US.txt -> LICENSE-en.txt
+en/license.txt -> LICENSE-en-project.txt
+de/README_de_DE_frami.txt -> LICENSE-de.txt
+de/COPYING_GPLv2 -> COPYING_GPLv2
+de/COPYING_GPLv3 -> COPYING_GPLv3
+
+Dictionary and affix files are gzip-compressed without content changes.
+See the bundled LICENSE files for authors and distribution terms.

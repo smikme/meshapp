@@ -22,6 +22,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RemoteChatJsonTest {
 
     @Test
+    void sendAndRetryCarryClientEncodingChoiceAlongsideOriginalText(@TempDir Path home) {
+        TestEnvironmentSupport.setUserHome(home);
+        try {
+            for (boolean compact : new boolean[]{true, false}) {
+                AppPreferences.setCyrillicCompactionEnabled(compact);
+                var send = RemoteChatJson.sendParams("channel", "0", "Москва", 42);
+                assertEquals(compact ? "Mocквa" : "Москва", send.get("text").getAsString());
+                assertEquals(compact, send.has("originalText"));
+                if (compact) { assertEquals("Москва", send.get("originalText").getAsString()); }
+                assertEquals(compact, send.get("compactCyrillic").getAsBoolean());
+                var retry = RemoteChatJson.retryParams("channel", "0", 123, 456);
+                assertEquals(compact, retry.get("compactCyrillic").getAsBoolean());
+            }
+        } finally { AppPreferences.setCyrillicCompactionEnabled(false); }
+    }
+
+    @Test
     void parseChatItemsRestoresServerUnreadCount() {
         JsonObject item = new JsonObject();
         item.addProperty("type", "CHANNEL");
