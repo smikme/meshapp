@@ -7,6 +7,11 @@ import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.OutgoingText;
+
+import static com.meshtastic.client.protocol.rpc.RpcJsonFields.booleanField;
+import static com.meshtastic.client.protocol.rpc.RpcJsonFields.intField;
+import static com.meshtastic.client.protocol.rpc.RpcJsonFields.longField;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,10 +48,33 @@ public final class RemoteChatJson {
         return params;
     }
 
+    /**
+     * Builds a {@code chat.send} request using the client's compaction preference.
+     * The {@code text} field contains the wire representation for older hosts;
+     * {@code originalText}, when different, lets updated hosts preserve the draft in history.
+     *
+     * @param chatType destination kind, {@code channel} or {@code dm}
+     * @param chatKey channel index or recipient node ID
+     * @param text original message text
+     * @param replyId quoted packet ID, or zero for no reply
+     * @return request parameters including the explicit compaction choice
+     */
     public static JsonObject sendParams(String chatType, String chatKey, String text, int replyId) {
         return sendParams(chatType, chatKey, text, replyId, "");
     }
 
+    /**
+     * Builds a {@code chat.send} request using the client's compaction preference.
+     * The {@code text} field contains the wire representation for older hosts;
+     * {@code originalText}, when different, lets updated hosts preserve the draft in history.
+     *
+     * @param chatType destination kind, {@code channel} or {@code dm}
+     * @param chatKey channel index or recipient node ID
+     * @param text original message text
+     * @param replyId quoted packet ID, or zero for no reply
+     * @param clientRequestId optional deduplication ID; null or blank omits it
+     * @return request parameters including the explicit compaction choice
+     */
     public static JsonObject sendParams(String chatType,
                                         String chatKey,
                                         String text,
@@ -55,7 +83,12 @@ public final class RemoteChatJson {
         JsonObject params = new JsonObject();
         params.addProperty("chatType", chatType);
         params.addProperty("chatKey", chatKey);
-        params.addProperty("text", text);
+        boolean compact = AppPreferences.isCyrillicCompactionEnabled();
+        String wireText = OutgoingText.prepare(text, compact);
+        // Older hosts can send the wire text directly; updated hosts also retain the original in history.
+        params.addProperty("text", wireText);
+        if (!wireText.equals(text)) { params.addProperty("originalText", text); }
+        params.addProperty("compactCyrillic", compact);
         if (replyId != 0) {
             params.addProperty("replyId", replyId);
         }
@@ -74,6 +107,16 @@ public final class RemoteChatJson {
         return params;
     }
 
+    /**
+     * Builds a {@code chat.retry} request carrying the client's current compaction choice.
+     * At least one message identifier must be supplied; the host prefers a positive database ID.
+     *
+     * @param chatType destination kind, {@code channel} or {@code dm}
+     * @param chatKey channel index or recipient node ID
+     * @param dbId positive history row ID, or zero when unavailable
+     * @param packetId packet ID, or zero when unavailable
+     * @return retry request parameters
+     */
     public static JsonObject retryParams(String chatType, String chatKey, long dbId, int packetId) {
         JsonObject params = new JsonObject();
         params.addProperty("chatType", chatType);
@@ -84,6 +127,7 @@ public final class RemoteChatJson {
         if (packetId != 0) {
             params.addProperty("packetId", packetId);
         }
+        params.addProperty("compactCyrillic", AppPreferences.isCyrillicCompactionEnabled());
         return params;
     }
 
@@ -96,7 +140,7 @@ public final class RemoteChatJson {
      * by this RPC client for the supplied connection scope.
      */
     public static List<ChatItem> parseChatItems(JsonElement result, String notificationOwnerId) {
-        JsonArray items = objectArray(result, "items");
+        JsonArray items = itemsArray(result);
         List<ChatItem> parsed = new ArrayList<>();
         for (JsonElement element : items) {
             if (!isObject(element)) {
@@ -120,7 +164,7 @@ public final class RemoteChatJson {
                     type,
                     stringField(item, "displayName"),
                     stringField(item, "avatarText"),
-                    firstText(stringField(item, "avatarColor"), DEFAULT_AVATAR_COLOR),
+                    avatarColor(item),
                     stringField(item, "lastMessageText"),
                     longField(item, "lastMessageTime"),
                     intField(item, "unreadCount"),
@@ -132,7 +176,7 @@ public final class RemoteChatJson {
     }
 
     public static List<MeshMessage> parseMessages(JsonElement result) {
-        JsonArray items = objectArray(result, "items");
+        JsonArray items = itemsArray(result);
         List<MeshMessage> parsed = new ArrayList<>();
         for (JsonElement element : items) {
             if (isObject(element)) {
@@ -179,7 +223,7 @@ public final class RemoteChatJson {
         message.setHopStart(intField(object, "hopStart"));
         message.setHopLimit(intField(object, "hopLimit"));
         message.setRxRssi(intField(object, "rxRssi"));
-        message.setRxSnr(floatField(object, "rxSnr"));
+        message.setRxSnr(rxSnr(object));
         message.setSenderName(stringField(object, "senderName"));
         message.setViaMqtt(booleanField(object, "viaMqtt"));
         message.setSystemMessage(booleanField(object, "systemMessage"));
@@ -229,9 +273,9 @@ public final class RemoteChatJson {
         return reactions;
     }
 
-    private static JsonArray objectArray(JsonElement result, String field) {
+    private static JsonArray itemsArray(JsonElement result) {
         JsonObject object = isObject(result) ? result.getAsJsonObject() : new JsonObject();
-        JsonElement element = object.get(field);
+        JsonElement element = object.get("items");
         return element != null && element.isJsonArray() ? element.getAsJsonArray() : new JsonArray();
     }
 
@@ -239,8 +283,9 @@ public final class RemoteChatJson {
         return element != null && element.isJsonObject();
     }
 
-    private static String firstText(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value.trim();
+    private static String avatarColor(JsonObject item) {
+        String color = stringField(item, "avatarColor");
+        return color.isBlank() ? DEFAULT_AVATAR_COLOR : color;
     }
 
     private static String stringField(JsonObject object, String field) {
@@ -252,30 +297,11 @@ public final class RemoteChatJson {
         return value == null ? "" : value.trim();
     }
 
-    private static int intField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                ? element.getAsInt()
-                : 0;
-    }
-
-    private static long longField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                ? element.getAsLong()
-                : 0L;
-    }
-
-    private static float floatField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
+    private static float rxSnr(JsonObject object) {
+        JsonElement element = object != null ? object.get("rxSnr") : null;
         return element != null && !element.isJsonNull() && element.isJsonPrimitive()
                 ? element.getAsFloat()
                 : 0.0f;
     }
 
-    private static boolean booleanField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                && element.getAsBoolean();
-    }
 }

@@ -3,10 +3,10 @@ package com.meshtastic.client.utils;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
 
-import java.util.Collections;
-import java.util.List;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -18,16 +18,12 @@ public class AppPreferences {
     public static final String PREFERENCES_ROOT_PATH = "/meshapp";
     public static final String PROP_PREFERENCES_ROOT_PATH = "meshapp.preferencesRootPath";
     public static final String KEY_DARK_MODE = "darkMode";
-    public static final String KEY_RECENT_SEARCH = "recentSearch";
-    public static final String KEY_RECENT_SEARCH_FAVORITE = "recentSearchFavorite";
     public static final String KEY_WINDOW_X = "windowX";
     public static final String KEY_WINDOW_Y = "windowY";
     public static final String KEY_WINDOW_WIDTH = "windowWidth";
     public static final String KEY_WINDOW_HEIGHT = "windowHeight";
     public static final String KEY_WINDOW_MAXIMIZED = "windowMaximized";
     public static final String KEY_NOTIFICATIONS_ENABLED = "notificationsEnabled";
-    public static final String KEY_NATIVE_WINDOW = "nativeWindow";
-    public static final String KEY_DISABLE_TRANSPARENCY = "disableTransparency";
     public static final String KEY_ENABLE_EFFECTS = "enableEffects";
     public static final String KEY_DISABLE_EFFECTS = "disableEffects";
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
@@ -40,6 +36,8 @@ public class AppPreferences {
     public static final String KEY_MEMORY_LIMIT_MB = "memoryLimitMb";
     public static final String KEY_APP_FONT_SIZE = "appFontSize";
     public static final String KEY_CHAT_FONT_SIZE = "chatFontSize";
+    /** Preference key for optional Cyrillic homoglyph substitution in outgoing text. */
+    public static final String KEY_CYRILLIC_COMPACTION = "cyrillicCompaction";
     public static final String KEY_PACKET_MONITOR_WINDOW_X = "packetMonitorWindowX";
     public static final String KEY_PACKET_MONITOR_WINDOW_Y = "packetMonitorWindowY";
     public static final String KEY_PACKET_MONITOR_WINDOW_WIDTH = "packetMonitorWindowWidth";
@@ -80,6 +78,7 @@ public class AppPreferences {
     public static final int DEFAULT_REMOTE_RPC_SERVER_PORT = 44030;
 
     private static Preferences state;
+    private static final ReadOnlyBooleanWrapper cyrillicCompaction = new ReadOnlyBooleanWrapper(false);
 
     public enum MqttDownlinkFilterMode {
         NO_FILTER("none", "settings.mqttFilter.mode.none"),
@@ -123,6 +122,7 @@ public class AppPreferences {
 
     public static void init() {
         state = Preferences.userRoot().node(preferencesRootPath());
+        cyrillicCompaction.set(state.getBoolean(KEY_CYRILLIC_COMPACTION, false));
     }
 
     private static String preferencesRootPath() {
@@ -145,6 +145,35 @@ public class AppPreferences {
         return state();
     }
 
+    /**
+     * Reads the saved compaction choice independently of the interface language.
+     *
+     * @return whether compaction is enabled; defaults to {@code false}
+     */
+    public static boolean isCyrillicCompactionEnabled() {
+        return state().getBoolean(KEY_CYRILLIC_COMPACTION, false);
+    }
+
+    /**
+     * Saves the compaction choice and notifies observers immediately on the calling thread.
+     *
+     * @param enabled whether outgoing Cyrillic text should use homoglyph substitution
+     */
+    public static void setCyrillicCompactionEnabled(boolean enabled) {
+        state().putBoolean(KEY_CYRILLIC_COMPACTION, enabled);
+        cyrillicCompaction.set(enabled);
+    }
+
+    /**
+     * Exposes changes made by {@link #setCyrillicCompactionEnabled(boolean)} or preference initialization.
+     *
+     * @return read-only property used to refresh open editors without restarting
+     */
+    public static ReadOnlyBooleanProperty cyrillicCompactionProperty() {
+        state();
+        return cyrillicCompaction.getReadOnlyProperty();
+    }
+
     public static boolean isDarkMode() {
         return state().getBoolean(KEY_DARK_MODE, false);
     }
@@ -159,22 +188,6 @@ public class AppPreferences {
 
     public static void setNotificationsEnabled(boolean enabled) {
         state().putBoolean(KEY_NOTIFICATIONS_ENABLED, enabled);
-    }
-
-    public static boolean isNativeWindow() {
-        return state().getBoolean(KEY_NATIVE_WINDOW, false);
-    }
-
-    public static void setNativeWindow(boolean value) {
-        state().putBoolean(KEY_NATIVE_WINDOW, value);
-    }
-
-    public static boolean isDisableTransparency() {
-        return state().getBoolean(KEY_DISABLE_TRANSPARENCY, false);
-    }
-
-    public static void setDisableTransparency(boolean value) {
-        state().putBoolean(KEY_DISABLE_TRANSPARENCY, value);
     }
 
     public static boolean isVisualEffectsEnabled() {
@@ -197,10 +210,6 @@ public class AppPreferences {
 
     public static void setVisualEffectsEnabled(boolean value) {
         state().putBoolean(KEY_ENABLE_EFFECTS, value);
-    }
-
-    public static boolean isDisableEffects() {
-        return !isVisualEffectsEnabled();
     }
 
     public static boolean isDisableEffectsEffective() {
@@ -352,10 +361,7 @@ public class AppPreferences {
     }
 
     public static int clampMemoryLimitMb(int value) {
-        return Math.max(
-            MIN_MEMORY_LIMIT_MB,
-            Math.min(MAX_MEMORY_LIMIT_MB, value)
-        );
+        return Math.clamp(value, MIN_MEMORY_LIMIT_MB, MAX_MEMORY_LIMIT_MB);
     }
 
     public static int getAppFontSize() {
@@ -372,12 +378,6 @@ public class AppPreferences {
 
     public static void setChatFontSize(int value) {
         state().putInt(KEY_CHAT_FONT_SIZE, value);
-    }
-
-    public static List<String> getRecentSearch(boolean favorite) {
-        String stringArr = state().get(favorite ? KEY_RECENT_SEARCH_FAVORITE : KEY_RECENT_SEARCH, null);
-        if (stringArr == null || stringArr.trim().isEmpty()) { return Collections.emptyList(); }
-        return List.of(stringArr.trim().split(","));
     }
 
     // ==================== Window Bounds ====================
@@ -770,20 +770,6 @@ public class AppPreferences {
     }
 
     /**
-     * Saves the MeshApp IDE SplitPane layout and flushes it to the backing store immediately.
-     *
-     * @param mainPos divider between editor area and right-side state panes
-     * @param editorPos divider between code editor and console
-     * @param infoPos divider between variables and selected-script KV
-     */
-    public static void saveLuaDevDividerPositions(double mainPos, double editorPos, double infoPos) {
-        setLuaDevMainDividerPos(mainPos);
-        setLuaDevEditorDividerPos(editorPos);
-        setLuaDevInfoDividerPos(infoPos);
-        flushState();
-    }
-
-    /**
      * Saves the complete MeshApp IDE layout, including the function outline pane.
      *
      * @param mainPos divider between editor area and right-side state panes
@@ -809,7 +795,7 @@ public class AppPreferences {
         if (!Double.isFinite(pos)) {
             return fallback;
         }
-        return Math.max(0.0, Math.min(1.0, pos));
+        return Math.clamp(pos, 0.0, 1.0);
     }
 
     /**

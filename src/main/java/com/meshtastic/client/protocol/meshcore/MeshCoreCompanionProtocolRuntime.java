@@ -1,5 +1,8 @@
 package com.meshtastic.client.protocol.meshcore;
 
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.OutgoingText;
+
 import static com.meshtastic.client.protocol.meshcore.MeshCoreCompanionFrames.*;
 
 import com.meshtastic.client.connection.*;
@@ -303,19 +306,79 @@ public final class MeshCoreCompanionProtocolRuntime
                                 - 2);
     }
 
+    /**
+     * Sends channel text using the saved application compaction choice.
+     * The original text is retained in history; the wire copy is validated against
+     * the MeshCore byte limit before sending.
+     *
+     * @param channel enabled channel index
+     * @param text original message text
+     * @param replyId must be zero because MeshCore does not support replies
+     * @return saved message, or null when the destination, connection or text cannot be used
+     * @throws IllegalArgumentException if a nonzero reply ID is supplied
+     * @throws IllegalStateException if local persistence fails
+     */
     public synchronized MeshMessage sendChannelMessage(int channel, String text, int replyId) {
+        return sendChannelMessage(channel, text, replyId, AppPreferences.isCyrillicCompactionEnabled());
+    }
+
+    /**
+     * Sends channel text using an explicit compaction choice.
+     * The original text is retained in history; the wire copy is validated against
+     * the MeshCore byte limit before sending.
+     *
+     * @param channel enabled channel index
+     * @param text original message text
+     * @param replyId must be zero because MeshCore does not support replies
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return saved message, or null when the destination, connection or text cannot be used
+     * @throws IllegalArgumentException if a nonzero reply ID is supplied
+     * @throws IllegalStateException if local persistence fails
+     */
+    public synchronized MeshMessage sendChannelMessage(int channel, String text, int replyId, boolean compact) {
+        String wireText = OutgoingText.prepare(text, compact);
         if (replyId != 0)
             throw new IllegalArgumentException("MeshCore does not support message replies");
         if (changingChannels.contains(channel)
-                || cannotSend(text, false)
+                || cannotSend(wireText, false)
                 || !state.getDeviceState().hasEnabledChannel(channel)) return null;
-        return sendNew(state.getOwnerId(), "!ffffffff", channel, text, false);
+        return sendNew(state.getOwnerId(), "!ffffffff", channel, text, false, wireText);
     }
 
+    /**
+     * Sends direct text using the saved application compaction choice.
+     * The original text is retained in history; the wire copy is validated against
+     * the MeshCore byte limit before sending.
+     *
+     * @param peer recipient contact node ID
+     * @param text original message text
+     * @param replyId must be zero because MeshCore does not support replies
+     * @return saved message, or null when the destination, connection or text cannot be used
+     * @throws IllegalArgumentException if a nonzero reply ID is supplied
+     * @throws IllegalStateException if local persistence fails or the destination is ambiguous
+     */
     public synchronized MeshMessage sendDirectMessage(String peer, String text, int replyId) {
+        return sendDirectMessage(peer, text, replyId, AppPreferences.isCyrillicCompactionEnabled());
+    }
+
+    /**
+     * Sends direct text using an explicit compaction choice.
+     * The original text is retained in history; the wire copy is validated against
+     * the MeshCore byte limit before sending.
+     *
+     * @param peer recipient contact node ID
+     * @param text original message text
+     * @param replyId must be zero because MeshCore does not support replies
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return saved message, or null when the destination, connection or text cannot be used
+     * @throws IllegalArgumentException if a nonzero reply ID is supplied
+     * @throws IllegalStateException if local persistence fails or the destination is ambiguous
+     */
+    public synchronized MeshMessage sendDirectMessage(String peer, String text, int replyId, boolean compact) {
+        String wireText = OutgoingText.prepare(text, compact);
         if (replyId != 0)
             throw new IllegalArgumentException("MeshCore does not support message replies");
-        if (cannotSend(text, true)) return null;
+        if (cannotSend(wireText, true)) return null;
         byte[] prefix = state.publicKeyPrefixForNode(peer);
         if (prefix.length != 6) return null;
         String canonical =
@@ -324,7 +387,7 @@ public final class MeshCoreCompanionProtocolRuntime
                         .findFirst()
                         .orElse(null);
         if (canonical == null) return null;
-        return sendNew(state.getOwnerId(), canonical, 0, text, true);
+        return sendNew(state.getOwnerId(), canonical, 0, text, true, wireText);
     }
 
     private boolean cannotSend(String text, boolean direct) {
@@ -336,7 +399,19 @@ public final class MeshCoreCompanionProtocolRuntime
                 || text.getBytes(StandardCharsets.UTF_8).length > maxTextBytes(direct);
     }
 
-    private MeshMessage sendNew(String from, String to, int channel, String text, boolean direct) {
+    /**
+     * Saves an original message and dispatches its already validated wire text.
+     *
+     * @param from local owner node ID
+     * @param to recipient node ID or broadcast ID
+     * @param channel channel index
+     * @param text original text to retain in history
+     * @param direct whether this is a direct message
+     * @param wireText prepared text whose size has already been checked
+     * @return newly saved outgoing message
+     * @throws IllegalStateException if local persistence fails
+     */
+    private MeshMessage sendNew(String from, String to, int channel, String text, boolean direct, String wireText) {
         long timestamp =
                 lastTimestamp = Math.max(System.currentTimeMillis() / 1000, lastTimestamp + 1);
         MeshMessage message = new MeshMessage(from, to, channel, text, timestamp, true);
@@ -345,15 +420,37 @@ public final class MeshCoreCompanionProtocolRuntime
         if (direct) state.getDeviceState().addDirectMessage(message, to);
         else state.getDeviceState().addMessage(message);
         requirePersisted(message);
-        sendAttempt(message, 0);
+        sendAttempt(message, 0, wireText);
         return message;
     }
 
+    /**
+     * Retries a stored outgoing message using the current application compaction choice.
+     * Revalidates the encoded size, destination and attempt limits before reusing
+     * the history row; a changed channel key prevents retries.
+     *
+     * @param message stored outgoing message; null is rejected
+     * @return whether a new attempt was started
+     */
     public synchronized boolean retryMessage(MeshMessage message) {
+        return retryMessage(message, AppPreferences.isCyrillicCompactionEnabled());
+    }
+
+    /**
+     * Retries a stored outgoing message using an explicit compaction choice.
+     * Revalidates the encoded size, destination and attempt limits before reusing
+     * the history row; a changed channel key prevents retries.
+     *
+     * @param message stored outgoing message; null is rejected
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return whether a new attempt was started
+     */
+    public synchronized boolean retryMessage(MeshMessage message, boolean compact) {
+        String wireText = message == null ? "" : OutgoingText.prepare(message.getText(), compact);
         if (message == null
                 || !message.isOutgoing()
                 || !Objects.equals(message.getFromNodeId(), state.getOwnerId())
-                || cannotSend(message.getText(), message.isDirectMessage())
+                || cannotSend(wireText, message.isDirectMessage())
                 || sending.contains(message)) return false;
         if (!message.isDirectMessage()) {
             var channel = state.getMeshCoreChannels().get(message.getChannelIndex());
@@ -377,13 +474,20 @@ public final class MeshCoreCompanionProtocolRuntime
         if (attempt > 255
                 || message.isDirectMessage()
                         && attempt > 3
-                        && message.getText().getBytes(StandardCharsets.UTF_8).length > 158)
+                        && wireText.getBytes(StandardCharsets.UTF_8).length > 158)
             return false;
-        sendAttempt(message, attempt);
+        sendAttempt(message, attempt, wireText);
         return true;
     }
 
-    private void sendAttempt(MeshMessage message, int attempt) {
+    /**
+     * Builds and stores an outgoing envelope, then starts acknowledgement tracking.
+     *
+     * @param message history row associated with this attempt
+     * @param attempt protocol attempt number, starting at zero
+     * @param wireText prepared and size-validated text for this attempt
+     */
+    private void sendAttempt(MeshMessage message, int attempt, String wireText) {
         byte[] payload;
         if (message.isDirectMessage()) {
             byte[] prefix = state.publicKeyPrefixForNode(message.getToNodeId());
@@ -394,12 +498,12 @@ public final class MeshCoreCompanionProtocolRuntime
             }
             payload =
                     MeshCoreCompanionFrames.sendDirectText(
-                            prefix, message.getTimestamp(), message.getText());
+                            prefix, message.getTimestamp(), wireText);
             payload[2] = (byte) attempt;
         } else
             payload =
                     MeshCoreCompanionFrames.sendChannelText(
-                            message.getChannelIndex(), message.getTimestamp(), message.getText());
+                            message.getChannelIndex(), message.getTimestamp(), wireText);
         storage.saveEnvelope(
                 state.getOwnerId(),
                 message.getDbId(),

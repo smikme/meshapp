@@ -1859,33 +1859,41 @@
    Подход как у xpipe: scene.fill=TRANSPARENT + rgba фоны.
    ============================================================ */
 
+/* JavaFX custom pseudo-classes are registered by NativeWindowHelper and FormChatUi.
+   Standard CSS inspections cannot resolve these application-defined states. */
 /* Корневой контейнер (BorderPane) — прозрачный для vibrancy */
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame {
     -fx-background-color: transparent;
 }
 
 /* Контент — непрозрачный фон поверх vibrancy */
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame .content-area {
     -fx-background-color: -color-bg-default;
 }
 
 /* Drawer — прозрачный, нативный vibrancy/Mica просвечивает */
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame .drawer-pane {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
     -fx-border-width: 0;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame .drawer-toolbar {
     -fx-background-color: transparent;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame .custom-title-bar {
     -fx-background-color: transparent;
 }
 
 
 /* Node list — прозрачный на seamless, vibrancy просвечивает */
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame .node-list-pane {
     -fx-background-color: transparent;
 }
@@ -1895,28 +1903,34 @@
    Separate frame (fallback) — стандартные непрозрачные фоны
    ============================================================ */
 
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .drawer-pane {
     -fx-background-color: -color-bg-default;
     -fx-border-color: -color-border-default;
 }
 
 /* Node list — на separate-frame полупрозрачный фон вместо vibrancy */
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .node-list-pane {
     -fx-background-color: -color-bg-subtle;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .content-area {
     -fx-background-color: -color-bg-default;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .custom-title-bar {
     -fx-background-color: -color-bg-subtle;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .title-bar-label {
     -fx-text-fill: -color-fg-muted;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .main-footer {
     -fx-background-color: -color-bg-subtle;
 }
@@ -2015,6 +2029,7 @@
     -fx-border-width: 0 0 1 0;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 .chat-list-view:compact .virtual-flow .clipped-container .sheet .list-cell {
     -fx-alignment: center;
 }
@@ -2154,10 +2169,12 @@
 }
 
 /* Seamless / separate frame варианты */
+/*noinspection CssInvalidPseudoSelector */
 :seamless-frame .chat-list-pane {
     -fx-background-color: transparent;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 :separate-frame .chat-list-pane {
     -fx-background-color: -color-bg-subtle;
 }
@@ -3208,6 +3225,12 @@
     -fx-fill: rgba(51, 144, 255, 0.4);
 }
 
+.chat-spelling-underline {
+    -fx-stroke: #ed5555;
+    -fx-stroke-width: 1;
+    -fx-fill: transparent;
+}
+
 /* ContextMenu */
 .context-menu {
     -fx-background-color: -color-bg-default;
@@ -3311,6 +3334,7 @@
     -fx-background-color: -color-bg-default;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 .lua-dev-root:seamless-frame {
     -fx-background-color: transparent;
 }
@@ -3329,6 +3353,7 @@
     -fx-padding: 4 0 8 0;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 .lua-dev-root:seamless-frame .lua-dev-side-menu {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
@@ -3339,11 +3364,13 @@
     -fx-border-color: rgba(0, 0, 0, 0.10);
 }
 
+/*noinspection CssInvalidPseudoSelector */
 .lua-dev-root.light-theme:seamless-frame .lua-dev-side-menu {
     -fx-background-color: transparent;
     -fx-border-color: transparent;
 }
 
+/*noinspection CssInvalidPseudoSelector */
 .lua-dev-root:seamless-frame .lua-dev-content {
     -fx-background-color: -color-bg-default;
     -fx-background-radius: 10 0 0 0;

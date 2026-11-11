@@ -862,5 +862,37 @@
     "dest": "./offline-repository/software/coley/bento-fx/0.15.1",
     "dest-filename": "bento-fx-0.15.1.pom",
     "only-arches": ["aarch64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-common/10.3.1/lucene-analysis-common-10.3.1.jar",
+    "sha512": "ca31793e18c690799935d48270ce43827c9eb57fca29a846af28480e2ef3e94b2639533adaf901031d90d1d74f481b9ec9d6b3e30812511be9282b189f257345",
+    "dest": "./offline-repository/org/apache/lucene/lucene-analysis-common/10.3.1",
+    "dest-filename": "lucene-analysis-common-10.3.1.jar",
+    "only-arches": ["aarch64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-common/10.3.1/lucene-analysis-common-10.3.1.pom",
+    "sha512": "96655650551aef5787e3aa12faf3de7ca5dbde2972fcac4da398908a23deead1fa520047175411f26a7f10433203a6ac7b1f8bc9803d83c908c24a0e181219e6",
+    "dest": "./offline-repository/org/apache/lucene/lucene-analysis-common/10.3.1",
+    "dest-filename": "lucene-analysis-common-10.3.1.pom",
+    "only-arches": ["aarch64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-core/10.3.1/lucene-core-10.3.1.jar",
+    "sha512": "f26e0d59990e99156d1e1e3898823eaed6bb2acbb4b9ce705bef246d2716de9d81b4ddeb02b7a27364a86b405955b55c0d0e9d05de546f9d939e5180b6dab643",
+    "dest": "./offline-repository/org/apache/lucene/lucene-core/10.3.1",
+    "dest-filename": "lucene-core-10.3.1.jar",
+    "only-arches": ["aarch64"]
+  },
+  {
+    "type": "file",
+    "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-core/10.3.1/lucene-core-10.3.1.pom",
+    "sha512": "8cce503b9bcba056daf4d59c9a63cd5d5111f269e9d4fc781a200dbe7d3aff4c29e372fe3220395df77fb58c458f7573ef6151202f484ac5e3a4be822579a736",
+    "dest": "./offline-repository/org/apache/lucene/lucene-core/10.3.1",
+    "dest-filename": "lucene-core-10.3.1.pom",
+    "only-arches": ["aarch64"]
   }
 ]

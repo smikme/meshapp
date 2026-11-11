@@ -405,6 +405,7 @@ dependencies {
 	implementation 'com.h2database:h2:2.4.240'
 	implementation 'org.luaj:luaj-jse:3.0.1'
 	implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
+	implementation 'org.apache.lucene:lucene-analysis-common:10.3.1' // Offline Hunspell spelling dictionaries.
 	implementation 'software.coley:bento-fx:0.15.1'
 	implementation('io.github.mkpaz:atlantafx-base:3.0.0') {
 		// AtlantaFX publishes its own org.openjfx version, which can otherwise move
