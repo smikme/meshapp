@@ -15,7 +15,7 @@ def build(source, output, base_url, manifest=None, channel="stable", feeds_dir=N
         target = output / "store" / language
         target.mkdir(parents=True, exist_ok=True)
         entries, ids = [], set()
-        for script in sorted((source / "store" / language).glob("*.json")):
+        for script in sorted((source.parent / "meshappstore" / language).glob("*.json")):
             if not re.fullmatch(r"[A-Za-z0-9_.-]+\.json", script.name):
                 raise ValueError(f"Invalid catalog filename: {script.name}")
             data = json.loads(script.read_text(encoding="utf-8"))
