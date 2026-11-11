@@ -26,6 +26,41 @@ public final class LuaValueMapper {
             "timestamp",
             "node_id",
             "variant",
+            "adc_voltage_ch0",
+            "adc_voltage_ch1",
+            "adc_voltage_ch2",
+            "adc_voltage_ch3",
+            "adc_voltage_ch4",
+            "adc_voltage_ch5",
+            "adc_voltage_ch6",
+            "adc_voltage_ch7",
+            "one_wire_temperature_ch0",
+            "one_wire_temperature_ch1",
+            "one_wire_temperature_ch2",
+            "one_wire_temperature_ch3",
+            "one_wire_temperature_ch4",
+            "one_wire_temperature_ch5",
+            "one_wire_temperature_ch6",
+            "one_wire_temperature_ch7",
+            "lightning_strike_count_1h",
+            "lightning_distance_km",
+            "pm_status_flags",
+            "soil_ph",
+            "ph",
+            "electrical_conductivity",
+            "salinity",
+            "nitrogen",
+            "phosphorus",
+            "potassium",
+            "dissolved_oxygen",
+            "orp",
+            "chemical_oxygen_demand",
+            "turbidity",
+            "nitrate",
+            "ammonium",
+            "biochemical_oxygen_demand",
+            "solar_irradiance",
+
             "battery_level",
             "externally_powered",
             "voltage",
@@ -239,6 +274,9 @@ public final class LuaValueMapper {
         table.set("barometric_pressure", LuaValue.valueOf(node.getBarometricPressure()));
         table.set("unmessagable", LuaValue.valueOf(node.isUnmessagable()));
         table.set("licensed", node.getLicensed() != null ? LuaValue.valueOf(node.isLicensed()) : LuaValue.NIL);
+        table.set("xeddsa_signed", node.getXeddsaSigned() != null ? LuaValue.valueOf(node.getXeddsaSigned()) : LuaValue.NIL);
+        table.set("heard_on_current_lora", node.getHeardOnCurrentLora() != null ? LuaValue.valueOf(node.getHeardOnCurrentLora()) : LuaValue.NIL);
+
         return table;
     }
 
@@ -254,6 +292,7 @@ public final class LuaValueMapper {
         table.set("role", stringOrNil(channel.getRole().name()));
         if (channel.hasSettings()) {
             table.set("name", stringOrNil(channel.getSettings().getName()));
+            table.set("use_aead", LuaValue.valueOf(channel.getSettings().getUseAead()));
         }
         return table;
     }
@@ -269,6 +308,41 @@ public final class LuaValueMapper {
         table.set("timestamp", LuaValue.valueOf(entry.getTimestamp()));
         table.set("node_id", stringOrNil(entry.getNodeId()));
         table.set("variant", stringOrNil(entry.getTelemetryVariant()));
+        table.set("adc_voltage_ch0", numberOrNil(entry.getAdcVoltageCh0()));
+        table.set("adc_voltage_ch1", numberOrNil(entry.getAdcVoltageCh1()));
+        table.set("adc_voltage_ch2", numberOrNil(entry.getAdcVoltageCh2()));
+        table.set("adc_voltage_ch3", numberOrNil(entry.getAdcVoltageCh3()));
+        table.set("adc_voltage_ch4", numberOrNil(entry.getAdcVoltageCh4()));
+        table.set("adc_voltage_ch5", numberOrNil(entry.getAdcVoltageCh5()));
+        table.set("adc_voltage_ch6", numberOrNil(entry.getAdcVoltageCh6()));
+        table.set("adc_voltage_ch7", numberOrNil(entry.getAdcVoltageCh7()));
+        table.set("one_wire_temperature_ch0", numberOrNil(entry.getOneWireTemperatureCh0()));
+        table.set("one_wire_temperature_ch1", numberOrNil(entry.getOneWireTemperatureCh1()));
+        table.set("one_wire_temperature_ch2", numberOrNil(entry.getOneWireTemperatureCh2()));
+        table.set("one_wire_temperature_ch3", numberOrNil(entry.getOneWireTemperatureCh3()));
+        table.set("one_wire_temperature_ch4", numberOrNil(entry.getOneWireTemperatureCh4()));
+        table.set("one_wire_temperature_ch5", numberOrNil(entry.getOneWireTemperatureCh5()));
+        table.set("one_wire_temperature_ch6", numberOrNil(entry.getOneWireTemperatureCh6()));
+        table.set("one_wire_temperature_ch7", numberOrNil(entry.getOneWireTemperatureCh7()));
+        table.set("lightning_strike_count_1h", numberOrNil(entry.getLightningStrikeCount1h()));
+        table.set("lightning_distance_km", numberOrNil(entry.getLightningDistanceKm()));
+        table.set("pm_status_flags", numberOrNil(entry.getPmStatusFlags()));
+        table.set("soil_ph", numberOrNil(entry.getSoilPh()));
+        table.set("ph", numberOrNil(entry.getPh()));
+        table.set("electrical_conductivity", numberOrNil(entry.getElectricalConductivity()));
+        table.set("salinity", numberOrNil(entry.getSalinity()));
+        table.set("nitrogen", numberOrNil(entry.getNitrogen()));
+        table.set("phosphorus", numberOrNil(entry.getPhosphorus()));
+        table.set("potassium", numberOrNil(entry.getPotassium()));
+        table.set("dissolved_oxygen", numberOrNil(entry.getDissolvedOxygen()));
+        table.set("orp", numberOrNil(entry.getOrp()));
+        table.set("chemical_oxygen_demand", numberOrNil(entry.getChemicalOxygenDemand()));
+        table.set("turbidity", numberOrNil(entry.getTurbidity()));
+        table.set("nitrate", numberOrNil(entry.getNitrate()));
+        table.set("ammonium", numberOrNil(entry.getAmmonium()));
+        table.set("biochemical_oxygen_demand", numberOrNil(entry.getBiochemicalOxygenDemand()));
+        table.set("solar_irradiance", numberOrNil(entry.getSolarIrradiance()));
+
         table.set("battery_level", LuaValue.valueOf(entry.getBatteryLevel()));
         table.set("externally_powered", LuaValue.valueOf(entry.isExternallyPowered()));
         table.set("voltage", LuaValue.valueOf(entry.getVoltage()));

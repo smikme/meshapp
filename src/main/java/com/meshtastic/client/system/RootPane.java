@@ -29,6 +29,8 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
+import javafx.stage.Window;
+import javafx.stage.WindowEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,9 +62,6 @@ public class RootPane extends BorderPane {
 
     private final DrawerPane drawerPane;
     private final MainForm mainForm;
-    private final ConnectionTabsPane connectionTabsPane;
-    private final StackPane toastOverlay;
-    private final Runnable connectionTitleListener = () -> Platform.runLater(this::updateWindowTitle);
 
     private double dragStartX;
     private double dragStartY;
@@ -91,9 +90,9 @@ public class RootPane extends BorderPane {
     public RootPane() {
         drawerPane = new DrawerPane();
         mainForm = new MainForm();
-        connectionTabsPane = new ConnectionTabsPane();
+        ConnectionTabsPane connectionTabsPane = new ConnectionTabsPane();
         ModalPane modalPane = new ModalPane();
-        toastOverlay = new StackPane();
+        StackPane toastOverlay = new StackPane();
         toastOverlay.setPickOnBounds(false);
 
         StackPane centerStack = new StackPane(mainForm, modalPane, toastOverlay);
@@ -127,7 +126,7 @@ public class RootPane extends BorderPane {
         Toast.setOverlay(toastOverlay);
         ModalPane.install(modalPane);
 
-        ConnectionManager.getInstance().addListener(connectionTitleListener);
+        ConnectionManager.getInstance().addListener(() -> Platform.runLater(this::updateWindowTitle));
         updateWindowTitle();
     }
 
@@ -150,13 +149,16 @@ public class RootPane extends BorderPane {
 
         // Traffic light buttons.
         Button closeBtn = createWindowButton("window-btn-close");
-        closeBtn.setOnAction(e -> AppTrayManager.getInstance().exitApplication());
+        closeBtn.setOnAction(_ -> {
+            Window window = getScene().getWindow();
+            window.fireEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSE_REQUEST));
+        });
 
         Button minimizeBtn = createWindowButton("window-btn-minimize");
-        minimizeBtn.setOnAction(e -> AppTrayManager.getInstance().requestMinimize());
+        minimizeBtn.setOnAction(_ -> AppTrayManager.getInstance().requestMinimize());
 
         Button maximizeBtn = createWindowButton("window-btn-maximize");
-        maximizeBtn.setOnAction(e -> toggleMaximize());
+        maximizeBtn.setOnAction(_ -> toggleMaximize());
 
         HBox buttons = new HBox(8, closeBtn, minimizeBtn, maximizeBtn);
         buttons.setAlignment(Pos.CENTER_LEFT);
@@ -213,7 +215,7 @@ public class RootPane extends BorderPane {
                 stage.setY(event.getScreenY() - dragOffsetY);
             }
         });
-        bar.setOnMouseReleased(event -> dragging = false);
+        bar.setOnMouseReleased(_ -> dragging = false);
 
         return bar;
     }
@@ -549,8 +551,9 @@ public class RootPane extends BorderPane {
         Rectangle2D bounds = resolveVisualBounds(stage);
         double minW = stage.getMinWidth() > 0 ? stage.getMinWidth() : 800;
         double minH = stage.getMinHeight() > 0 ? stage.getMinHeight() : 600;
-        restoreW = Math.max(minW, Math.min(bounds.getWidth() * 0.85, bounds.getWidth()));
-        restoreH = Math.max(minH, Math.min(bounds.getHeight() * 0.85, bounds.getHeight()));
+        // Preserve the window minimum even when the screen is smaller; clamp requires ordered bounds.
+        restoreW = Math.clamp(bounds.getWidth() * 0.85, minW, Math.max(minW, bounds.getWidth()));
+        restoreH = Math.clamp(bounds.getHeight() * 0.85, minH, Math.max(minH, bounds.getHeight()));
         restoreX = bounds.getMinX() + (bounds.getWidth() - restoreW) / 2.0;
         restoreY = bounds.getMinY() + (bounds.getHeight() - restoreH) / 2.0;
     }

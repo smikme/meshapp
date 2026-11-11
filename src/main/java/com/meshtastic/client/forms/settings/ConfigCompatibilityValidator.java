@@ -41,6 +41,12 @@ public final class ConfigCompatibilityValidator {
             return Optional.of(I18n.t("settings.config.compatibility.unknown"));
         }
 
+        for (var channel : changes.channels()) {
+            if (channel.getSettings().getUseAead() && !state.getFirmwareCapabilities().authenticatedChannels()) {
+                return Optional.of(I18n.t("settings.config.compatibility.aeadRequires281"));
+            }
+        }
+
         boolean firmware28 =
                 state.getFirmwareCapabilities().firmware28OrNewer();
         if (changes.ownerModified()) {
@@ -130,18 +136,27 @@ public final class ConfigCompatibilityValidator {
             }
             ModuleConfigProtos.ModuleConfig.MeshBeaconConfig beacon =
                     moduleConfig.getMeshBeacon();
-            if (utf8Length(beacon.getBroadcastMessage()) > 100) {
+            if (utf8Length(beacon.getBroadcastMessage()) > 60) {
                 return Optional.of(I18n.t(
                         "settings.config.compatibility.beaconMessage"));
             }
             if (beacon.getBroadcastIntervalSecs() != 0
-                    && beacon.getBroadcastIntervalSecs() < 3600) {
+                    && Integer.toUnsignedLong(beacon.getBroadcastIntervalSecs()) < 3600) {
                 return Optional.of(I18n.t(
                         "settings.config.compatibility.beaconInterval"));
             }
+            if ((beacon.hasBroadcastOfferFrequencySlot() && beacon.getBroadcastOfferFrequencySlot() == 0)
+                    || beacon.getBroadcastTargetsList().stream()
+                            .anyMatch(target -> target.hasFrequencySlot() && target.getFrequencySlot() == 0)) {
+                return Optional.of(I18n.t("settings.config.compatibility.beaconFrequencySlot"));
+            }
             if (beacon.getBroadcastTargetsList().stream()
-                    .filter(target -> target.hasChannelIndex())
-                    .anyMatch(target -> target.getChannelIndex() > 7)) {
+                    .filter(ModuleConfigProtos.ModuleConfig.MeshBeaconConfig.BroadcastTarget::hasChannelIndex)
+                    .anyMatch(target -> Integer.toUnsignedLong(target.getChannelIndex()) > 7
+                            || java.util.stream.Stream.concat(changes.channels().stream(), state.getChannels().stream())
+                                    .filter(channel -> channel.getIndex() == target.getChannelIndex())
+                                    .findFirst().filter(channel -> channel.getRole()
+                                            != org.meshtastic.proto.ChannelProtos.Channel.Role.DISABLED).isEmpty())) {
                 return Optional.of(I18n.t(
                         "settings.config.compatibility.beaconChannel"));
             }

@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,9 +38,96 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MessageBubbleFactoryTest {
 
+    @Test
+    void meshpicPreviewsWorkForIncomingOutgoingAndRestoredMessages() {
+        onFxThread(() -> {
+            var opened = new AtomicReference<ChatImage>();
+            var loaded = new java.util.ArrayList<String>();
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions() { @Override public void openChatImage(ChatImage image) { opened.set(image); } },
+                    new HashMap<>(), url -> { loaded.add(url); return new javafx.scene.image.WritableImage(2, 2); });
+            for (boolean outgoing : new boolean[]{false, true}) {
+                var message = new MeshMessage("!2", "!ffffffff", 0, "Фото https://meshpic.org/feZ.", 1, outgoing);
+                message.setDbId(42); // The same text path is used for restored history.
+                var rendered = factory.buildRendered(message);
+                StackPane frame = findNodeWithStyle(rendered.row(), "chat-bubble-image-preview", StackPane.class).orElseThrow();
+                frame.getOnMouseClicked().handle(new javafx.scene.input.MouseEvent(
+                        javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0, 0, 0, 0,
+                        javafx.scene.input.MouseButton.PRIMARY, 1, false, false, false, false,
+                        false, false, false, false, false, false, null));
+                assertEquals("https://meshpic.org/image/feZ", opened.get().fullUrl());
+                factory.disposeRendered(rendered);
+            }
+            assertEquals(java.util.List.of("https://meshpic.org/image/feZ?s=t"), loaded);
+        });
+    }
+
+    @Test
+    void missingPreviewKeepsMessageLinkAndShowsErrorImmediately() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(), new HashMap<>(),
+                    _ -> new javafx.scene.image.Image(new java.io.ByteArrayInputStream(new byte[]{1})));
+            var message = new MeshMessage("!2", "!ffffffff", 0, "https://meshpic.org/feZ", 1, false);
+            var rendered = factory.buildRendered(message);
+            assertTrue(findNodeWithStyle(rendered.row(), "chat-bubble-image-error", Label.class).orElseThrow().isVisible());
+            assertEquals("https://meshpic.org/feZ", findNodeWithStyle(rendered.row(), "chat-bubble-url-node", Text.class).orElseThrow().getText());
+            factory.disposeRendered(rendered);
+        });
+    }
+
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();
+    }
+
+    @Test
+    void recyclingReusesCompletedPreviewAndEvictsOldImagesAtThePixelBudget() {
+        onFxThread(() -> {
+            int[] loads = {0};
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(), new HashMap<>(), _ -> {
+                        loads[0]++;
+                        return new javafx.scene.image.WritableImage(1000, 1000);
+                    });
+            java.util.function.IntFunction<MeshMessage> message = id -> new MeshMessage("!2", "!ffffffff", 0,
+                    "https://d.privatepractice.app/test00" + id, 1, false);
+            var first = factory.buildRendered(message.apply(1));
+            HBox root = first.row();
+            factory.disposeRendered(first);
+            var repeated = factory.buildRendered(message.apply(1), root);
+            assertEquals(root, repeated.row());
+            assertEquals(1, loads[0], "returning to a loaded preview must not start another image load");
+            factory.disposeRendered(repeated);
+            for (int id = 2; id <= 6; id++) factory.disposeRendered(factory.buildRendered(message.apply(id), root));
+            factory.disposeRendered(factory.buildRendered(message.apply(1), root));
+            assertEquals(7, loads[0], "old previews must be evicted to respect the decoded pixel budget");
+        });
+    }
+
+    @Test
+    void recycledRootDispatchesReplyToItsCurrentMessageAndKeepsItsContextMenu() {
+        onFxThread(() -> {
+            AtomicReference<MeshMessage> replied = new AtomicReference<>();
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions() { @Override public void startReply(MeshMessage message) { replied.set(message); } },
+                    new HashMap<>());
+            MeshMessage old = new MeshMessage("!2", "!ffffffff", 0, "old", 1, false);
+            MeshMessage current = new MeshMessage("!3", "!ffffffff", 0, "current", 2, false);
+            var first = factory.buildRendered(old);
+            HBox root = first.row();
+            factory.disposeRendered(first);
+            var second = factory.buildRendered(current, root);
+            VBox bubble = findNodeWithStyle(second.row(), "chat-bubble-incoming", VBox.class).orElseThrow();
+            assertNotNull(bubble.getOnContextMenuRequested());
+            bubble.getOnMouseClicked().handle(new javafx.scene.input.MouseEvent(
+                    javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0, 0, 0, 0,
+                    javafx.scene.input.MouseButton.PRIMARY, 2, false, false, false, false,
+                    false, false, false, false, false, false, null));
+            assertEquals(current, replied.get());
+            factory.disposeRendered(second);
+            assertNull(bubble.getOnContextMenuRequested());
+        });
     }
 
     @Test
@@ -57,7 +145,6 @@ class MessageBubbleFactoryTest {
 
             assertNotNull(content);
             assertNotNull(content.getOnMouseClicked());
-            return null;
         });
     }
 
@@ -81,7 +168,6 @@ class MessageBubbleFactoryTest {
             assertNotNull(badge);
             assertNotNull(icon);
             assertTrue(content.getStyleClass().contains("chat-bubble-with-mqtt-badge"));
-            return null;
         });
     }
 
@@ -102,7 +188,6 @@ class MessageBubbleFactoryTest {
             assertNotNull(link);
             assertEquals("https://meshapp.ru", link.getText());
             assertNotNull(link.getOnMouseClicked());
-            return null;
         });
     }
 
@@ -123,7 +208,6 @@ class MessageBubbleFactoryTest {
             assertNotNull(status);
             assertEquals("✓", status.getText());
             assertFalse(status.getStyleClass().contains("chat-bubble-status-ok"));
-            return null;
         });
     }
 
@@ -144,9 +228,8 @@ class MessageBubbleFactoryTest {
             assertNotNull(status);
             assertNull(status.getText());
             assertNotNull(status.getGraphic());
-            assertTrue(status.getGraphic() instanceof SVGPath);
+            assertInstanceOf(SVGPath.class, status.getGraphic());
             assertTrue(status.getStyleClass().contains("chat-bubble-status-ok"));
-            return null;
         });
     }
 
@@ -177,7 +260,6 @@ class MessageBubbleFactoryTest {
 
                 assertTrue(ownerAContent.getStyleClass().contains("chat-bubble-mentioned"));
                 assertFalse(ownerBContent.getStyleClass().contains("chat-bubble-mentioned"));
-                return null;
             });
         } finally {
             ownerAState.shutdown();
@@ -202,7 +284,6 @@ class MessageBubbleFactoryTest {
             VBox content = findNodeWithStyle(row, "chat-bubble-incoming", VBox.class).orElseThrow();
 
             assertTrue(content.getStyleClass().contains("chat-bubble-mentioned"));
-            return null;
         });
     }
 
@@ -229,14 +310,13 @@ class MessageBubbleFactoryTest {
         return Optional.empty();
     }
 
-    private static <T> T onFxThread(FxSupplier<T> supplier) {
+    private static void onFxThread(FxTask task) {
         CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<T> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
 
         Platform.runLater(() -> {
             try {
-                result.set(supplier.get());
+                task.run();
             } catch (Throwable t) {
                 failure.set(t);
             } finally {
@@ -248,7 +328,6 @@ class MessageBubbleFactoryTest {
         if (failure.get() != null) {
             throw new AssertionError("JavaFX task failed", failure.get());
         }
-        return result.get();
     }
 
     private static void await(CountDownLatch latch) {
@@ -263,11 +342,11 @@ class MessageBubbleFactoryTest {
     }
 
     @FunctionalInterface
-    private interface FxSupplier<T> {
-        T get() throws Exception;
+    private interface FxTask {
+        void run() throws Exception;
     }
 
-    private static final class NoOpBubbleActions implements MessageBubbleFactory.BubbleActions {
+    private static class NoOpBubbleActions implements MessageBubbleFactory.BubbleActions {
         @Override public void startReply(MeshMessage msg) {}
         @Override public void sendReaction(MeshMessage msg, String emoji) {}
         @Override public void confirmDeleteMessage(MeshMessage msg, HBox bubbleRow) {}
@@ -276,4 +355,17 @@ class MessageBubbleFactoryTest {
         @Override public boolean isMessageSelectionModeActive() { return false; }
         @Override public boolean retryMessage(MeshMessage msg) { return false; }
     }
+    @Test
+    void verifiedReceiptHasDistinctLabelAndExplanation() {
+        onFxThread(() -> {
+            Label label = new Label();
+            MessageBubbleFactory.updateStatusLabel(label, MeshMessage.DeliveryStatus.VERIFIED);
+            assertEquals("✓✓", label.getText());
+            assertNotNull(label.getTooltip());
+            MessageBubbleFactory.updateStatusLabel(label, MeshMessage.DeliveryStatus.DELIVERED);
+            assertEquals("✓", label.getText());
+            assertNull(label.getTooltip());
+        });
+    }
+
 }

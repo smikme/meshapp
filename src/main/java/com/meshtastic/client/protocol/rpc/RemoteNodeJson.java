@@ -11,6 +11,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static com.meshtastic.client.protocol.rpc.RpcJsonFields.longField;
+
+import static com.meshtastic.client.protocol.rpc.RpcJsonFields.intField;
+
+import static com.meshtastic.client.protocol.rpc.RpcJsonFields.booleanField;
+
 /**
  * JSON mapping helpers for node RPC methods.
  *
@@ -58,7 +64,7 @@ public final class RemoteNodeJson {
     }
 
     public static List<NodeData> parseNodes(JsonElement result) {
-        JsonArray items = objectArray(result, "items");
+        JsonArray items = resultItems(result);
         List<NodeData> parsed = new ArrayList<>();
         for (JsonElement element : items) {
             if (isObject(element)) {
@@ -77,7 +83,7 @@ public final class RemoteNodeJson {
     }
 
     private static Map<String, Boolean> parseFlagMap(JsonElement result, String field) {
-        JsonArray items = objectArray(result, "items");
+        JsonArray items = resultItems(result);
         Map<String, Boolean> flags = new LinkedHashMap<>();
         for (JsonElement element : items) {
             if (!isObject(element)) {
@@ -133,6 +139,12 @@ public final class RemoteNodeJson {
         if (object.has("licensed") && !object.get("licensed").isJsonNull()) {
             node.setLicensed(booleanField(object, "licensed"));
         }
+        if (object.has("xeddsaSigned") && !object.get("xeddsaSigned").isJsonNull()) {
+            node.setXeddsaSigned(booleanField(object, "xeddsaSigned"));
+        }
+        if (object.has("heardOnCurrentLora") && !object.get("heardOnCurrentLora").isJsonNull()) {
+            node.setHeardOnCurrentLora(booleanField(object, "heardOnCurrentLora"));
+        }
         return node;
     }
 
@@ -164,14 +176,17 @@ public final class RemoteNodeJson {
         object.addProperty("publicKey", node.getPublicKey() != null ? ENCODER.encodeToString(node.getPublicKey()) : "");
         object.addProperty("unmessagable", node.getUnmessagable());
         object.addProperty("licensed", node.getLicensed());
+        object.addProperty("xeddsaSigned", node.getXeddsaSigned());
+        object.addProperty("heardOnCurrentLora", node.getHeardOnCurrentLora());
+
         object.addProperty("favorite", favorite);
         object.addProperty("ignored", ignored);
         return object;
     }
 
-    private static JsonArray objectArray(JsonElement result, String field) {
+    private static JsonArray resultItems(JsonElement result) {
         JsonObject object = isObject(result) ? result.getAsJsonObject() : new JsonObject();
-        JsonElement element = object.get(field);
+        JsonElement element = object.get("items");
         return element != null && element.isJsonArray() ? element.getAsJsonArray() : new JsonArray();
     }
 
@@ -192,20 +207,6 @@ public final class RemoteNodeJson {
         return value == null ? "" : value.trim();
     }
 
-    private static int intField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                ? element.getAsInt()
-                : 0;
-    }
-
-    private static long longField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                ? element.getAsLong()
-                : 0L;
-    }
-
     private static double doubleField(JsonObject object, String field) {
         JsonElement element = object != null ? object.get(field) : null;
         return element != null && !element.isJsonNull() && element.isJsonPrimitive()
@@ -220,9 +221,4 @@ public final class RemoteNodeJson {
                 : 0.0f;
     }
 
-    private static boolean booleanField(JsonObject object, String field) {
-        JsonElement element = object != null ? object.get(field) : null;
-        return element != null && !element.isJsonNull() && element.isJsonPrimitive()
-                && element.getAsBoolean();
-    }
 }

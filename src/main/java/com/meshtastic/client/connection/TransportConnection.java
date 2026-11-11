@@ -47,6 +47,18 @@ public interface TransportConnection {
         sendBytes(data);
     }
 
+    /** Completes when the transport has accepted the complete write, or fails explicitly. */
+    default java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+        if (!isConnected()) return java.util.concurrent.CompletableFuture.failedFuture(
+                new IllegalStateException("Transport disconnected"));
+        try {
+            sendBytes(data, expectResponse);
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        } catch (RuntimeException e) {
+            return java.util.concurrent.CompletableFuture.failedFuture(e);
+        }
+    }
+
     /**
      * Registers a listener for protocol payloads extracted by the transport
      * framing layer from TCP, Serial, or BLE input.

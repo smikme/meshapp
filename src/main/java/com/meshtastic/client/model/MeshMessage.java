@@ -26,11 +26,12 @@ public class MeshMessage {
      * <ul>
      *   <li>{@code SENDING}: sent to the radio and waiting for ACK</li>
      *   <li>{@code DELIVERED}: sent, but a DM recipient has not confirmed delivery</li>
-     *   <li>{@code CONFIRMED}: ACK received from the DM recipient</li>
+     *   <li>{@code CONFIRMED}: ACK received from the DM recipient, without a verified proof</li>
+     *   <li>{@code VERIFIED}: firmware verified the recipient's pairwise delivery proof</li>
      *   <li>{@code FAILED}: NAK received or channel ACK timed out</li>
      * </ul>
      */
-    public enum DeliveryStatus { SENDING, DELIVERED, CONFIRMED, FAILED }
+    public enum DeliveryStatus { SENDING, DELIVERED, CONFIRMED, VERIFIED, FAILED }
 
     private final String fromNodeId;
     private final String toNodeId;
@@ -54,6 +55,7 @@ public class MeshMessage {
     private long dbId;
     private List<MessageReaction> reactions = Collections.emptyList();
     private boolean replyToOutgoing;
+    private transient boolean replyContextResolved;
 
     /**
      * Creates a message with its core fields.
@@ -134,6 +136,8 @@ public class MeshMessage {
 
     public boolean isReplyToOutgoing() { return replyToOutgoing; }
     public void setReplyToOutgoing(boolean replyToOutgoing) { this.replyToOutgoing = replyToOutgoing; }
+    public boolean isReplyContextResolved() { return replyContextResolved; }
+    public void setReplyContextResolved(boolean resolved) { replyContextResolved = resolved; }
 
     /**
      * Returns whether hop count can be calculated safely.

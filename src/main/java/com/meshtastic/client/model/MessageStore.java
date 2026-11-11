@@ -56,7 +56,7 @@ public class MessageStore {
      */
     public void addMessage(MeshMessage msg) {
         List<MeshMessage> list = messagesByChannel
-                .computeIfAbsent(msg.getChannelIndex(), k -> Collections.synchronizedList(new ArrayList<>()));
+                .computeIfAbsent(msg.getChannelIndex(), _ -> Collections.synchronizedList(new ArrayList<>()));
         boolean notifyListeners = false;
         synchronized (list) {
         // In a channel, packetId alone is not enough: different senders can use
@@ -75,14 +75,11 @@ public class MessageStore {
             if (!notifyListeners) {
                 list.add(msg);
                 while (list.size() > MAX_MESSAGES_IN_MEMORY) {
-                    list.remove(0);
+                    list.removeFirst();
                 }
-                notifyListeners = true;
             }
         }
-        if (notifyListeners) {
-            fireMessageListeners();
-        }
+        fireMessageListeners();
     }
 
     /**
@@ -114,7 +111,7 @@ public class MessageStore {
      */
     public void addDirectMessage(MeshMessage msg, String peerNodeId) {
         List<MeshMessage> list = directMessages
-                .computeIfAbsent(peerNodeId, k -> Collections.synchronizedList(new ArrayList<>()));
+                .computeIfAbsent(peerNodeId, _ -> Collections.synchronizedList(new ArrayList<>()));
         boolean notifyListeners = false;
         synchronized (list) {
             if (msg.getPacketId() != 0) {
@@ -131,14 +128,11 @@ public class MessageStore {
             if (!notifyListeners) {
                 list.add(msg);
                 while (list.size() > MAX_MESSAGES_IN_MEMORY) {
-                    list.remove(0);
+                    list.removeFirst();
                 }
-                notifyListeners = true;
             }
         }
-        if (notifyListeners) {
-            fireMessageListeners();
-        }
+        fireMessageListeners();
     }
 
     /**
@@ -326,6 +320,8 @@ public class MessageStore {
      * @param packetId packet identifier
      * @return matching message, or {@code null}
      */
+    // These are shared synchronized lists; iteration must lock each list, as required by Collections.synchronizedList.
+    @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
     public MeshMessage findMessageByPacketId(int packetId) {
         if (packetId == 0) { return null; }
         // Search channel messages.
@@ -448,7 +444,10 @@ public class MessageStore {
             return true;
         }
         if (current == MeshMessage.DeliveryStatus.SENDING) {
-            return incoming != MeshMessage.DeliveryStatus.SENDING;
+            return true;
+        }
+        if (incoming == MeshMessage.DeliveryStatus.VERIFIED) {
+            return true;
         }
         if (current == MeshMessage.DeliveryStatus.DELIVERED) {
             return incoming == MeshMessage.DeliveryStatus.CONFIRMED;

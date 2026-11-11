@@ -21,6 +21,10 @@ import com.meshtastic.client.model.PacketTreeNode;
 import com.meshtastic.client.model.PacketLogEntry.Direction;
 import javafx.scene.control.TreeItem;
 import org.meshtastic.proto.AdminProtos;
+import org.meshtastic.proto.MeshBeaconProtos;
+import org.meshtastic.proto.LoRaWANBridgeProtos;
+import org.meshtastic.proto.StoreAndForwardProtos;
+import org.meshtastic.proto.ATAKProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.TelemetryProtos;
 
@@ -190,6 +194,8 @@ public final class PacketDebugFormatter {
         /**
          * @return {@code true} when the preview contains at least one packet byte
          */
+        // This public preview capability is expressed positively, like isEmpty/isPresent APIs.
+        @SuppressWarnings("BooleanMethodIsAlwaysInverted")
         public boolean hasBytes() {
             return hexByteStartChars != null && hexByteStartChars.length > 0;
         }
@@ -514,6 +520,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionJsonExportState(jsonWriter, 0);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static PacketCollectionJsonExportState writePacketCollectionJsonEntry(
             PacketCollectionJsonExportState state,
             PacketLogEntry entry,
@@ -525,6 +533,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionJsonExportState(state.writer(), state.packetCount() + 1);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static void finishPacketCollectionJsonExport(
             PacketCollectionJsonExportState state,
             long packetCount) throws IOException {
@@ -547,6 +557,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionCsvExportState(writer, 0);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static PacketCollectionCsvExportState writePacketCollectionCsvEntry(
             PacketCollectionCsvExportState state,
             PacketLogEntry entry,
@@ -766,6 +778,8 @@ public final class PacketDebugFormatter {
         return new PacketCollectionCsvExportState(state.writer(), state.packetCount() + 1);
     }
 
+    // The export caller owns the writer and closes it after all entries are written.
+    @SuppressWarnings("resource")
     public static void finishPacketCollectionCsvExport(PacketCollectionCsvExportState state) throws IOException {
         if (state == null || state.writer() == null) {
             return;
@@ -826,6 +840,7 @@ public final class PacketDebugFormatter {
      * @param packet protobuf packet
      * @return tree root
      */
+    @SuppressWarnings("unused") // Convenience overload for callers with an already decoded packet.
     public static TreeItem<PacketTreeNode> buildPacketTree(MeshProtos.MeshPacket packet) {
         return buildPacketTree(packet, packet != null ? packet.toByteArray() : new byte[0]);
     }
@@ -991,6 +1006,10 @@ public final class PacketDebugFormatter {
             case TELEMETRY_APP -> describeTelemetryPayload(data);
             case TRACEROUTE_APP -> describeTraceroutePayload(data);
             case ADMIN_APP -> describeAdminPayload(data);
+            case MESH_BEACON_APP, LORAWAN_BRIDGE, STORE_FORWARD_APP, WAYPOINT_APP, ATAK_PLUGIN -> {
+                Message payload = tryParsePayload(data);
+                yield payload != null ? payload.toString().strip() : describeGenericPayload(packet, data);
+            }
             default -> describeGenericPayload(packet, data);
         };
     }
@@ -1065,7 +1084,7 @@ public final class PacketDebugFormatter {
                         + ", airUtil=" + stats.getAirUtilTx());
             }
             if (sb.isEmpty()) {
-                appendSegment(sb, "telemetry");
+                appendSegment(sb, telemetry.getVariantCase().name());
             }
             return sb.toString();
         } catch (InvalidProtocolBufferException e) {
@@ -1196,7 +1215,7 @@ public final class PacketDebugFormatter {
         if (item == null || item.getValue() == null) {
             return;
         }
-        sb.append("  ".repeat(Math.max(0, depth))).append(item.getValue().getLabel());
+        sb.repeat("  ", Math.max(0, depth)).append(item.getValue().getLabel());
         if (item.getValue().hasByteRange()) {
             sb.append(" [").append(item.getValue().getStartByte())
                     .append("..").append(item.getValue().getEndByte()).append(')');
@@ -1294,6 +1313,12 @@ public final class PacketDebugFormatter {
             case TELEMETRY_APP -> parseDecodedPayloadJson(() -> TelemetryProtos.Telemetry.parseFrom(data.getPayload()));
             case TRACEROUTE_APP -> parseDecodedPayloadJson(() -> MeshProtos.RouteDiscovery.parseFrom(data.getPayload()));
             case ADMIN_APP -> parseDecodedPayloadJson(() -> AdminProtos.AdminMessage.parseFrom(data.getPayload()));
+            case MESH_BEACON_APP -> parseDecodedPayloadJson(() -> MeshBeaconProtos.MeshBeacon.parseFrom(data.getPayload()));
+            case LORAWAN_BRIDGE -> parseDecodedPayloadJson(() -> LoRaWANBridgeProtos.LoRaWANBridge.parseFrom(data.getPayload()));
+            case STORE_FORWARD_APP -> parseDecodedPayloadJson(() -> StoreAndForwardProtos.StoreAndForward.parseFrom(data.getPayload()));
+            case WAYPOINT_APP -> parseDecodedPayloadJson(() -> MeshProtos.Waypoint.parseFrom(data.getPayload()));
+            case ATAK_PLUGIN -> parseDecodedPayloadJson(() -> ATAKProtos.TAKPacket.parseFrom(data.getPayload()));
+
             default -> {
                 if (data.getPayload().isEmpty()) {
                     yield new JsonPrimitive("");
@@ -1426,6 +1451,12 @@ public final class PacketDebugFormatter {
                 case TELEMETRY_APP -> TelemetryProtos.Telemetry.parseFrom(data.getPayload());
                 case TRACEROUTE_APP -> MeshProtos.RouteDiscovery.parseFrom(data.getPayload());
                 case ADMIN_APP -> AdminProtos.AdminMessage.parseFrom(data.getPayload());
+                case MESH_BEACON_APP -> MeshBeaconProtos.MeshBeacon.parseFrom(data.getPayload());
+                case LORAWAN_BRIDGE -> LoRaWANBridgeProtos.LoRaWANBridge.parseFrom(data.getPayload());
+                case STORE_FORWARD_APP -> StoreAndForwardProtos.StoreAndForward.parseFrom(data.getPayload());
+                case WAYPOINT_APP -> MeshProtos.Waypoint.parseFrom(data.getPayload());
+                case ATAK_PLUGIN -> ATAKProtos.TAKPacket.parseFrom(data.getPayload());
+
                 default -> null;
             };
         } catch (InvalidProtocolBufferException e) {

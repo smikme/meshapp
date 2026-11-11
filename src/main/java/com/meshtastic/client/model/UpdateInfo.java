@@ -4,6 +4,7 @@ import com.google.gson.annotations.SerializedName;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.platform.OsDetect.OsType;
 import com.meshtastic.client.platform.OsDetect.PackageFormat;
+import com.meshtastic.client.update.ReleaseVersion;
 
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -18,19 +19,43 @@ import java.util.Set;
  */
 public class UpdateInfo {
 
+    @SerializedName("version")
     private String version;
+    @SerializedName("versionCode")
     private int versionCode;
+    @SerializedName("buildNumber")
+    private Long buildNumber;
+    @SerializedName("channel")
+    private String channel;
+    @SerializedName("releaseVersion")
+    private String releaseVersion;
+    @SerializedName("releaseNotes")
     private String releaseNotes;
     @SerializedName("releaseNotes_ru")
     private String releaseNotesRu;
+    @SerializedName("downloads")
     private Map<String, String> downloads;
+    @SerializedName("selfUpdate")
     private Map<String, SelfUpdateArtifact> selfUpdate;
 
     public String getVersion() { return version; }
     public int getVersionCode() { return versionCode; }
-    public String getReleaseNotes() { return releaseNotes; }
-    public String getReleaseNotesRu() { return releaseNotesRu; }
-    public Map<String, String> getDownloads() { return downloads; }
+    public long getBuildNumber() {
+        return ReleaseVersion.parse(version).map(ReleaseVersion::buildNumber).orElse(0L);
+    }
+    public String getChannel() {
+        return ReleaseVersion.parse(version).map(ReleaseVersion::channel).orElse("stable");
+    }
+
+    /** The signed version string is authoritative; duplicated metadata must agree with it. */
+    public boolean hasInconsistentVersionMetadata() {
+        if (buildNumber == null && channel == null && releaseVersion == null) return false;
+        return ReleaseVersion.parse(version).map(v ->
+                (buildNumber != null && buildNumber != v.buildNumber())
+                        || (channel != null && !channel.equals(v.channel()))
+                        || (releaseVersion != null && !releaseVersion.equals(v.baseVersion()))
+                        || versionCode != v.legacyCode()).orElse(true);
+    }
     public Map<String, SelfUpdateArtifact> getSelfUpdate() { return selfUpdate; }
 
     /**
@@ -90,8 +115,23 @@ public class UpdateInfo {
     }
 
     String getDownloadUrl(OsType osType, PackageFormat packageFormat) {
+        return getDownloadUrl(osType, packageFormat, OsDetect.normalizedArch());
+    }
+
+    String getDownloadUrl(OsType osType, PackageFormat packageFormat, String arch) {
         if (downloads == null || downloads.isEmpty()) {
             return null;
+        }
+
+        for (String key : selfUpdateKeys(osType, packageFormat, arch)) {
+            // Prefer architecture-specific installers; retain the established generic
+            // fallback order below for manifests that predate architecture keys.
+            if (arch != null && !arch.isBlank() && key.endsWith("-" + arch)) {
+                String url = downloads.get(key);
+                if (url != null && !url.isBlank()) {
+                    return url;
+                }
+            }
         }
 
         return switch (osType) {

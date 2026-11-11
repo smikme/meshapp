@@ -18,7 +18,7 @@ public enum FrameFormat {
     /** Standard KISS TNC framing for the MeshCore KISS modem protocol. */
     KISS,
 
-    /** Raw MeshCore Companion packets without a KISS wrapper. */
+    /** MeshCore Companion stream header: direction byte and uint16 little-endian payload length. */
     MESHCORE_COMPANION;
 
     /**

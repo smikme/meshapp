@@ -3,6 +3,7 @@ package com.meshtastic.client.service;
 import com.meshtastic.client.model.MessageReaction;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
+import com.meshtastic.client.utils.ChatHistoryTrace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,6 +26,8 @@ import java.util.*;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schema is created at runtime and covered by database integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class MessageDbService {
 
     private static final Logger log = LoggerFactory.getLogger(MessageDbService.class);
@@ -44,12 +47,25 @@ public final class MessageDbService {
             "ОМ", "ЕМ", "АМ", "ЯМ", "АХ", "ЯХ", "ОВ", "ЕВ", "ИЯ", "ИЕ", "ИЙ");
 
     private static MessageDbService instance;
+    private static final java.util.concurrent.atomic.AtomicLong historyRevision = new java.util.concurrent.atomic.AtomicLong();
+
+    public long historyRevision() { return historyRevision.get(); }
 
     private Connection dbConnection;
     private PreparedStatement insertStmt;
     private PreparedStatement updateStatusStmt;
     private PreparedStatement insertReactionStmt;
     private PreparedStatement updateReactionStatusStmt;
+    private static final int MAX_CACHED_CHAT_COUNTS = 256;
+    private record ChatCountKey(String owner, String type, String key) {
+        ChatCountKey {
+            owner = owner != null ? owner : "";
+        }
+    }
+    // Counts depend on history, not viewport position. Bound this cache and
+    // invalidate it alongside writes so scrolling never repeatedly scans H2.
+    private final Map<ChatCountKey, Integer> unreadEligibleCounts =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     private MessageDbService() {
         initDb();
@@ -77,6 +93,8 @@ public final class MessageDbService {
     // ═══════════════════════════════════════════════════════════
 
     private void initDb() {
+        historyRevision.incrementAndGet();
+        unreadEligibleCounts.clear();
         try {
             closeStatements();
             dbConnection = DatabaseProvider.getConnection();
@@ -90,9 +108,9 @@ public final class MessageDbService {
                     CREATE TABLE IF NOT EXISTS messages (
                         id             BIGINT AUTO_INCREMENT PRIMARY KEY,
                         chat_type      VARCHAR(10) NOT NULL,
-                        chat_key       VARCHAR(20) NOT NULL,
-                        from_node_id   VARCHAR(20) NOT NULL,
-                        to_node_id     VARCHAR(20) NOT NULL,
+                        chat_key       VARCHAR(80) NOT NULL,
+                        from_node_id   VARCHAR(80) NOT NULL,
+                        to_node_id     VARCHAR(80) NOT NULL,
                         channel_idx    INT NOT NULL,
                         text           CLOB,
                         timestamp      BIGINT NOT NULL,
@@ -109,7 +127,7 @@ public final class MessageDbService {
                         system_msg     BOOLEAN DEFAULT FALSE,
                         rx_rssi        INT DEFAULT 0,
                         rx_snr         REAL DEFAULT 0,
-                        owner_node_id  VARCHAR(20) NOT NULL DEFAULT ''
+                        owner_node_id  VARCHAR(80) NOT NULL DEFAULT ''
                     )
                     """);
 
@@ -129,12 +147,12 @@ public final class MessageDbService {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS message_reactions (
                         id                 BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id      VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id      VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type          VARCHAR(10) NOT NULL,
-                        chat_key           VARCHAR(20) NOT NULL,
+                        chat_key           VARCHAR(80) NOT NULL,
                         target_packet_id   INT NOT NULL,
                         reaction_packet_id INT DEFAULT 0,
-                        from_node_id       VARCHAR(20) NOT NULL,
+                        from_node_id       VARCHAR(80) NOT NULL,
                         emoji              VARCHAR(16) NOT NULL,
                         timestamp          BIGINT NOT NULL,
                         outgoing           BOOLEAN NOT NULL,
@@ -155,9 +173,9 @@ public final class MessageDbService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_read_counts (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type     VARCHAR(10) NOT NULL,
-                        chat_key      VARCHAR(20) NOT NULL,
+                        chat_key      VARCHAR(80) NOT NULL,
                         read_count    INT NOT NULL DEFAULT 0,
                         PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
@@ -165,9 +183,9 @@ public final class MessageDbService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS chat_threads (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type     VARCHAR(10) NOT NULL,
-                        chat_key      VARCHAR(20) NOT NULL,
+                        chat_key      VARCHAR(80) NOT NULL,
                         PRIMARY KEY (owner_node_id, chat_type, chat_key)
                     )
                     """);
@@ -175,17 +193,17 @@ public final class MessageDbService {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS traceroute_results (
                         id                     BIGINT AUTO_INCREMENT PRIMARY KEY,
-                        owner_node_id          VARCHAR(20) NOT NULL DEFAULT '',
+                        owner_node_id          VARCHAR(80) NOT NULL DEFAULT '',
                         chat_type              VARCHAR(10) NOT NULL DEFAULT '',
-                        chat_key               VARCHAR(20) NOT NULL DEFAULT '',
+                        chat_key               VARCHAR(80) NOT NULL DEFAULT '',
                         source                 VARCHAR(80) NOT NULL DEFAULT '',
                         request_id             VARCHAR(120) NOT NULL DEFAULT '',
                         script_id              BIGINT DEFAULT 0,
                         target_node_num        BIGINT DEFAULT 0,
-                        target_node_id         VARCHAR(20),
+                        target_node_id         VARCHAR(80),
                         target_name            VARCHAR(120),
                         response_from_node_num BIGINT DEFAULT 0,
-                        response_from_node_id  VARCHAR(20),
+                        response_from_node_id  VARCHAR(80),
                         route_data             BLOB,
                         formatted_text         CLOB,
                         timestamp              BIGINT NOT NULL
@@ -213,7 +231,7 @@ public final class MessageDbService {
                 """, Statement.RETURN_GENERATED_KEYS);
 
             updateStatusStmt = dbConnection.prepareStatement("""
-                UPDATE messages SET status = ?, error_reason = ? WHERE packet_id = ? AND packet_id <> 0
+                UPDATE messages SET status = ?, error_reason = ? WHERE packet_id = ? AND packet_id <> 0 AND owner_node_id NOT LIKE 'mc:%'
                 """);
 
             insertReactionStmt = dbConnection.prepareStatement("""
@@ -264,7 +282,7 @@ public final class MessageDbService {
             ps.setString(2, "STALE");
             int updatedMessages = ps.executeUpdate();
 
-            int updatedReactions = 0;
+            int updatedReactions;
             try (PreparedStatement reactionPs = dbConnection.prepareStatement(
                     "UPDATE message_reactions SET status = ?, error_reason = ? WHERE status = 'SENDING'")) {
                 reactionPs.setString(1, MeshMessage.DeliveryStatus.FAILED.name());
@@ -294,6 +312,7 @@ public final class MessageDbService {
      * @param ownerNodeId owner device nodeId, for example "!9e755af0"
      */
     public synchronized void save(MeshMessage msg, String chatType, String chatKey, String ownerNodeId) {
+        historyRevision.incrementAndGet();
         if (msg == null) { return; }
         if (insertStmt == null) {
             log.warn("Message DB not initialized — message dropped (chatType={}, chatKey={})", chatType, chatKey);
@@ -341,6 +360,7 @@ public final class MessageDbService {
             insertStmt.setBoolean(20, msg.isViaMqtt());
             insertStmt.setString(21, normalizedOwnerNodeId);
             insertStmt.executeUpdate();
+            unreadEligibleCounts.remove(new ChatCountKey(normalizedOwnerNodeId, chatType, chatKey));
 
             try (ResultSet keys = insertStmt.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -389,7 +409,7 @@ public final class MessageDbService {
                   AND channel_idx = ? AND outgoing = ?
                   AND ((from_node_id = ?) OR (from_node_id IS NULL AND ? IS NULL))
                   AND ((to_node_id = ?) OR (to_node_id IS NULL AND ? IS NULL))
-                ORDER BY id ASC LIMIT 1
+                ORDER BY id LIMIT 1
                 """)) {
             ps.setString(1, ownerNodeId);
             ps.setString(2, chatType);
@@ -489,6 +509,7 @@ public final class MessageDbService {
                                              String chatType,
                                              String chatKey,
                                              String ownerNodeId) {
+        historyRevision.incrementAndGet();
         if (reaction == null) { return false; }
         if (insertReactionStmt == null) {
             log.warn("Reaction DB not initialized — reaction dropped (chatType={}, chatKey={})", chatType, chatKey);
@@ -618,10 +639,19 @@ public final class MessageDbService {
         return null;
     }
 
-    /**
-     * Updates message delivery status by packetId.
-     */
+    /** Updates one persisted message; protocol ACK identifiers are not database keys. */
+    public synchronized void updateStatusById(long id, String owner, MeshMessage.DeliveryStatus status, String error) {
+        historyRevision.incrementAndGet();
+        if (dbConnection == null || id <= 0) throw new IllegalStateException("Message is not persisted");
+        try (var ps = dbConnection.prepareStatement(
+                "UPDATE messages SET status=?, error_reason=? WHERE id=? AND owner_node_id=?")) {
+            ps.setString(1, status.name()); ps.setString(2, error); ps.setLong(3, id); ps.setString(4, owner);
+            if (ps.executeUpdate() != 1) throw new IllegalStateException("Message owner mismatch");
+        } catch (SQLException e) { throw new IllegalStateException("Cannot persist message status", e); }
+    }
+
     public synchronized void updateStatus(int packetId, MeshMessage.DeliveryStatus status, String errorReason) {
+        historyRevision.incrementAndGet();
         if (packetId == 0) { return; }
         if (updateStatusStmt == null) {
             log.warn("Message DB not initialized — status update dropped (packetId={})", packetId);
@@ -648,6 +678,7 @@ public final class MessageDbService {
                                                       int newPacketId,
                                                       MeshMessage.DeliveryStatus status,
                                                       String errorReason) {
+        historyRevision.incrementAndGet();
         if (dbConnection == null || newPacketId == 0) {
             return false;
         }
@@ -685,6 +716,7 @@ public final class MessageDbService {
     public synchronized boolean updateReactionStatus(int packetId,
                                                      MeshMessage.DeliveryStatus status,
                                                      String errorReason) {
+        historyRevision.incrementAndGet();
         if (packetId == 0) { return false; }
         if (updateReactionStatusStmt == null) {
             log.warn("Reaction DB not initialized — status update dropped (packetId={})", packetId);
@@ -705,6 +737,174 @@ public final class MessageDbService {
     // Reads: pagination.
     // ═══════════════════════════════════════════════════════════
 
+    /** Read-only snapshot for the background history loader. Failures propagate, never masquerade as EOF. */
+    public ChatHistoryLoader.Page loadHistoryPage(ChatHistoryLoader.Request request) throws SQLException {
+        long revision;
+        Connection expectedWriter;
+        synchronized (this) {
+            if (dbConnection == null) throw new SQLException("Message history is closed");
+            revision = historyRevision.get();
+            expectedWriter = dbConnection;
+        }
+        long started = System.nanoTime();
+        var scope = request.scope();
+        try (var session = DatabaseProvider.openHistoryReadConnection(expectedWriter)) {
+            Connection reader = session.connection();
+            var readTrace = ChatHistoryTrace.start("read page");
+            long latest;
+            try (PreparedStatement statement = reader.prepareStatement(
+                    "SELECT MAX(id) FROM messages WHERE owner_node_id=? AND chat_type=? AND chat_key=?")) {
+                bindHistoryScope(statement, scope);
+                try (ResultSet result = statement.executeQuery()) { result.next(); latest = result.getLong(1); }
+            }
+            List<MeshMessage> messages;
+            boolean first;
+            boolean last;
+            if (request.direction() == ChatHistoryLoader.Direction.AROUND) {
+                List<MeshMessage> target = readHistoryRows(reader, scope, "id = ?", request.cursor(), 1, false);
+                if (target.isEmpty()) {
+                    messages = readHistoryRows(reader, scope, "id <= ?", Long.MAX_VALUE, request.limit() + 1, true);
+                    first = messages.size() <= request.limit();
+                    if (!first) messages.removeFirst();
+                    last = true;
+                } else {
+                    int beforeLimit = request.limit() / 2;
+                    int afterLimit = request.limit() - beforeLimit - 1;
+                    List<MeshMessage> before = readHistoryRows(reader, scope, "id < ?", request.cursor(), beforeLimit + 1, true);
+                    List<MeshMessage> after = readHistoryRows(reader, scope, "id > ?", request.cursor(), afterLimit + 1, false);
+                    first = before.size() <= beforeLimit;
+                    last = after.size() <= afterLimit;
+                    if (!first) before.removeFirst();
+                    if (!last) after.removeLast();
+                    messages = new ArrayList<>(before);
+                    messages.addAll(target);
+                    messages.addAll(after);
+                }
+            } else {
+                boolean descending = request.direction() != ChatHistoryLoader.Direction.AFTER;
+                long cursor = request.direction() == ChatHistoryLoader.Direction.LATEST ? Long.MAX_VALUE : request.cursor();
+                String predicate = request.direction() == ChatHistoryLoader.Direction.LATEST ? "id <= ?"
+                        : descending ? "id < ?" : "id > ?";
+                messages = readHistoryRows(reader, scope, predicate, cursor, request.limit() + 1, descending);
+                boolean end = messages.size() <= request.limit();
+                if (!end) { if (descending) messages.removeFirst(); else messages.removeLast(); }
+                first = descending && end;
+                last = request.direction() == ChatHistoryLoader.Direction.LATEST || (!descending && end);
+            }
+            readTrace.close();
+            long readNanos = System.nanoTime() - started;
+            long hydrationStarted = System.nanoTime();
+            try (var _ = ChatHistoryTrace.start("hydrate page")) {
+                List<MeshMessage> resolvedQuotes = hydrateHistoryPage(reader, scope, messages);
+                reader.commit();
+                persistHistoryQuotes(reader, scope, resolvedQuotes, revision);
+            }
+            return new ChatHistoryLoader.Page(messages, first, last, latest, revision,
+                    readNanos, System.nanoTime() - hydrationStarted);
+        }
+    }
+
+    private static void bindHistoryScope(PreparedStatement statement, ChatHistoryLoader.Scope scope) throws SQLException {
+        statement.setString(1, scope.owner() == null ? "" : scope.owner());
+        statement.setString(2, scope.type());
+        statement.setString(3, scope.key());
+    }
+
+    private static List<MeshMessage> readHistoryRows(Connection reader, ChatHistoryLoader.Scope scope,
+                                                      String predicate, long cursor, int limit, boolean descending) throws SQLException {
+        if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+        List<MeshMessage> messages = new ArrayList<>();
+        try (PreparedStatement statement = reader.prepareStatement(
+                "SELECT * FROM messages WHERE owner_node_id=? AND chat_type=? AND chat_key=? AND "
+                        + predicate + " ORDER BY id " + (descending ? "DESC" : "ASC") + " LIMIT ?")) {
+            bindHistoryScope(statement, scope);
+            statement.setLong(4, cursor);
+            statement.setInt(5, limit);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) messages.add(readMessage(result));
+            }
+        }
+        if (descending) Collections.reverse(messages);
+        return messages;
+    }
+
+    private static List<MeshMessage> hydrateHistoryPage(Connection reader, ChatHistoryLoader.Scope scope,
+                                           List<MeshMessage> messages) throws SQLException {
+        if (messages.isEmpty()) return List.of();
+        List<MeshMessage> resolvedQuotes = new ArrayList<>();
+        List<Integer> replyIds = messages.stream().map(MeshMessage::getReplyId).filter(id -> id != 0).distinct().toList();
+        Map<Integer, MeshMessage> originals = new HashMap<>();
+        if (!replyIds.isEmpty()) {
+            String placeholders = String.join(",", Collections.nCopies(replyIds.size(), "?"));
+            try (PreparedStatement statement = reader.prepareStatement(
+                    "SELECT * FROM messages WHERE owner_node_id=? AND chat_type=? AND chat_key=? AND packet_id IN ("
+                            + placeholders + ") ORDER BY id")) {
+                bindHistoryScope(statement, scope);
+                for (int i = 0; i < replyIds.size(); i++) statement.setInt(i + 4, replyIds.get(i));
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        MeshMessage original = readMessage(result);
+                        originals.putIfAbsent(original.getPacketId(), original);
+                    }
+                }
+            }
+        }
+        List<Integer> packetIds = messages.stream().map(MeshMessage::getPacketId).filter(id -> id != 0).distinct().toList();
+        Map<Integer, List<MessageReaction>> reactions = new HashMap<>();
+        if (!packetIds.isEmpty()) {
+            String placeholders = String.join(",", Collections.nCopies(packetIds.size(), "?"));
+            try (PreparedStatement statement = reader.prepareStatement(
+                    "SELECT * FROM message_reactions WHERE owner_node_id=? AND chat_type=? AND chat_key=?"
+                            + " AND target_packet_id IN (" + placeholders + ") ORDER BY target_packet_id,id")) {
+                bindHistoryScope(statement, scope);
+                for (int i = 0; i < packetIds.size(); i++) statement.setInt(i + 4, packetIds.get(i));
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        MessageReaction reaction = readReaction(result);
+                        reactions.computeIfAbsent(reaction.getTargetPacketId(), _ -> new ArrayList<>()).add(reaction);
+                    }
+                }
+            }
+        }
+        for (MeshMessage message : messages) {
+            MeshMessage original = originals.get(message.getReplyId());
+            if (original != null) {
+                if (needsReplyText(message) && original.getText() != null && !original.getText().isEmpty()) {
+                    message.setReplyText(original.getText());
+                    resolvedQuotes.add(message);
+                }
+                message.setReplyToOutgoing(original.isOutgoing());
+            }
+            message.setReplyContextResolved(true);
+            message.setReactions(reactions.get(message.getPacketId()));
+        }
+        return resolvedQuotes;
+    }
+
+    private synchronized void persistHistoryQuotes(Connection reader, ChatHistoryLoader.Scope scope,
+                                                     List<MeshMessage> messages, long revision) throws SQLException {
+        if (messages.isEmpty() || dbConnection == null || historyRevision.get() != revision) return;
+        // Retain the existing quote backfill behavior, using one batch on the
+        // worker's connection. Never commit or reconfigure the shared writer.
+        reader.setReadOnly(false);
+        try (PreparedStatement statement = reader.prepareStatement("""
+                UPDATE messages SET reply_text=? WHERE owner_node_id=? AND chat_type=? AND chat_key=?
+                    AND id=? AND reply_id=? AND (reply_text IS NULL OR LENGTH(reply_text)=0)
+                """)) {
+            for (MeshMessage message : messages) {
+                statement.setString(1, message.getReplyText());
+                statement.setString(2, scope.owner() == null ? "" : scope.owner());
+                statement.setString(3, scope.type());
+                statement.setString(4, scope.key());
+                statement.setLong(5, message.getDbId());
+                statement.setInt(6, message.getReplyId());
+                statement.addBatch();
+            }
+            statement.executeBatch();
+            reader.commit();
+        }
+    }
+
     /**
      * Loads the last N messages for a chat in chronological order.
      *
@@ -721,7 +921,7 @@ public final class MessageDbService {
             SELECT * FROM (
                 SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                 ORDER BY id DESC LIMIT ?
-            ) ORDER BY id ASC
+            ) ORDER BY id
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -756,7 +956,7 @@ public final class MessageDbService {
             SELECT * FROM (
                 SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id < ?
                 ORDER BY id DESC LIMIT ?
-            ) ORDER BY id ASC
+            ) ORDER BY id
             """;
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -807,8 +1007,8 @@ public final class MessageDbService {
         List<MeshMessage> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = limit > 0
-                ? "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC LIMIT ?"
-                : "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
+                ? "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id LIMIT ?"
+                : "SELECT * FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -863,42 +1063,6 @@ public final class MessageDbService {
     // ═══════════════════════════════════════════════════════════
     // Reads: search and metadata.
     // ═══════════════════════════════════════════════════════════
-
-    /**
-     * Loads recent system messages whose text starts with the given prefix.
-     *
-     * @param textPrefix  system-message text prefix
-     * @param limit       maximum number of messages
-     * @param ownerNodeId owner device nodeId
-     * @return messages from newest to oldest
-     */
-    public List<MeshMessage> loadRecentSystemMessagesByPrefix(String textPrefix, int limit, String ownerNodeId) {
-        List<MeshMessage> result = new ArrayList<>();
-        if (dbConnection == null || textPrefix == null || textPrefix.isBlank() || limit <= 0) {
-            return result;
-        }
-        String sql = """
-            SELECT * FROM messages
-            WHERE owner_node_id = ?
-              AND system_msg = TRUE
-              AND CAST(text AS VARCHAR) LIKE ?
-            ORDER BY id DESC
-            LIMIT ?
-            """;
-        try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
-            ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
-            ps.setString(2, textPrefix + "%");
-            ps.setInt(3, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.add(readMessage(rs));
-                }
-            }
-        } catch (SQLException e) {
-            log.error("Failed to load recent system messages by prefix (limit={})", limit, e);
-        }
-        return result;
-    }
 
     /**
      * Loads recent saved traceroute results.
@@ -1506,7 +1670,7 @@ public final class MessageDbService {
                       WHERE other_map.WORDID IN (%s)
                         AND other_map.ROWID = ft_map.ROWID
                   )
-                    """.formatted(placeholders(searchQuery.wordIdGroups().get(i).size())));
+                  """.formatted(placeholders(searchQuery.wordIdGroups().get(i).size())));
         }
         return sql.toString();
     }
@@ -1796,7 +1960,7 @@ public final class MessageDbService {
                 SELECT * FROM messages
                 WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                   AND packet_id = ? AND packet_id <> 0
-                ORDER BY id ASC LIMIT 1
+                ORDER BY id LIMIT 1
                 """)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -1861,7 +2025,7 @@ public final class MessageDbService {
                 WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
                   AND reply_id <> 0
                   AND (reply_text IS NULL OR LENGTH(reply_text) = 0)
-                ORDER BY id ASC
+                ORDER BY id
                 """)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -1932,7 +2096,7 @@ public final class MessageDbService {
             SELECT * FROM message_reactions
             WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
               AND target_packet_id IN (%s)
-            ORDER BY target_packet_id ASC, id ASC
+            ORDER BY target_packet_id, id
             """.formatted(placeholders);
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
@@ -1972,8 +2136,8 @@ public final class MessageDbService {
         List<MessageReaction> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = limit > 0
-                ? "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC LIMIT ?"
-                : "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id ASC";
+                ? "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id LIMIT ?"
+                : "SELECT * FROM message_reactions WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ? AND id > ? ORDER BY id";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setString(2, chatType);
@@ -2100,7 +2264,32 @@ public final class MessageDbService {
      * messages, including system messages.
      */
     public int getUnreadEligibleMessageCount(String chatType, String chatKey, String ownerNodeId) {
-        if (dbConnection == null) { return 0; }
+        ChatCountKey key = new ChatCountKey(ownerNodeId, chatType, chatKey);
+        Integer cached = unreadEligibleCounts.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        // Serialize cache misses with saves/deletions. A concurrent write must
+        // not invalidate a count just before that stale count enters the cache.
+        synchronized (this) {
+            cached = unreadEligibleCounts.get(key);
+            if (cached != null) {
+                return cached;
+            }
+            int count = queryUnreadEligibleMessageCount(chatType, chatKey, ownerNodeId);
+            if (count >= 0) {
+                if (unreadEligibleCounts.size() >= MAX_CACHED_CHAT_COUNTS) {
+                    unreadEligibleCounts.clear();
+                }
+                unreadEligibleCounts.put(key, count);
+                return count;
+            }
+            return 0;
+        }
+    }
+
+    private int queryUnreadEligibleMessageCount(String chatType, String chatKey, String ownerNodeId) {
+        if (dbConnection == null) { return -1; }
         try (PreparedStatement ps = dbConnection.prepareStatement("""
                 SELECT COUNT(*) FROM messages
                 WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?
@@ -2115,7 +2304,7 @@ public final class MessageDbService {
         } catch (SQLException e) {
             log.error("Failed to count unread-eligible messages ({}, {})", chatType, chatKey, e);
         }
-        return 0;
+        return -1;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -2130,6 +2319,7 @@ public final class MessageDbService {
      * @param ownerNodeId owner device nodeId
      */
     public synchronized void deleteChat(String chatType, String chatKey, String ownerNodeId) {
+        historyRevision.incrementAndGet();
         if (dbConnection == null) { return; }
         try (PreparedStatement ps1 = dbConnection.prepareStatement(
                      "DELETE FROM messages WHERE owner_node_id = ? AND chat_type = ? AND chat_key = ?");
@@ -2141,6 +2331,7 @@ public final class MessageDbService {
             ps1.setString(2, chatType);
             ps1.setString(3, chatKey);
             ps1.executeUpdate();
+            unreadEligibleCounts.remove(new ChatCountKey(ownerNodeId, chatType, chatKey));
 
             psReactions.setString(1, ownerNodeId != null ? ownerNodeId : "");
             psReactions.setString(2, chatType);
@@ -2177,6 +2368,7 @@ public final class MessageDbService {
      * Deletes one message by its database id.
      */
     public synchronized void deleteMessage(long dbId) {
+        historyRevision.incrementAndGet();
         if (dbConnection == null || dbId <= 0) { return; }
         String ownerNodeId = null;
         String chatType = null;
@@ -2201,6 +2393,11 @@ public final class MessageDbService {
         try (PreparedStatement ps = dbConnection.prepareStatement("DELETE FROM messages WHERE id = ?")) {
             ps.setLong(1, dbId);
             ps.executeUpdate();
+            if (chatType != null && chatKey != null) {
+                unreadEligibleCounts.remove(new ChatCountKey(ownerNodeId, chatType, chatKey));
+            } else {
+                unreadEligibleCounts.clear();
+            }
         } catch (SQLException e) {
             log.error("Failed to delete message id={}", dbId, e);
         }
@@ -2540,12 +2737,16 @@ public final class MessageDbService {
     /**
      * Closes the database connection.
      */
-    public void close() {
+    public synchronized void close() {
+        historyRevision.incrementAndGet();
+        unreadEligibleCounts.clear();
         closeStatements();
         dbConnection = null;
     }
 
     public synchronized void prepareForDatabaseReset() {
+        historyRevision.incrementAndGet();
+        unreadEligibleCounts.clear();
         closeStatements();
         dbConnection = null;
     }

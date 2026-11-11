@@ -6,6 +6,7 @@ import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatNameResolver;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.components.chat.VirtualMessagePane;
 import com.meshtastic.client.model.ChatItem;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageChangeEvent;
@@ -61,10 +62,8 @@ import java.util.function.Consumer;
  */
 abstract class FormChatBase extends Form {
 
-    protected static final int REQUEST_TIMEOUT_SECONDS = 360;
     protected static final int UNREAD_FOCUS_THRESHOLD = 2;
     protected static final double BOTTOM_READ_SLOP_PX = 24.0;
-    protected static final double PAGE_LOAD_EDGE_THRESHOLD = 0.1;
     protected static final int PAGE_SIZE = 50;
     protected static final int MAX_WINDOW_PAGES = 3;
     protected static final int MAX_LOADED_MESSAGES = PAGE_SIZE * MAX_WINDOW_PAGES;
@@ -93,7 +92,7 @@ abstract class FormChatBase extends Form {
 
     // Message area
     protected ScrollPane messageScrollPane;
-    protected VBox messageContainer;
+    protected VirtualMessagePane messageContainer;
     protected StackPane messageArea; // Wrapper: scrollPane plus the jump-down button.
     protected Button scrollDownBtn;
     protected Label scrollDownBadge;
@@ -226,6 +225,8 @@ abstract class FormChatBase extends Form {
     protected boolean formVisible;
     protected int scrollStateSyncSuspendCount;
     protected long scrollOperationGeneration;
+    // Unlike scroll callbacks, data requests remain valid while the form is hidden.
+    protected long chatRequestGeneration;
     protected final AtomicBoolean messageRefreshQueued = new AtomicBoolean();
     protected final AtomicBoolean messageRefreshDirty = new AtomicBoolean();
     protected final Queue<MessageChangeEvent> pendingMessageChanges = new ConcurrentLinkedQueue<>();
@@ -234,11 +235,10 @@ abstract class FormChatBase extends Form {
     protected final AtomicBoolean viewportLayoutQueued = new AtomicBoolean();
     protected final AtomicBoolean viewportLayoutDirty = new AtomicBoolean();
 
-    protected final Runnable messageListener = this::scheduleMessageRefresh;
     protected final Consumer<MessageChangeEvent> messageChangeListener = this::scheduleMessageChangeRefresh;
     protected final Runnable connectionListener = () -> Platform.runLater(this::rebindState);
     protected final ChangeListener<Number> chatFontSizeListener =
-            (obs, oldValue, newValue) -> Platform.runLater(this::handleChatFontSizeChanged);
+            (_, _, _) -> Platform.runLater(this::handleChatFontSizeChanged);
 
     /**
      * Under heavy traffic, scheduling one Platform.runLater call per event can
@@ -342,6 +342,7 @@ abstract class FormChatBase extends Form {
     protected abstract boolean isScrollStateSyncSuspended();
     protected abstract boolean isCurrentScrollOperation(long generation);
     protected abstract void clearLoadedMessageState();
+    protected abstract void cancelHistoryLoading();
     protected abstract void showNewChatDialog();
     protected abstract void deleteChat(ChatItem item);
     protected abstract void confirmClearChatHistory(ChatItem item);
@@ -351,6 +352,7 @@ abstract class FormChatBase extends Form {
     protected abstract void loadNewerMessages();
     protected abstract boolean isAtLiveTail();
     protected abstract void scrollToBottom();
+    protected abstract void beginScrollOperation();
     protected abstract void jumpToLatestMessages();
     protected abstract void updateScrollDownBadge();
     protected abstract void markAsRead(ChatItem item);
@@ -360,6 +362,8 @@ abstract class FormChatBase extends Form {
     protected abstract void ensureMessageLoaded(long dbId);
     protected abstract void scrollToMessage(long dbId, double anchorOffset);
     protected abstract void requestMessageViewportLayout();
+    protected abstract void synchronizeMessageViewport();
+    protected abstract void prefetchAdjacentHistory(double vvalue);
     protected abstract void restorePendingCountdowns();
     protected abstract void updateInputEnabled();
     protected abstract void refreshLoadedMessageRows();

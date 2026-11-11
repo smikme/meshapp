@@ -16,6 +16,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -38,7 +41,6 @@ class EmojiTextFieldTest {
 
             field.insertText(2, "X");
             assertEquals("AX😀B", field.getText());
-            return null;
         });
     }
 
@@ -48,7 +50,6 @@ class EmojiTextFieldTest {
             EmojiTextField field = new EmojiTextField();
             field.setText("A\uD83DB\uDC00C");
             assertEquals("ABC", field.getText());
-            return null;
         });
     }
 
@@ -76,18 +77,100 @@ class EmojiTextFieldTest {
             Event.fireEvent(field, typed);
             assertNull(bubbledKeyTyped.get());
             assertEquals("a", field.getText());
-            return null;
         });
     }
 
-    private static <T> T onFxThread(FxSupplier<T> supplier) {
+    @Test
+    void wordNavigationSelectionDeletionAndUndoUseStandardShortcuts() {
+        onFxThread(() -> {
+            EmojiTextField field = new EmojiTextField();
+            field.setText("Привет hello Welt");
+            field.positionCaret(field.getText().length());
+            wordLeft(field, false);
+            assertEquals(13, field.getCaretPosition());
+            wordLeft(field, true);
+            assertEquals("hello ", field.getSelectedText());
+            key(field, KeyCode.BACK_SPACE, false, false, false);
+            assertEquals("Привет Welt", field.getText());
+            shortcut(field, KeyCode.Z, false);
+            assertEquals("Привет hello Welt", field.getText());
+            assertEquals("hello ", field.getSelectedText());
+            shortcut(field, KeyCode.Z, true);
+            assertEquals("Привет Welt", field.getText());
+        });
+    }
+
+    @Test
+    void oversizedReplacementPreservesSelectionAndUndoCannotBypassChangedLimit() {
+        onFxThread(() -> {
+            EmojiTextField field = new EmojiTextField();
+            AtomicInteger limit = new AtomicInteger(6);
+            field.setMaxBytesSupplier(limit::get);
+            field.setText("я😀");
+            shortcut(field, KeyCode.A, false);
+            field.replaceSelection("😀😀");
+            assertEquals("я😀", field.getText());
+            assertEquals("я😀", field.getSelectedText());
+            field.replaceSelection("hi");
+            assertEquals("hi", field.getText());
+            limit.set(2);
+            field.undo();
+            assertEquals("hi", field.getText());
+            limit.set(6);
+            field.undo();
+            assertEquals("я😀", field.getText());
+            field.redo();
+            assertEquals("hi", field.getText());
+            field.clear();
+            field.undo();
+            assertEquals("", field.getText());
+        });
+    }
+
+    @Test
+    void lineNavigationWorksWithinOneLongWrappedWord() {
+        onFxThread(() -> {
+            EmojiTextField field = new EmojiTextField();
+            StackPane root = new StackPane(field);
+            new Scene(root, 180, 180);
+            field.setText("abcdefghijklmnopqrstuvwxyz".repeat(3));
+            root.resize(180, 180);
+            root.applyCss();
+            root.layout();
+            field.positionCaret(30);
+            key(field, KeyCode.HOME, false, false, false);
+            int lineStart = field.getCaretPosition();
+            assertTrue(lineStart > 0 && lineStart < 30);
+            key(field, KeyCode.END, false, false, false);
+            assertTrue(field.getCaretPosition() >= 30 && field.getCaretPosition() < field.getText().length());
+            key(field, KeyCode.UP, false, false, false);
+            assertTrue(field.getCaretPosition() <= lineStart);
+            shortcut(field, KeyCode.HOME, false);
+            assertEquals(0, field.getCaretPosition());
+        });
+    }
+
+    private static void shortcut(EmojiTextField field, KeyCode code, boolean shift) {
+        boolean mac = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac");
+        key(field, code, shift, !mac, mac);
+    }
+
+    private static void wordLeft(EmojiTextField field, boolean shift) {
+        boolean mac = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac");
+        Event.fireEvent(field, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.LEFT, shift, !mac, mac, false));
+    }
+
+    private static void key(EmojiTextField field, KeyCode code, boolean shift, boolean control, boolean meta) {
+        Event.fireEvent(field, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, shift, control, false, meta));
+    }
+
+    private static void onFxThread(FxAction action) {
         CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<T> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
 
         Platform.runLater(() -> {
             try {
-                result.set(supplier.get());
+                action.run();
             } catch (Throwable t) {
                 failure.set(t);
             } finally {
@@ -99,7 +182,6 @@ class EmojiTextFieldTest {
         if (failure.get() != null) {
             throw new AssertionError("JavaFX task failed", failure.get());
         }
-        return result.get();
     }
 
     private static void await(CountDownLatch latch) {
@@ -114,7 +196,7 @@ class EmojiTextFieldTest {
     }
 
     @FunctionalInterface
-    private interface FxSupplier<T> {
-        T get() throws Exception;
+    private interface FxAction {
+        void run() throws Exception;
     }
 }

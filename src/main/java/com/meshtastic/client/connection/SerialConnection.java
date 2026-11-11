@@ -5,7 +5,6 @@ import com.meshtastic.client.connection.serial.NativeSerialPort;
 import com.meshtastic.client.connection.serial.NativeSerialPortFactory;
 import com.meshtastic.client.connection.serial.SerialModemLinePolicy;
 import com.meshtastic.client.model.SerialModemLineMode;
-import com.meshtastic.client.platform.OsDetect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +13,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -63,7 +63,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     private volatile long lastPacketReceiveAtMillis;
     private volatile long lastWriteAtMillis;
     private volatile boolean awaitingResponseAfterWrite;
-    private volatile int readTimeoutsSinceWrite;
+    private final AtomicInteger readTimeoutsSinceWrite = new AtomicInteger();
     private volatile long activeReadStartedAtMillis;
     private volatile boolean readCallInFlight;
     private Thread readerThread;
@@ -89,6 +89,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                 DEFAULT_PARTIAL_FRAME_SILENCE_TIMEOUT_MS, serialModemLineMode);
     }
 
+    @SuppressWarnings("unused") // Convenience entry point for transport integrations.
     public SerialConnection(String portName, int baudRate, FrameFormat frameFormat) {
         this(portName, baudRate, frameFormat, SerialModemLineMode.AUTO);
     }
@@ -108,6 +109,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         setFrameFormat(frameFormat);
     }
 
+    @SuppressWarnings("unused") // Uses the default baud rate.
     public SerialConnection(String portName) {
         this(portName, DEFAULT_BAUD_RATE);
     }
@@ -182,7 +184,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             log.info("Opening serial port: {} ({})", portName, desc);
 
             SerialModemLinePolicy modemLinePolicy = modemLinePolicy(
-                    portName, desc, OsDetect.isWindows(), serialModemLineMode);
+                    portName, desc, serialModemLineMode);
             log.info("Serial modem line policy for {}: DTR={}, RTS={} ({})",
                     portName,
                     modemLinePolicy.assertDtr() ? "on" : "off",
@@ -206,7 +208,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
             lastPacketReceiveAtMillis = now;
             lastWriteAtMillis = 0;
             awaitingResponseAfterWrite = false;
-            readTimeoutsSinceWrite = 0;
+            readTimeoutsSinceWrite.set(0);
             activeReadStartedAtMillis = 0;
             readCallInFlight = false;
             terminalSignalSent.set(false);
@@ -257,34 +259,30 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
     }
 
     @Override
-    public synchronized void sendBytes(byte[] data) {
-        sendBytes(data, true);
+    public synchronized void sendBytes(byte[] data) { sendBytes(data, true); }
+
+    @Override
+    public synchronized void sendBytes(byte[] data, boolean expectResponse) {
+        sendBytesAsync(data, expectResponse);
     }
 
     @Override
-    public synchronized void sendBytes(byte[] data, boolean expectResponseAfterWrite) {
-        if (!isConnected()) {
-            log.warn("Cannot send: serial port {} not connected", portName);
-            return;
-        }
-        if (expectResponseAfterWrite) {
-            long writeStartedAt = currentTimeMillis.getAsLong();
-            lastWriteAtMillis = writeStartedAt;
-            awaitingResponseAfterWrite = true;
-            readTimeoutsSinceWrite = 0;
-        }
+    public synchronized java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+        if (!isConnected()) return java.util.concurrent.CompletableFuture.failedFuture(
+                new IllegalStateException("Transport disconnected"));
         try {
+            if (expectResponse) {
+                lastWriteAtMillis = currentTimeMillis.getAsLong();
+                awaitingResponseAfterWrite = true;
+                readTimeoutsSinceWrite.set(0);
+            }
             nativePort.write(data, 0, data.length);
-            log.trace("Sent {} bytes to serial {}", data.length, portName);
-        } catch (ConnectionException e) {
-            if (expectResponseAfterWrite) {
-                awaitingResponseAfterWrite = false;
-            }
-            log.error("Write failed to serial {}", portName, e);
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        } catch (Exception e) {
+            awaitingResponseAfterWrite = false;
             ConnectionListener listener = connectionListener;
-            if (listener != null) {
-                listener.onConnectionError("Write failed: " + e.getMessage(), e);
-            }
+            if (listener != null) listener.onConnectionError("Write failed: " + e.getMessage(), e);
+            return java.util.concurrent.CompletableFuture.failedFuture(e);
         }
     }
 
@@ -379,7 +377,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                         long sinceLastByteRxMs = Math.max(0L, now - lastReceiveAtMillis);
                         long sinceLastPacketRxMs = Math.max(0L, now - lastPacketReceiveAtMillis);
                         log.warn("Serial receive stalled on {} after write: silentFor={} ms, sinceLastByteRx={} ms, sinceLastPacketRx={} ms, readTimeouts={}, portOpen={}",
-                                portName, silentForMs, sinceLastByteRxMs, sinceLastPacketRxMs, readTimeoutsSinceWrite, port.isOpen());
+                                portName, silentForMs, sinceLastByteRxMs, sinceLastPacketRxMs, readTimeoutsSinceWrite.get(), port.isOpen());
                         errorMessage = "Serial receive stalled after write: " + portName;
                         break;
                     }
@@ -436,7 +434,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
 
     private void clearAwaitingResponseAfterWrite() {
         awaitingResponseAfterWrite = false;
-        readTimeoutsSinceWrite = 0;
+        readTimeoutsSinceWrite.set(0);
     }
 
     private boolean shouldResetPartialFrame(StreamFrameParser parser, long now) {
@@ -464,7 +462,7 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
 
     private void noteReadTimeoutWhileAwaitingResponse() {
         if (awaitingResponseAfterWrite) {
-            readTimeoutsSinceWrite++;
+            readTimeoutsSinceWrite.incrementAndGet();
         }
     }
 
@@ -614,11 +612,11 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
                 || lower.contains("nrf52");
     }
 
-    static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows) {
-        return modemLinePolicy(portName, desc, isWindows, SerialModemLineMode.AUTO);
+    static SerialModemLinePolicy modemLinePolicy(String portName, String desc) {
+        return modemLinePolicy(portName, desc, SerialModemLineMode.AUTO);
     }
 
-    static SerialModemLinePolicy modemLinePolicy(String portName, String desc, boolean isWindows,
+    static SerialModemLinePolicy modemLinePolicy(String portName, String desc,
                                                  SerialModemLineMode serialModemLineMode) {
         SerialModemLineMode mode = normalizeSerialModemLineMode(serialModemLineMode);
         if (!mode.isAuto()) {
@@ -633,12 +631,12 @@ public class SerialConnection implements MeshtasticConnection, FrameFormatAwareC
         return SerialModemLinePolicy.generic();
     }
 
-    static boolean shouldAssertDtr(String portName, String desc, boolean isWindows) {
-        return modemLinePolicy(portName, desc, isWindows).assertDtr();
+    static boolean shouldAssertDtr(String portName, String desc) {
+        return modemLinePolicy(portName, desc).assertDtr();
     }
 
-    static boolean shouldAssertRts(String portName, String desc, boolean isWindows) {
-        return modemLinePolicy(portName, desc, isWindows).assertRts();
+    static boolean shouldAssertRts(String portName, String desc) {
+        return modemLinePolicy(portName, desc).assertRts();
     }
 
     private static SerialModemLineMode normalizeSerialModemLineMode(SerialModemLineMode mode) {

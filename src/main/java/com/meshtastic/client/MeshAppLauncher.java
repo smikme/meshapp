@@ -18,7 +18,7 @@ public final class MeshAppLauncher {
 
     private MeshAppLauncher() {}
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
         if (NativeAccessRelauncher.relaunchIfRequired(args)) {
             return;
         }
@@ -35,7 +35,7 @@ public final class MeshAppLauncher {
             return;
         }
         AppPreferences.init();
-        if (!MeshApp.isSingleInstanceGuardDisabled(args) && !MeshApp.acquireSingleInstanceGuard()) {
+        if (!MeshApp.isSingleInstanceGuardDisabled(args) && MeshApp.shouldExitForExistingInstance()) {
             return;
         }
         SessionCrashLogManager.prepareForLaunch();

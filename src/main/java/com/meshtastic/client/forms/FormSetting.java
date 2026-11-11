@@ -11,12 +11,11 @@ import com.meshtastic.client.forms.settings.ConfigSaveController;
 import com.meshtastic.client.forms.settings.ConfigSnapshotController;
 import com.meshtastic.client.forms.settings.ConfigSnapshotEditor;
 import com.meshtastic.client.forms.settings.ConfigTreeItemSupport;
-import com.meshtastic.client.forms.settings.DatabaseResetConfirmationPanelFactory;
 import com.meshtastic.client.forms.settings.DatabaseResetController;
 import com.meshtastic.client.forms.settings.DevicePowerActionController;
 import com.meshtastic.client.forms.settings.DeviceTimeSyncController;
 import com.meshtastic.client.forms.settings.FirmwareUpdateController;
-import com.meshtastic.client.forms.settings.MeshCoreSettingsTreeBuilder;
+import com.meshtastic.client.forms.settings.MeshCoreSettingsPane;
 import com.meshtastic.client.forms.settings.MeshtasticConfigTreeBuilder;
 import com.meshtastic.client.forms.settings.NodeCacheSettingsController;
 import com.meshtastic.client.forms.settings.RingtoneSettingsController;
@@ -60,8 +59,6 @@ import javafx.stage.Window;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.ModuleConfigProtos;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -73,12 +70,14 @@ import org.slf4j.LoggerFactory;
 )
 public class FormSetting extends Form {
 
-    private static final Logger log = LoggerFactory.getLogger(
-        FormSetting.class
-    );
     private DeviceState state;
     private ProtocolHandler handler;
     private MeshCoreCompanionState meshCoreCompanionState;
+    private com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime meshCoreRuntime;
+    private MeshCoreSettingsPane meshCorePane;
+    private com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocolRuntime kissRuntime;
+    private com.meshtastic.client.forms.settings.MeshCoreKissSettingsPane kissPane;
+    private Node standardConfigPanel;
     private RemoteRpcState remoteRpcState;
     private RemoteAdminBackend remoteSettingsBackend;
     private RemoteAdminSession remoteSettingsSession;
@@ -110,9 +109,7 @@ public class FormSetting extends Form {
         new NodeCacheSettingsController();
 
     private Tab cacheTab;
-    private Tab appearanceTab;
     private Tab firmwareTab;
-    private Tab remoteRpcTab;
 
     // Config tab
     private TreeTableView<ConfigTreeItem> configTree;
@@ -120,7 +117,6 @@ public class FormSetting extends Form {
     private TreeItem<ConfigTreeItem> fullConfigRoot;
     private Label configStatusLabel;
     private Button saveConfigBtn;
-    private Button refreshConfigBtn;
     private Button syncDateTimeBtn;
     private Button resetDatabaseBtn;
     private Button restartHardwareBtn;
@@ -161,16 +157,17 @@ public class FormSetting extends Form {
             I18n.t("settings.tab.cache"),
             createScrollableSettingsPanel(cacheController.createPanel())
         );
-        configTab = new Tab(I18n.t("settings.tab.config"), createConfigPanel());
+        standardConfigPanel = createConfigPanel();
+        configTab = new Tab(I18n.t("settings.tab.config"), standardConfigPanel);
         firmwareTab = new Tab(
             I18n.t("settings.tab.firmware"),
             createScrollableSettingsPanel(firmwareUpdateController.createPanel())
         );
-        appearanceTab = new Tab(
+        Tab appearanceTab = new Tab(
             I18n.t("settings.tab.app"),
             createScrollableSettingsPanel(ApplicationSettingsPanelFactory.create())
         );
-        remoteRpcTab = new Tab(
+        Tab remoteRpcTab = new Tab(
             I18n.t("settings.tab.rpc"),
             createScrollableSettingsPanel(ApplicationSettingsPanelFactory.createRemoteRpcSettingsPanel())
         );
@@ -179,7 +176,7 @@ public class FormSetting extends Form {
         tabPane
             .getSelectionModel()
             .selectedItemProperty()
-            .addListener((obs, oldTab, newTab) -> {
+            .addListener((_, _, newTab) -> {
                 if (newTab == cacheTab) {
                     cacheController.reload();
                 } else if (newTab == configTab) {
@@ -213,6 +210,8 @@ public class FormSetting extends Form {
     @Override
     public void formClose() {
         closeRemoteSettingsBackend();
+        if(meshCorePane!=null){meshCorePane.close();meshCorePane=null;}
+        if(kissPane!=null){kissPane.close();kissPane=null;}
     }
 
     @Override
@@ -234,7 +233,10 @@ public class FormSetting extends Form {
             .map(ConnectionEntry::getId)
             .map(mgr::getProtocolRuntime)
             .orElse(null);
+        var kiss=runtime instanceof com.meshtastic.client.protocol.meshcore.MeshCoreKissProtocolRuntime modem?modem:null;
+        if(kissRuntime!=kiss){if(kissPane!=null)kissPane.close();kissPane=null;kissRuntime=kiss;}
         if (runtime != null && runtime.getState() instanceof RemoteRpcState rpcState) {
+            if(meshCorePane!=null)meshCorePane.close();meshCorePane=null;meshCoreRuntime=null;
             if (remoteRpcState != rpcState) {
                 closeRemoteSettingsBackend();
                 remoteRpcState = rpcState;
@@ -267,6 +269,12 @@ public class FormSetting extends Form {
         this.state = newState;
         this.handler = newHandler;
         this.meshCoreCompanionState = newMeshCoreState;
+        var companion = runtime instanceof com.meshtastic.client.protocol.meshcore.MeshCoreCompanionProtocolRuntime mc ? mc : null;
+        if (meshCoreRuntime != companion) {
+            if (meshCorePane != null) meshCorePane.close();
+            meshCorePane = null;
+            meshCoreRuntime = companion;
+        }
         ringtoneController.observe(newState);
     }
 
@@ -289,6 +297,8 @@ public class FormSetting extends Form {
         ringtoneController.observe(null);
         state = null;
         handler = null;
+        if(meshCorePane != null) meshCorePane.close();
+        meshCorePane=null;meshCoreRuntime=null;
         meshCoreCompanionState = null;
         observedConfigLoadFuture = null;
         fullConfigRoot = null;
@@ -351,7 +361,7 @@ public class FormSetting extends Form {
             return;
         }
         observedConfigLoadFuture = future;
-        future.whenComplete((ds, ex) ->
+        future.whenComplete((_, _) ->
             Platform.runLater(() -> {
                 if (observedConfigLoadFuture == future) {
                     observedConfigLoadFuture = null;
@@ -392,7 +402,6 @@ public class FormSetting extends Form {
         configSearchField = controls.searchField();
         configStatusLabel = controls.statusLabel();
         configTree = controls.configTree();
-        refreshConfigBtn = controls.refreshButton();
         syncDateTimeBtn = controls.syncTimeButton();
         saveConfigBtn = controls.saveRadioButton();
         restartHardwareBtn = controls.restartButton();
@@ -410,10 +419,6 @@ public class FormSetting extends Form {
 
     private void onResetDatabaseRequested() {
         databaseResetController.requestReset();
-    }
-
-    private VBox buildDatabaseResetConfirmationPanel(Runnable onConfirm) {
-        return DatabaseResetConfirmationPanelFactory.create(onConfirm);
     }
 
     private void setDevicePowerButtonsDisabled(boolean disabled) {
@@ -557,15 +562,6 @@ public class FormSetting extends Form {
         );
     }
 
-    private TreeItem<ConfigTreeItem> findTopLevelSection(
-        TreeItem<ConfigTreeItem> root,
-        String configType
-    ) {
-        return ConfigTreeItemSupport
-            .findTopLevelSection(root, configType)
-            .orElse(null);
-    }
-
     /**
      * Loads configuration from DeviceState and builds the tree.
      */
@@ -573,10 +569,16 @@ public class FormSetting extends Form {
         refreshConnection();
 
         if (remoteSettingsBackend != null) {
+            configTab.setContent(standardConfigPanel);
             reloadRemoteSettingsTree();
             return;
         }
 
+        if(kissRuntime!=null){
+            if(kissPane==null)kissPane=new com.meshtastic.client.forms.settings.MeshCoreKissSettingsPane(kissRuntime);
+            ScrollPane modemScroll=new ScrollPane(kissPane);modemScroll.setFitToWidth(true);configTab.setContent(modemScroll);return;
+        }
+        configTab.setContent(standardConfigPanel);
         boolean meshtasticConnected = state != null && handler != null;
         boolean meshCoreConnected =
             state != null && meshCoreCompanionState != null;
@@ -596,7 +598,8 @@ public class FormSetting extends Form {
         }
 
         if (meshCoreConnected && !meshtasticConnected) {
-            showMeshCoreSettingsTree(meshCoreCompanionState);
+            if(meshCorePane == null) meshCorePane = new MeshCoreSettingsPane(meshCoreRuntime);
+            configTab.setContent(meshCorePane);
             return;
         }
 
@@ -756,42 +759,6 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Builds the read-only settings tree for MeshCore Companion Protocol.
-     * <p>
-     * MeshCore Companion does not expose the Meshtastic Admin protobuf
-     * configuration, so this tab shows available metadata, radio parameters,
-     * storage, and channels while disabling Meshtastic configuration save/reboot actions.
-     *
-     * @param meshCoreState MeshCore Companion runtime state
-     */
-    private void showMeshCoreSettingsTree(
-        MeshCoreCompanionState meshCoreState
-    ) {
-        originalConfigs = new ArrayList<>();
-        originalModuleConfigs = new ArrayList<>();
-        originalChannels = Optional
-            .ofNullable(state)
-            .map(DeviceState::getChannels)
-            .map(ArrayList::new)
-            .orElseGet(ArrayList::new);
-        workingChannels = new ArrayList<>(originalChannels);
-
-        TreeItem<ConfigTreeItem> root = MeshCoreSettingsTreeBuilder.build(
-            meshCoreState,
-            originalChannels
-        );
-
-        fullConfigRoot = root;
-        configTree.setRoot(root);
-        configSearchField.clear();
-        saveConfigBtn.setDisable(true);
-        setSyncDateTimeButtonDisabled(true);
-        configStatusLabel.setText(
-            I18n.t("settings.meshCore.status.readOnly")
-        );
-    }
-
-    /**
      * Counts editable fields in the tree.
      */
     private int countFields(TreeItem<ConfigTreeItem> item) {
@@ -807,28 +774,6 @@ public class FormSetting extends Form {
         ConfigTreeItemSupport
             .filter(fullConfigRoot, query)
             .ifPresent(configTree::setRoot);
-    }
-
-    /**
-     * Recursively filters a tree node and returns a copy with matching descendants, or null.
-     */
-    private TreeItem<ConfigTreeItem> filterTreeItem(
-        TreeItem<ConfigTreeItem> item,
-        String lowerQuery
-    ) {
-        return ConfigTreeItemSupport
-            .filter(item, lowerQuery)
-            .filter(filtered -> !filtered.getChildren().isEmpty() || item.getValue() == filtered.getValue())
-            .orElse(null);
-    }
-
-    /**
-     * Deep-copies a tree node so a full section can be shown when its category matches.
-     */
-    private TreeItem<ConfigTreeItem> copyTreeItem(
-        TreeItem<ConfigTreeItem> item
-    ) {
-        return ConfigTreeItemSupport.copyTreeItem(item);
     }
 
     /**
@@ -1021,13 +966,6 @@ public class FormSetting extends Form {
     }
 
     /**
-     * Checks whether a section contains changed fields.
-     */
-    private boolean hasMoifiedFields(TreeItem<ConfigTreeItem> item) {
-        return ConfigTreeItemSupport.hasModifiedFields(item);
-    }
-
-    /**
      * Clears modification flags after saving.
      */
     private void resetModifiedFlags(TreeItem<ConfigTreeItem> item) {
@@ -1091,22 +1029,6 @@ public class FormSetting extends Form {
             return;
         }
         configTree.refresh();
-    }
-
-    /**
-     * Gets the active oneof field number from Config.
-     */
-    private int getActiveOneofFieldNumber(ConfigProtos.Config config) {
-        return ConfigProtobufSupport.activeOneofFieldNumber(config);
-    }
-
-    /**
-     * Gets the active oneof field number from ModuleConfig.
-     */
-    private int getActiveModuleOneofFieldNumber(
-        ModuleConfigProtos.ModuleConfig mc
-    ) {
-        return ConfigProtobufSupport.activeModuleOneofFieldNumber(mc);
     }
 
     /**

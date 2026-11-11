@@ -46,6 +46,9 @@ public class NodeData {
     private byte[] publicKey;
     private Boolean unmessagable;
     private Boolean licensed;
+    private Boolean xeddsaSigned;
+    private Boolean heardOnCurrentLora;
+
 
     /**
      * Creates a node with the given numeric id and generated {@code nodeId}.
@@ -56,6 +59,12 @@ public class NodeData {
         this.nodeNum = nodeNum;
         this.nodeId = String.format("!%08x", nodeNum);
     }
+
+    public Boolean getXeddsaSigned() { return xeddsaSigned; }
+    public void setXeddsaSigned(Boolean value) { xeddsaSigned = value; }
+
+    public Boolean getHeardOnCurrentLora() { return heardOnCurrentLora; }
+    public void setHeardOnCurrentLora(Boolean value) { heardOnCurrentLora = value; }
 
     public int getNodeNum() { return nodeNum; }
 

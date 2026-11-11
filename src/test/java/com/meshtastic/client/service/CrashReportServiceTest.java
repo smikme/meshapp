@@ -1,257 +1,76 @@
 package com.meshtastic.client.service;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.meshtastic.client.i18n.I18n;
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import java.net.InetSocketAddress;
-import java.net.URI;
-import java.net.http.HttpClient;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * @author Konstantin A. Smirnov (ks@privatepractice.app)
- */
 class CrashReportServiceTest {
+    @TempDir Path directory;
+    private final Clock clock = Clock.fixed(Instant.parse("2026-11-08T10:00:00Z"), ZoneOffset.UTC);
+    private final CrashReportService.CrashContext context =
+            new CrashReportService.CrashContext("v2.4.0", 2004000, "Linux", "6.8", "x86_64");
 
-    private HttpServer server;
-
-    @org.junit.jupiter.api.BeforeEach
-    void setUp() throws Exception {
-        server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.start();
-    }
-
-    @AfterEach
-    void tearDown() {
-        if (server != null) {
-            server.stop(0);
+    @Test
+    void preparesPersistentArchiveAndIssueFormWithoutSendingAnything() throws Exception {
+        Path source = directory.resolve("session.log");
+        Files.writeString(source, "fatal: boom");
+        var result = new CrashReportService(directory.resolve("reports"), clock)
+                .prepareCrashReport(source, "Ошибка & вопрос?", context);
+        assertTrue(Files.exists(source));
+        assertTrue(Files.exists(result.archive()));
+        assertEquals("github.com", result.issueUrl().getHost());
+        assertEquals("/smikme/meshapp/issues/new", result.issueUrl().getPath());
+        String query = URLDecoder.decode(result.issueUrl().getRawQuery(), StandardCharsets.UTF_8);
+        assertTrue(query.contains("Ошибка & вопрос?"));
+        assertTrue(query.contains("2004000"));
+        assertFalse(query.contains(directory.toString()));
+        try (ZipFile zip = new ZipFile(result.archive().toFile())) {
+            assertEquals("fatal: boom", new String(zip.getInputStream(zip.getEntry("diagnostics/session.log")).readAllBytes(), StandardCharsets.UTF_8));
+            assertNotNull(zip.getEntry("report.md"));
         }
     }
 
     @Test
-    void submitCrashReportCreatesIssueAndUploadsArchive() throws Exception {
-        AtomicReference<String> issueAuth = new AtomicReference<>();
-        AtomicReference<String> issueBody = new AtomicReference<>();
-        AtomicReference<String> uploadAuth = new AtomicReference<>();
-        AtomicReference<String> uploadContentType = new AtomicReference<>();
-        AtomicReference<String> uploadBody = new AtomicReference<>();
-
-        server.createContext("/api/v1/repos/covox/meshapp/issues", exchange -> {
-            issueAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            issueBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            byte[] response = "{\"index\":42}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(201, response.length);
-            exchange.getResponseBody().write(response);
-            exchange.close();
-        });
-
-        server.createContext("/api/v1/repos/covox/meshapp/issues/42/assets", exchange -> {
-            uploadAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            uploadContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
-            uploadBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.ISO_8859_1));
-            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(201, response.length);
-            exchange.getResponseBody().write(response);
-            exchange.close();
-        });
-
-        Path logFile = Files.createTempFile("meshapp-session-", ".log");
-        Files.writeString(logFile, "fatal: boom");
-
-        CrashReportService service = new CrashReportService(
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v1"),
-                "covox",
-                "meshapp",
-                "test-token",
-                HttpClient.newHttpClient(),
-                Clock.fixed(Instant.parse("2026-04-10T10:15:30Z"), ZoneOffset.UTC)
-        );
-
-        CrashReportService.SubmissionResult result = service.submitCrashReport(
-                logFile,
-                "Упал при открытии настроек",
-                "support@example.com",
-                new CrashReportService.CrashContext("1.2.3", 77, "Linux", "6.8", "x86_64")
-        );
-
-        JsonObject payload = JsonParser.parseString(issueBody.get()).getAsJsonObject();
-        String body = payload.get("body").getAsString();
-        String encodedEmail = Base64.getEncoder().encodeToString("support@example.com".getBytes(StandardCharsets.UTF_8));
-
-        assertEquals(42L, result.issueIndex());
-        assertEquals("token test-token", issueAuth.get());
-        assertEquals("token test-token", uploadAuth.get());
-        assertTrue(body.contains("Упал при открытии настроек"));
-        assertTrue(body.contains(encodedEmail));
-        assertFalse(body.contains("support@example.com"));
-        assertFalse(body.contains("E-Mail"));
-        assertTrue(issueBody.get().contains("\"title\""));
-        assertTrue(uploadContentType.get().startsWith("multipart/form-data; boundary="));
-        assertTrue(uploadBody.get().contains("name=\"attachment\""));
-        assertTrue(uploadBody.get().contains("meshapp-session-"));
+    void preservesCompleteCommentAndNestedDiagnosticsWhenIssueUrlWouldBeTooLong() throws Exception {
+        Path source = directory.resolve("bundle");
+        Files.createDirectories(source.resolve("nested"));
+        Files.writeString(source.resolve("nested/session.log"), "error");
+        String comment = "Ошибка 🛰️ ".repeat(3000);
+        var result = new CrashReportService(directory.resolve("reports"), clock)
+                .prepareProblemReport(source, comment, context);
+        assertTrue(result.issueUrl().toString().length() < 6500);
+        assertTrue(Files.readString(result.report()).contains(comment.trim()));
+        try (ZipFile zip = new ZipFile(result.archive().toFile())) {
+            assertNotNull(zip.getEntry("diagnostics/nested/session.log"));
+        }
     }
 
     @Test
-    void submitProblemReportUsesProblemSpecificTitleAndBody() throws Exception {
-        AtomicReference<String> issueBody = new AtomicReference<>();
-
-        server.createContext("/api/v1/repos/covox/meshapp/issues", exchange -> {
-            issueBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            byte[] response = "{\"index\":7}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(201, response.length);
-            exchange.getResponseBody().write(response);
-            exchange.close();
-        });
-
-        server.createContext("/api/v1/repos/covox/meshapp/issues/7/assets", exchange -> {
-            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(201, response.length);
-            exchange.getResponseBody().write(response);
-            exchange.close();
-        });
-
-        Path logFile = Files.createTempFile("meshapp-session-", ".log");
-        Files.writeString(logFile, "ui glitch");
-
-        CrashReportService service = new CrashReportService(
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v1"),
-                "covox",
-                "meshapp",
-                "test-token",
-                HttpClient.newHttpClient(),
-                Clock.fixed(Instant.parse("2026-04-10T10:15:30Z"), ZoneOffset.UTC)
-        );
-
-        service.submitProblemReport(
-                logFile,
-                "Не открывается окно помощи",
-                "support@example.com",
-                new CrashReportService.CrashContext("1.2.3", 77, "Linux", "6.8", "x86_64")
-        );
-
-        JsonObject payload = JsonParser.parseString(issueBody.get()).getAsJsonObject();
-        String title = payload.get("title").getAsString();
-        String body = payload.get("body").getAsString();
-
-        assertTrue(title.contains(I18n.t("crashReport.issue.title.problem")));
-        assertTrue(body.contains(I18n.t("crashReport.issue.bodyLead.problem")));
-        assertTrue(body.contains("Не открывается окно помощи"));
-        assertTrue(body.contains(I18n.t("crashReport.issue.attachment.problem")));
-        String encodedEmail = Base64.getEncoder().encodeToString("support@example.com".getBytes(StandardCharsets.UTF_8));
-        assertTrue(body.contains(encodedEmail));
-        assertFalse(body.contains("support@example.com"));
-        assertFalse(body.contains("E-Mail"));
+    void repeatedExportsNeverOverwriteEarlierReport() throws Exception {
+        Path source = directory.resolve("session.log");
+        Files.writeString(source, "first");
+        var service = new CrashReportService(directory.resolve("reports"), clock);
+        var first = service.prepareProblemReport(source, "first", context);
+        var second = service.prepareProblemReport(source, "second", context);
+        assertNotEquals(first.archive(), second.archive());
+        assertTrue(Files.readString(first.report()).contains("first"));
+        assertTrue(Files.readString(second.report()).contains("second"));
     }
 
     @Test
-    void submitCrashReportArchivesDirectoryPayload() throws Exception {
-        AtomicReference<byte[]> uploadBody = new AtomicReference<>();
-        AtomicReference<String> uploadContentType = new AtomicReference<>();
-
-        server.createContext("/api/v1/repos/covox/meshapp/issues", exchange -> {
-            byte[] response = "{\"index\":99}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(201, response.length);
-            exchange.getResponseBody().write(response);
-            exchange.close();
-        });
-
-        server.createContext("/api/v1/repos/covox/meshapp/issues/99/assets", exchange -> {
-            uploadContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
-            uploadBody.set(exchange.getRequestBody().readAllBytes());
-            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(201, response.length);
-            exchange.getResponseBody().write(response);
-            exchange.close();
-        });
-
-        Path bundleDir = Files.createTempDirectory("meshapp-bundle-");
-        Files.writeString(bundleDir.resolve("meshapp-session.log"), "fatal: boom");
-        Files.writeString(bundleDir.resolve("fatal-marker.json"), "{\"type\":\"uncaught-exception\"}");
-        Files.write(bundleDir.resolve("heapdump_pid123.hprof"), new byte[] {1, 2, 3});
-
-        CrashReportService service = new CrashReportService(
-                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/api/v1"),
-                "covox",
-                "meshapp",
-                "test-token",
-                HttpClient.newHttpClient(),
-                Clock.fixed(Instant.parse("2026-04-10T10:15:30Z"), ZoneOffset.UTC)
-        );
-
-        service.submitCrashReport(
-                bundleDir,
-                "Падает без стектрейса",
-                "",
-                new CrashReportService.CrashContext("1.2.3", 77, "Windows", "10", "x86_64")
-        );
-
-        byte[] zipBytes = extractZipPayload(uploadBody.get(), uploadContentType.get());
-        List<String> entryNames = readZipEntryNames(zipBytes);
-        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/meshapp-session.log")));
-        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/fatal-marker.json")));
-        assertTrue(entryNames.stream().anyMatch(name -> name.endsWith("/heapdump_pid123.hprof")));
-    }
-
-    private static byte[] extractZipPayload(byte[] multipartBody, String contentType) {
-        String boundary = contentType.substring(contentType.indexOf("boundary=") + "boundary=".length());
-        byte[] boundaryBytes = ("--" + boundary).getBytes(StandardCharsets.UTF_8);
-        byte[] headerDelimiter = "\r\n\r\n".getBytes(StandardCharsets.UTF_8);
-        byte[] trailerDelimiter = ("\r\n--" + boundary).getBytes(StandardCharsets.UTF_8);
-
-        int partStart = indexOf(multipartBody, boundaryBytes, 0);
-        int payloadStart = indexOf(multipartBody, headerDelimiter, partStart) + headerDelimiter.length;
-        int payloadEnd = indexOf(multipartBody, trailerDelimiter, payloadStart);
-
-        byte[] zip = new byte[payloadEnd - payloadStart];
-        System.arraycopy(multipartBody, payloadStart, zip, 0, zip.length);
-        return zip;
-    }
-
-    private static List<String> readZipEntryNames(byte[] zipBytes) throws Exception {
-        List<String> entryNames = new ArrayList<>();
-        try (ZipInputStream zip = new ZipInputStream(new java.io.ByteArrayInputStream(zipBytes))) {
-            java.util.zip.ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
-                entryNames.add(entry.getName());
-            }
-        }
-        return entryNames;
-    }
-
-    private static int indexOf(byte[] haystack, byte[] needle, int fromIndex) {
-        outer:
-        for (int i = Math.max(0, fromIndex); i <= haystack.length - needle.length; i++) {
-            for (int j = 0; j < needle.length; j++) {
-                if (haystack[i + j] != needle[j]) {
-                    continue outer;
-                }
-            }
-            return i;
-        }
-        throw new IllegalArgumentException("Needle not found in multipart payload");
+    void missingPayloadFailsWithoutCreatingEmptyReport() {
+        var service = new CrashReportService(directory.resolve("reports"), clock);
+        assertThrows(java.io.IOException.class, () -> service.prepareCrashReport(directory.resolve("missing"), "", context));
+        assertFalse(Files.exists(directory.resolve("reports")));
     }
 }

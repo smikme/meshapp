@@ -15,6 +15,9 @@ import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
 import com.meshtastic.client.utils.ConfigDebugFormatter;
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.OutgoingText;
+import com.meshtastic.client.utils.MeshtasticPayloadLimits;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,14 +65,30 @@ public final class MessageService {
      * @return created message in {@code SENDING} status
      */
     public static MeshMessage sendChannelMessage(ProtocolHandler handler, DeviceState state, int channelIndex, String text, int replyId) {
+        return sendChannelMessage(handler, state, channelIndex, text, replyId, AppPreferences.isCyrillicCompactionEnabled());
+    }
+
+    /**
+     * Sends a channel broadcast with an explicit compaction choice, including for RPC clients.
+     * Only the transmitted copy is transformed; history retains the original text.
+     * The encoded size is checked before saving or dispatching the message.
+     *
+     * @param handler protocol handler used for sending
+     * @param state device state
+     * @param channelIndex channel index; zero is Primary
+     * @param text original message text
+     * @param replyId quoted packet ID, or zero for no reply
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return saved outgoing message
+     * @throws IllegalArgumentException if the encoded text exceeds the available payload budget
+     * @throws IllegalStateException if the message cannot be saved to local history
+     */
+    public static MeshMessage sendChannelMessage(ProtocolHandler handler, DeviceState state, int channelIndex, String text, int replyId, boolean compact) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;
 
-        MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
-                .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
-        if (replyId != 0) { dataBuilder.setReplyId(replyId); }
-        MeshProtos.Data data = dataBuilder.build();
+        MeshProtos.Data data = buildTextMessageData(text, replyId,
+                MeshtasticPayloadLimits.channelAuthenticationOverhead(state, channelIndex), compact);
 
         if (replyId != 0) {
             log.info("REPLY_DEBUG send channel: replyId={} (0x{}), payloadBytes={}",
@@ -107,7 +126,7 @@ public final class MessageService {
         String chatType = "channel";
         String chatKey = String.valueOf(channelIndex);
         hydrateReplyText(state, msg, ownerNodeId, chatType, chatKey);
-        MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
+        persistOutgoingMessage(msg, chatType, chatKey, ownerNodeId);
         state.addMessage(msg);
         state.registerPendingAck(packetId, msg);
         handler.sendToRadio(toRadio);
@@ -127,6 +146,25 @@ public final class MessageService {
      * @return created message in {@code SENDING} status
      */
     public static MeshMessage sendDirectMessage(ProtocolHandler handler, DeviceState state, String peerNodeId, String text, int replyId) {
+        return sendDirectMessage(handler, state, peerNodeId, text, replyId, AppPreferences.isCyrillicCompactionEnabled());
+    }
+
+    /**
+     * Sends a direct message with an explicit compaction choice, including for RPC clients.
+     * Only the transmitted copy is transformed; history retains the original text.
+     * The encoded size is checked before saving or dispatching the message.
+     *
+     * @param handler protocol handler used for sending
+     * @param state device state
+     * @param peerNodeId recipient node ID
+     * @param text original message text
+     * @param replyId quoted packet ID, or zero for no reply
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return saved outgoing message; null if the peer cannot be resolved or messaged
+     * @throws IllegalArgumentException if the encoded text exceeds the available payload budget
+     * @throws IllegalStateException if the message cannot be saved to local history
+     */
+    public static MeshMessage sendDirectMessage(ProtocolHandler handler, DeviceState state, String peerNodeId, String text, int replyId, boolean compact) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         long now = System.currentTimeMillis() / 1000;
 
@@ -141,18 +179,14 @@ public final class MessageService {
         }
         int peerNodeNum = peerNode.getNodeNum();
 
-        MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
-                .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
-                .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
-        if (replyId != 0) { dataBuilder.setReplyId(replyId); }
-        MeshProtos.Data data = dataBuilder.build();
+        MeshProtos.Data data = buildTextMessageData(text, replyId, 0, compact);
 
         if (replyId != 0) {
             log.info("REPLY_DEBUG send DM: replyId={} (0x{}), payloadBytes={}",
                     replyId, Integer.toHexString(replyId), data.getPayload().size());
         }
 
-        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(peerNodeId, peerNode);
         int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
 
         NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
@@ -171,9 +205,8 @@ public final class MessageService {
 
         String ownerNodeId = String.format("!%08x", state.getMyNodeNum());
         String chatType = "dm";
-        String chatKey = peerNodeId;
-        hydrateReplyText(state, msg, ownerNodeId, chatType, chatKey);
-        MessageDbService.getInstance().save(msg, chatType, chatKey, ownerNodeId);
+        hydrateReplyText(state, msg, ownerNodeId, chatType, peerNodeId);
+        persistOutgoingMessage(msg, chatType, peerNodeId, ownerNodeId);
         state.addDirectMessage(msg, peerNodeId);
         if (usePkiTransport) {
             preparePeerForPkiDirectMessage(handler, state, peerNode)
@@ -198,6 +231,16 @@ public final class MessageService {
                     packetId, directChannel, false, msg);
         }
         return msg;
+    }
+
+    private static void persistOutgoingMessage(MeshMessage message, String chatType, String chatKey, String owner) {
+        MessageDbService.getInstance().save(message, chatType, chatKey, owner);
+        // A new outgoing message starts with dbId=0. Do not send it and clear
+        // the editor if the database rejected the insert: the chat could never
+        // load that message back. The UI already preserves drafts on failure.
+        if (message.getDbId() <= 0) {
+            throw new IllegalStateException(com.meshtastic.client.i18n.I18n.t("chat.messageSaveFailed"));
+        }
     }
 
     private static void hydrateReplyText(DeviceState state,
@@ -244,11 +287,32 @@ public final class MessageService {
     }
 
     /**
-     * Resends a previously undelivered outgoing message without creating a new history row.
+     * Resends a previously undelivered outgoing message without creating a new history row,
+     * using the current application compaction preference.
      *
+     * @param handler protocol handler used for sending
+     * @param state current device state
+     * @param message failed outgoing message; null is rejected
      * @return {@code true} if a new send attempt was started
+     * @throws IllegalArgumentException if the encoded message no longer fits the payload budget
      */
     public static boolean retryMessage(ProtocolHandler handler, DeviceState state, MeshMessage message) {
+        return retryMessage(handler, state, message, AppPreferences.isCyrillicCompactionEnabled());
+    }
+
+    /**
+     * Retries a failed outgoing message using an explicit compaction choice.
+     * Re-encodes the saved original text and validates current limits before changing
+     * the existing history row, packet ID or delivery status.
+     *
+     * @param handler protocol handler used for sending
+     * @param state current device state
+     * @param message failed outgoing message; null is rejected
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return whether a new send attempt was started
+     * @throws IllegalArgumentException if the encoded message no longer fits the payload budget
+     */
+    public static boolean retryMessage(ProtocolHandler handler, DeviceState state, MeshMessage message, boolean compact) {
         if (handler == null || state == null || message == null || !message.isOutgoing()) {
             return false;
         }
@@ -257,8 +321,8 @@ public final class MessageService {
         }
 
         return isChannelMessage(message)
-                ? retryChannelMessage(handler, state, message)
-                : retryDirectMessage(handler, state, message);
+                ? retryChannelMessage(handler, state, message, compact)
+                : retryDirectMessage(handler, state, message, compact);
     }
 
     /**
@@ -333,7 +397,7 @@ public final class MessageService {
                 .setEmoji(1)
                 .build();
 
-        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(peerNodeId, peerNode);
         int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
         if (usePkiTransport) {
             preparePeerForPkiDirectMessage(handler, state, peerNode);
@@ -361,9 +425,10 @@ public final class MessageService {
 
     private static boolean retryChannelMessage(ProtocolHandler handler,
                                                DeviceState state,
-                                               MeshMessage message) {
+                                               MeshMessage message, boolean compact) {
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
-        MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId());
+        MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId(),
+                MeshtasticPayloadLimits.channelAuthenticationOverhead(state, message.getChannelIndex()), compact);
         logRetryReplyDebug("channel", message.getReplyId(), data);
         if (!prepareMessageForRetry(message, packetId)) {
             return false;
@@ -385,7 +450,7 @@ public final class MessageService {
 
     private static boolean retryDirectMessage(ProtocolHandler handler,
                                               DeviceState state,
-                                              MeshMessage message) {
+                                              MeshMessage message, boolean compact) {
         String peerNodeId = message.getToNodeId();
         NodeData peerNode = resolvePeerNode(state, peerNodeId);
         if (peerNode == null) {
@@ -399,10 +464,10 @@ public final class MessageService {
 
         int packetId = ThreadLocalRandom.current().nextInt(1, Integer.MAX_VALUE);
         int peerNodeNum = peerNode.getNodeNum();
-        MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId());
+        MeshProtos.Data data = buildTextMessageData(message.getText(), message.getReplyId(), 0, compact);
         logRetryReplyDebug("DM", message.getReplyId(), data);
 
-        boolean usePkiTransport = shouldUsePkiDirectMessage(state, peerNodeId, peerNode);
+        boolean usePkiTransport = shouldUsePkiDirectMessage(peerNodeId, peerNode);
         int directChannel = usePkiTransport ? 0 : resolveDirectMessageChannel(state, peerNodeId, peerNode);
         if (!prepareMessageForRetry(message, packetId)) {
             return false;
@@ -544,13 +609,14 @@ public final class MessageService {
     /**
      * Proxies an MQTT payload from the desktop/phone client to the device.
      * Payload is always sent as bytes so binary data is not lost.
+     * @return completion of the transport write, not an acknowledgement from firmware or the mesh
      */
-    public static void sendMqttClientProxyMessage(ProtocolHandler handler,
+    public static CompletableFuture<Void> sendMqttClientProxyMessage(ProtocolHandler handler,
                                                   String topic,
                                                   byte[] payload,
                                                   boolean retained) {
         if (handler == null || topic == null || topic.isBlank() || payload == null) {
-            return;
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Missing MQTT proxy message or protocol handler"));
         }
 
         MeshProtos.MqttClientProxyMessage proxyMessage = MeshProtos.MqttClientProxyMessage.newBuilder()
@@ -559,7 +625,7 @@ public final class MessageService {
                 .setRetained(retained)
                 .build();
 
-        handler.sendToRadio(MeshProtos.ToRadio.newBuilder()
+        return handler.sendToRadioAsync(MeshProtos.ToRadio.newBuilder()
                 .setMqttClientProxyMessage(proxyMessage)
                 .build(), false);
     }
@@ -957,11 +1023,6 @@ public final class MessageService {
     }
 
     /**
-     * Helper for sending AdminMessage to the local device.
-     *
-     * @return future with routing ACK/NAK for the sent admin packet
-     */
-    /**
      * Sends a mutating admin command to the local device.
      * <p>
      * For begin/set/commit and other write operations, only routing ACK is needed.
@@ -1076,7 +1137,7 @@ public final class MessageService {
             return CompletableFuture.completedFuture(MeshProtos.Routing.Error.NONE);
         }
         log.debug("Sharing local user info with {} before PKI DM", peerNode.getNodeId());
-        return sendNodeInfoPacketAwaitRoutingAck(handler, state, peerNode.getNodeNum(), localUser.toByteString(), false);
+        return sendNodeInfoPacketAwaitRoutingAck(handler, state, peerNode.getNodeNum(), localUser.toByteString());
     }
 
     static void seedPeerContactForPki(ProtocolHandler handler, DeviceState state, NodeData peerNode) {
@@ -1161,10 +1222,26 @@ public final class MessageService {
         requestNodeInfo(handler, state, targetNodeNum);
     }
 
-    private static MeshProtos.Data buildTextMessageData(String text, int replyId) {
+    /**
+     * Builds a text payload after reserving protobuf, reply and authentication bytes.
+     *
+     * @param text original message text
+     * @param replyId quoted packet ID, or zero for no reply
+     * @param authenticationOverhead additional radio authentication bytes
+     * @param compact whether to apply Cyrillic homoglyph substitution
+     * @return validated text-message data
+     * @throws IllegalArgumentException if the transformed text exceeds the remaining budget
+     */
+    private static MeshProtos.Data buildTextMessageData(String text, int replyId, int authenticationOverhead,
+                                                       boolean compact) {
+        String wireText = OutgoingText.prepare(text, compact);
+        int maxBytes = 228 - authenticationOverhead - (replyId != 0 ? 5 : 0);
+        if (wireText.getBytes(StandardCharsets.UTF_8).length > maxBytes) {
+            throw new IllegalArgumentException(com.meshtastic.client.i18n.I18n.t("chat.messageTooLong", maxBytes));
+        }
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
-                .setPayload(ByteString.copyFrom(text, StandardCharsets.UTF_8));
+                .setPayload(ByteString.copyFrom(wireText, StandardCharsets.UTF_8));
         if (replyId != 0) {
             dataBuilder.setReplyId(replyId);
         }
@@ -1247,7 +1324,7 @@ public final class MessageService {
         return normalizeDirectMessageChannel(state, peerNode != null ? peerNode.getChannel() : 0);
     }
 
-    private static boolean shouldUsePkiDirectMessage(DeviceState state, String peerNodeId, NodeData peerNode) {
+    private static boolean shouldUsePkiDirectMessage(String peerNodeId, NodeData peerNode) {
         byte[] publicKey = peerNode != null ? peerNode.getPublicKey() : null;
         if (publicKey == null || publicKey.length == 0) {
             log.debug("DM transport for {} stays legacy: peer public key is unavailable", peerNodeId);
@@ -1351,15 +1428,14 @@ public final class MessageService {
     private static CompletableFuture<MeshProtos.Routing.Error> sendNodeInfoPacketAwaitRoutingAck(ProtocolHandler handler,
                                                                                                   DeviceState state,
                                                                                                   int targetNodeNum,
-                                                                                                  ByteString payload,
-                                                                                                  boolean wantResponse) {
+                                                                                                  ByteString payload) {
         if (handler == null || state == null || targetNodeNum == 0) {
             return CompletableFuture.completedFuture(MeshProtos.Routing.Error.BAD_REQUEST);
         }
 
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.NODEINFO_APP)
-                .setWantResponse(wantResponse);
+                .setWantResponse(false);
         if (payload != null && !payload.isEmpty()) {
             dataBuilder.setPayload(payload);
         }
@@ -1408,6 +1484,8 @@ public final class MessageService {
         handler.sendToRadio(MeshProtos.ToRadio.newBuilder().setPacket(packetBuilder.build()).build());
     }
 
+    // Returns success for this action, consistently with the persistence API.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private static boolean prepareMessageForRetry(MeshMessage message, int newPacketId) {
         if (message == null || newPacketId == 0) {
             return false;
@@ -1633,6 +1711,8 @@ public final class MessageService {
         return null;
     }
 
+    // Returns success for this action, consistently with the persistence API.
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private static boolean saveOutgoingReaction(DeviceState state,
                                                 String chatType,
                                                 String chatKey,

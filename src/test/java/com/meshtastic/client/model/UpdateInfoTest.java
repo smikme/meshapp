@@ -16,6 +16,20 @@ class UpdateInfoTest {
     private final Gson gson = new Gson();
 
     @Test
+    void selectsNativeInstallerForCpuArchitecture() {
+        UpdateInfo info = parse("""
+                {"downloads": {
+                  "macos-dmg-aarch64": "https://example.invalid/arm.dmg",
+                  "macos-dmg-x86_64": "https://example.invalid/intel.dmg",
+                  "macos": "https://example.invalid/release"
+                }}
+                """);
+        assertEquals("https://example.invalid/arm.dmg", info.getDownloadUrl(OsType.MACOS, PackageFormat.DMG, "aarch64"));
+        assertEquals("https://example.invalid/intel.dmg", info.getDownloadUrl(OsType.MACOS, PackageFormat.DMG, "x86_64"));
+        assertEquals("https://example.invalid/release", info.getDownloadUrl(OsType.MACOS, PackageFormat.DMG, "unknown"));
+    }
+
+    @Test
     void linuxAppImagePrefersDedicatedArtifact() {
         UpdateInfo info = parse("""
                 {

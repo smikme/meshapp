@@ -31,6 +31,9 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -58,6 +61,7 @@ public final class WinBleProcess implements BlePlatform {
     private static final Duration WRITE_TIMEOUT = Duration.ofSeconds(15);
     private static final int RECENT_HELPER_OUTPUT_LINES = 12;
 
+    private final java.util.List<String> command;
     private final Object processLock = new Object();
     private final Object writeLock = new Object();
     private final Object helperOutputLock = new Object();
@@ -65,6 +69,13 @@ public final class WinBleProcess implements BlePlatform {
     private final AtomicBoolean connectInProgress = new AtomicBoolean(false);
     private final Map<Integer, CompletableFuture<Message>> pending = new ConcurrentHashMap<>();
     private final Deque<String> recentHelperOutput = new ArrayDeque<>();
+    // Listeners may synchronously call the helper (e.g. isConnected before the next
+    // MeshCore write). Keep them ordered, but never block the protocol reader.
+    private final ExecutorService callbacks = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "win-ble-helper-callbacks");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private volatile Process process;
     private volatile BufferedWriter writer;
@@ -76,6 +87,14 @@ public final class WinBleProcess implements BlePlatform {
     private volatile Consumer<byte[]> fromRadioListener;
     private volatile Consumer<BleState> stateListener;
     private volatile Consumer<String> passkeyRequestHandler;
+
+    public WinBleProcess() {
+        this(helperCommand());
+    }
+
+    WinBleProcess(java.util.List<String> command) {
+        this.command = java.util.List.copyOf(command);
+    }
 
     @Override
     public void startScan(Consumer<BleDevice> onDeviceFound) {
@@ -206,6 +225,7 @@ public final class WinBleProcess implements BlePlatform {
     @Override
     public void dispose() {
         disposed = true;
+        callbacks.shutdownNow();
         stopHelper();
     }
 
@@ -280,7 +300,6 @@ public final class WinBleProcess implements BlePlatform {
             readyFuture = ready;
             clearRecentHelperOutput();
 
-            java.util.List<String> command = helperCommand();
             log.debug("Starting Windows BLE helper: {}", command);
             ProcessBuilder builder = new ProcessBuilder(command);
             Process started = builder.start();
@@ -386,24 +405,25 @@ public final class WinBleProcess implements BlePlatform {
             case "device" -> {
                 Consumer<BleDevice> consumer = scanConsumer;
                 if (consumer != null && message.address != null) {
-                    consumer.accept(new BleDevice(
+                    BleDevice device = new BleDevice(
                             message.address,
                             message.name != null ? message.name : "Unknown",
                             message.rssi != null ? message.rssi : 0,
-                            profile.protocolType()));
+                            profile.protocolType());
+                    dispatchCallback(() -> consumer.accept(device));
                 }
             }
             case "data" -> {
                 Consumer<byte[]> listener = fromRadioListener;
                 if (listener != null && message.data != null) {
-                    listener.accept(Base64.getDecoder().decode(message.data));
+                    dispatchCallback(() -> listener.accept(Base64.getDecoder().decode(message.data)));
                 }
             }
             case "state" -> handleStateEvent(message);
             case "passkey" -> {
                 Consumer<String> handler = passkeyRequestHandler;
                 if (handler != null) {
-                    handler.accept(message.address);
+                    dispatchCallback(() -> handler.accept(message.address));
                 }
             }
             default -> log.debug("Ignoring Windows BLE helper event: {}", message.event);
@@ -412,30 +432,61 @@ public final class WinBleProcess implements BlePlatform {
 
     private void handleStateEvent(Message message) {
         Consumer<BleState> listener = stateListener;
-        if (listener == null || message.state == null) {
+        if (message.state == null) {
             return;
         }
+        // Update/filter state on receipt: connectInProgress may change before a
+        // queued listener runs (notably for the initial disconnect during pairing).
         switch (message.state) {
             case 0 -> {
                 connected = true;
-                listener.accept(new BleState.Connected());
+                if (listener != null) {
+                    dispatchCallback(() -> listener.accept(new BleState.Connected()));
+                }
             }
             case 1 -> {
                 connected = false;
                 if (connectInProgress.get()) {
                     return;
                 }
-                listener.accept(new BleState.Disconnected());
+                if (listener != null) {
+                    dispatchCallback(() -> listener.accept(new BleState.Disconnected()));
+                }
             }
             case 2 -> {
                 connected = false;
                 if (connectInProgress.get()) {
                     return;
                 }
-                listener.accept(new BleState.Error(
-                        message.message != null ? message.message : "Windows BLE helper error", null));
+                if (listener != null) {
+                    dispatchCallback(() -> listener.accept(new BleState.Error(
+                            message.message != null ? message.message : "Windows BLE helper error", null)));
+                }
             }
             default -> {
+            }
+        }
+    }
+
+    private void dispatchCallback(Runnable callback) {
+        if (disposed) {
+            return;
+        }
+        try {
+            callbacks.execute(() -> {
+                if (disposed) {
+                    return;
+                }
+                try {
+                    callback.run();
+                } catch (RuntimeException e) {
+                    log.warn("Windows BLE helper callback failed", e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // dispose() may shut down the executor between the check and submission.
+            if (!disposed) {
+                log.warn("Windows BLE helper callback rejected", e);
             }
         }
     }
@@ -453,7 +504,7 @@ public final class WinBleProcess implements BlePlatform {
             connected = false;
             Consumer<BleState> listener = stateListener;
             if (listener != null) {
-                listener.accept(new BleState.Error(message, null));
+                dispatchCallback(() -> listener.accept(new BleState.Error(message, null)));
             }
         }
     }

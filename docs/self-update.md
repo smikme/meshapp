@@ -1,172 +1,116 @@
-# MeshApp Self-Update Manifest
+# MeshApp self-update
 
-MeshApp uses a non-privileged launcher/payload self-update layout. The native
-package installs a stable signed launcher bundle. On startup, that launcher
-bootstraps and starts the actual application payload from a user-writable
-version directory. Updates replace only that payload and switch `current`; they
-do not modify the signed native launcher bundle.
+Build and publication instructions: [GitHub release workflow](github-release.md).
 
-The legacy `downloads` manifest still works. The self-update path is enabled
-only when all of these are true:
+The native installer provides a stable launcher and Java runtime. The launcher
+starts an application payload from a user-writable version directory. Updates
+replace the payload and switch `current`; they do not modify the installed
+launcher/runtime. Runtime or launcher changes require a new native installer.
 
-- the application is running from a managed payload process where the launcher
-  provides `MESHAPP_UPDATE_ROOT` and `MESHAPP_UPDATE_VERSION`
-- the current package format is not Flatpak
-- the manifest contains a matching `selfUpdate` artifact
-- the artifact is a full payload `zip`
-- the artifact hash matches
-- the artifact signature is trusted, or unsigned dev mode is explicitly enabled
+Managed roots:
 
-Native DMG/MSI/DEB packages are still the delivery mechanism for the stable
-launcher. The first run of the launcher copies its packaged application payload
-to the managed root:
+- macOS: `~/Library/Application Support/MeshApp/`
+- Windows: `%LOCALAPPDATA%\MeshApp\`
+- Linux: `~/.local/share/meshapp/`
 
-- macOS: `~/Library/Application Support/MeshApp/versions/<version>/`
-- Windows: `%LOCALAPPDATA%\MeshApp\versions\<version>\`
-- Linux: `~/.local/share/meshapp/versions/<version>/`
+Payload ZIPs contain `lib/`, including the application JAR, JavaFX modules and
+native libraries, never a macOS `.app`. The packaged runtime must retain its
+executable `bin/java`. `verifySelfUpdatePackage` checks packages before release.
 
-Payload archives include the application jars, JavaFX modules, and platform
-native libraries required by that build. For example, Windows payloads include
-the packaged `meshapp-ble.dll`, Linux payloads include `libmeshapp-ble.so`, and
-macOS native resources are carried by the application jar.
+## GitHub publication
 
-The packaged runtime must keep its native `bin/java` launcher. The stable
-launcher starts the payload as a separate Java process; stripping native runtime
-commands breaks that handoff and forces the application back to manual download
-mode.
+`Build release` creates a draft with installers, payload ZIPs, `release.json`
+and `SHA256SUMS`. `Publish release` validates these files, signs update entries,
+uploads `meshapp.json`, publishes the release and deploys GitHub Pages.
 
-Before publishing release assets, run:
+Feeds: `https://smikme.github.io/meshapp/updates/stable/meshapp.json` and
+`https://smikme.github.io/meshapp/updates/unstable/meshapp.json`.
+Stable installations read only stable; unstable installations read both. Versions
+are ordered by major/minor/patch, stable after unstable, then numeric build number.
+Legacy names without a build suffix have build 0. Development builds (code 0)
+do not request public updates. A missing channel (404) means no published update;
+other HTTP failures remain errors.
+Artifact URLs use `https://github.com/smikme/meshapp/releases/download/<tag>/…`.
 
-```sh
-./gradlew verifySelfUpdatePackage
-```
+The new trust root is `config/update-public-key.pem`. The private key is stored
+as `MESHAPP_UPDATE_ED25519_PRIVATE_KEY` in the `production` environment.
+Do not rotate it without planning a trust transition for installed clients.
+The first GitHub-only release requires manual installation.
 
-The task builds and verifies the native package plus self-update payload. It
-fails when the packaged runtime cannot start the payload, the payload zip
-contains an app bundle instead of `lib/`, the app jar lacks the update trust
-key, or platform native libraries are missing from the payload.
-For local smoke tests, pass `-PmeshappUpdateEd25519PublicKey=...` or set
-`MESHAPP_UPDATE_ED25519_PUBLIC_KEY`; release CI already requires this secret.
+Versions use `vX.Y.Z`; `versionCode = X * 1000000 + Y * 1000 + Z`.
+Limits: X/Y <= 255 and Z <= 999. Development builds have code 0. The manifest and
+every embedded `version.properties` must agree. A release cannot be promoted
+over a newer release in its channel or a newer native build in either channel.
+`Build release` assigns its run number once. Retries keep it; stable tags use
+`vX.Y.Z+build.N`, unstable tags use `vX.Y.Z-unstable.N`. The legacy integer
+`versionCode` remains unchanged for backward compatibility. First deploy this
+updater using a higher base stable version so old clients notice the transition.
 
-The generated manifest keeps the legacy `downloads` map for existing clients:
-`windows`, `macos`, `linux`, plus package-specific keys such as `windows-msi`,
-`macos-dmg`, `linux-deb`, `linux-appimage`, and `linux-flatpak`. The new
-`selfUpdate` map is additive; older clients ignore it.
+The full version string binds the build and channel in the existing v1 signature
+format; no trust-key or signature-format migration is needed. Optional duplicated
+`buildNumber`, `channel`, and `releaseVersion` fields must match that string.
+Native installer versions use a separate monotonic epoch (build 126 = 3.0.126).
+The launcher also compares full build identities, so a newly installed native
+package can replace an older managed payload with the same legacy code.
 
-Example:
+## Manifest contract
 
 ```json
 {
-  "version": "2.1.20",
-  "versionCode": 2147,
-  "releaseNotes": "Bug fixes and improvements.",
-  "releaseNotes_ru": "Исправления ошибок и улучшения.",
+  "version": "v2.4.0+build.126",
+  "versionCode": 2004000,
+  "buildNumber": 126,
+  "channel": "stable",
+  "releaseVersion": "2.4.0",
+  "packageVersion": "3.0.126",
+  "releaseNotes": "Release notes",
+  "releaseNotes_ru": "Описание выпуска",
+  "downloads": {
+    "macos-dmg-aarch64": "https://github.com/smikme/meshapp/releases/download/v2.4.0+build.126/MeshApp-v2.4.0+build.126-macos-aarch64.dmg",
+    "macos": "https://github.com/smikme/meshapp/releases/tag/v2.4.0+build.126"
+  },
   "selfUpdate": {
     "macos-aarch64": {
       "type": "full-archive",
       "format": "zip",
-      "version": "2.1.20",
-      "url": "https://meshapp.privatepractice.app/releases/MeshApp-2.1.20-macos-aarch64-selfupdate.zip",
-      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "version": "v2.4.0+build.126",
+      "url": "https://github.com/smikme/meshapp/releases/download/v2.4.0+build.126/MeshApp-v2.4.0+build.126-macos-aarch64-selfupdate.zip",
+      "sha256": "<64 hexadecimal characters>",
       "size": 123456789,
-      "signature": "base64-ed25519-signature"
+      "signature": "<base64 Ed25519 signature>"
     }
   }
 }
 ```
 
-Artifact lookup order is:
+Installer lookup prefers `{os}-{package}-{arch}`, then `{os}-{arch}`, followed
+by generic package/OS fallbacks. Generic URLs lead to the release page so unknown
+CPUs are not silently assigned incompatible installers.
 
-1. `{os}-{package}-{arch}`
-2. `{os}-{arch}`
-3. `{os}-{package}`
-4. `{os}`
+Self-update lookup uses `{os}-{package}-{arch}`, `{os}-{arch}`, `{os}-{package}`,
+`{os}`. Flatpak ignores `selfUpdate`; users install the new bundle from Releases.
 
-Flatpak builds intentionally ignore `selfUpdate` artifacts. They only notify the
-user and instruct them to update through Software Center or:
-
-```sh
-flatpak update app.privatepractice.meshapp
-```
-
-## CI/CD generation
-
-Release artifacts and the update manifest are separate CI/CD steps:
-
-1. Tag pushes run `.gitea/workflows/release.yml`. Linux, Windows, and macOS
-   jobs build native packages plus
-   `MeshApp-{version}-{os}-{arch}-selfupdate.zip`.
-   This zip contains the managed application payload, not the signed native
-   package or macOS `.app` bundle.
-   Each release build also runs `verifySelfUpdatePackage` before uploading
-   artifacts to Gitea.
-   This creates and publishes the Gitea release, but does not publish it to the
-   update system.
-2. A manual `.gitea/workflows/publish-update-manifest.yml` run selects which
-   existing Gitea release is visible to users by the tag chosen in Gitea
-   "Use workflow from". The job downloads the selected release assets, computes
-   SHA-256 and file sizes, adds `downloads`, adds matching `selfUpdate` entries,
-   and deploys `meshapp.json` to the Flatpak server at `${FLATPAK_DEPLOY_PATH}/meshapp.json`,
-   which is publicly available as `https://flatpak.privatepractice.app/meshapp.json`.
-   nginx for `meshapp.privatepractice.app` should reverse-proxy
-   `/meshapp.json` to that Flatpak URL.
-
-The manifest generator is `.gitea/scripts/generate-update-manifest.sh`.
-
-```sh
-.gitea/scripts/generate-update-manifest.sh v2.1.20 build/update/meshapp.json build/jpackage
-```
-
-CI variables and secrets:
-
-- `RELEASE_TOKEN`: required; used to read selected Gitea release assets
-- `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`: required for release builds; bundled into
-  `/update/ed25519-public-key.txt` so the client trusts signed artifacts
-- `MESHAPP_UPDATE_ED25519_PRIVATE_KEY`: required when publishing a manifest with
-  self-update artifacts; signs self-update artifacts
-- `MESHAPP_UPDATE_ASSET_BASE_URL`: optional; overrides generated asset URLs
-- `MESHAPP_VERSION`: optional; overrides manifest `version`
-- `MESHAPP_VERSION_CODE`: optional; overrides manifest `versionCode`
-- `MESHAPP_RELEASE_NOTES`: optional; overrides manifest `releaseNotes`
-- `MESHAPP_RELEASE_NOTES_RU`: optional; fills localized `releaseNotes_ru`
-- `FLATPAK_DEPLOY_HOST`: required by `publish-update-manifest`
-- `FLATPAK_DEPLOY_USER`: required by `publish-update-manifest`
-- `FLATPAK_DEPLOY_PATH`: required by `publish-update-manifest`
-- `FLATPAK_DEPLOY_SSH_KEY`: required by `publish-update-manifest`
-- `FLATPAK_DEPLOY_SSH_PORT`: optional; defaults to `22`
-
-Manual update publication inputs:
-
-- "Use workflow from": required; choose an existing release tag, for example `v2.1.20`
-- `release_notes`: required; exported as `MESHAPP_RELEASE_NOTES` for `meshapp.json`
-- `release_notes_ru`: required; exported as `MESHAPP_RELEASE_NOTES_RU` for `meshapp.json`
-
-The Gitea release body is generated from commit history during the tag release.
-The manual release notes inputs are used only by the update manifest.
-
-If `MESHAPP_UPDATE_ED25519_PRIVATE_KEY` is absent while self-update artifacts are
-present, manifest publication fails. If `MESHAPP_UPDATE_ED25519_PUBLIC_KEY` is
-absent during a release build, package builds fail.
-
-The Ed25519 signature signs this UTF-8 payload:
+Each Ed25519 signature covers these UTF-8 bytes, including the final newline:
 
 ```text
 meshapp-self-update-v1
 {manifest.version}
 {manifest.versionCode}
-{artifact.type or full-archive}
-{artifact.format or zip}
+{artifact.type}
+{artifact.format}
 {artifact.version}
 {artifact.url}
 {artifact.sha256}
 {artifact.size}
 ```
 
-The public key can be supplied through one of:
+`scripts/ci/release.py` generates and verifies signatures before publication.
+The Java client verifies the signature and archive SHA-256 before installation.
+The JSON document is not itself signed; each update entry binds its contents
+to the release version/code.
 
-- JVM property `meshapp.update.ed25519PublicKey`
-- environment variable `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`
-- resource `/update/ed25519-public-key.txt`
-
-For local development only, unsigned artifacts can be enabled with
-`meshapp.update.allowUnsigned=true` or `MESHAPP_UPDATE_ALLOW_UNSIGNED=true`.
+Development overrides: JVM property `meshapp.update.ed25519PublicKey`, environment
+variable `MESHAPP_UPDATE_ED25519_PUBLIC_KEY`, or build property
+`meshappUpdateEd25519PublicKey`. Unsigned development updates require explicit
+`meshapp.update.allowUnsigned` / `MESHAPP_UPDATE_ALLOW_UNSIGNED`. GitHub release
+workflows always require signatures.

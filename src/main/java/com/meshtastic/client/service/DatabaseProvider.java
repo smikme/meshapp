@@ -39,9 +39,10 @@ public final class DatabaseProvider {
     private static final DateTimeFormatter RECOVERY_TIMESTAMP_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault());
     private static final RecoveryExecutor DIRECT_RECOVERY_EXECUTOR =
-            (dbFile, task) -> task.run((step, path) -> {});
+            (_, task) -> task.run((_, _) -> {});
 
     private static Connection connection;
+    private static final java.util.Set<Connection> historyReaders = new java.util.HashSet<>();
     private static RecoveryExecutor recoveryExecutor = DIRECT_RECOVERY_EXECUTOR;
 
     private DatabaseProvider() {}
@@ -167,6 +168,7 @@ public final class DatabaseProvider {
      * prepared statements.
      */
     public static synchronized void close() {
+        closeHistoryReaders();
         if (connection == null) { return; }
         try {
             if (!connection.isClosed()) {
@@ -186,6 +188,7 @@ public final class DatabaseProvider {
      * services must recreate their tables and prepared statements.
      */
     public static synchronized void resetDatabase() throws SQLException {
+        closeHistoryReaders();
         Connection activeConnection = getConnection();
         if (activeConnection == null) {
             throw new SQLException("Database connection is not available");
@@ -201,6 +204,8 @@ public final class DatabaseProvider {
         }
 
         try (Statement stmt = activeConnection.createStatement()) {
+            // The active H2 profile is selected at runtime, not an IDE data source.
+            //noinspection SqlNoDataSourceInspection
             stmt.execute("DROP ALL OBJECTS");
         }
         log.info("All database objects dropped by explicit reset request");
@@ -215,6 +220,40 @@ public final class DatabaseProvider {
 
     private static String resolveDatabaseUrl() throws Exception {
         return "jdbc:h2:" + resolveDatabaseDirectory().resolve(DATABASE_NAME) + ";AUTO_SERVER=FALSE;TRACE_LEVEL_FILE=0";
+    }
+
+    /** Independent, short-lived read handle; never shares prepared statements or transactions with writers. */
+    static synchronized HistoryReadSession openHistoryReadConnection(Connection expectedWriter) throws SQLException {
+        Connection active = connection;
+        if (active == null || active != expectedWriter || active.isClosed()) throw new SQLException("Database is unavailable or has changed");
+        Connection reader = DriverManager.getConnection(active.getMetaData().getURL(), "", "");
+        try {
+            reader.setReadOnly(true);
+            reader.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+            reader.setAutoCommit(false);
+            historyReaders.add(reader);
+            return new HistoryReadSession(reader);
+        } catch (SQLException error) {
+            reader.close();
+            throw error;
+        }
+    }
+
+    record HistoryReadSession(Connection connection) implements AutoCloseable {
+        @Override public void close() throws SQLException {
+            synchronized (DatabaseProvider.class) {
+                historyReaders.remove(connection);
+                connection.close();
+            }
+        }
+    }
+
+    private static void closeHistoryReaders() {
+        for (Connection reader : historyReaders) {
+            try { reader.close(); }
+            catch (SQLException error) { log.debug("Failed to close history reader", error); }
+        }
+        historyReaders.clear();
     }
 
     private static Connection openAndMigrate(Path dbFile) throws Exception {

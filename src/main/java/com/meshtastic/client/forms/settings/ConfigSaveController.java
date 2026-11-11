@@ -17,7 +17,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import javafx.application.Platform;
 import javafx.scene.control.TreeItem;
@@ -292,8 +291,11 @@ public final class ConfigSaveController {
             case DETECTION_SENSOR ->
                 MeshProtos.ExcludedModules.DETECTIONSENSOR_CONFIG_VALUE;
             case PAXCOUNTER -> MeshProtos.ExcludedModules.PAXCOUNTER_CONFIG_VALUE;
-            case STATUSMESSAGE, TRAFFIC_MANAGEMENT, TAK, MESH_BEACON,
-                 PAYLOADVARIANT_NOT_SET -> 0;
+            case STATUSMESSAGE -> MeshProtos.ExcludedModules.STATUSMESSAGE_CONFIG_VALUE;
+            case TRAFFIC_MANAGEMENT -> MeshProtos.ExcludedModules.TRAFFICMANAGEMENT_CONFIG_VALUE;
+            case TAK -> MeshProtos.ExcludedModules.TAK_CONFIG_VALUE;
+            case MESH_BEACON -> MeshProtos.ExcludedModules.MESHBEACON_CONFIG_VALUE;
+            case PAYLOADVARIANT_NOT_SET -> 0;
         };
     }
 
@@ -452,8 +454,6 @@ public final class ConfigSaveController {
             changes.configs(),
             changes.moduleConfigs(),
             changes.channels(),
-            changes.ownerModified(),
-            changes.positionModified(),
             changes.requiresReconnect()
         );
         AtomicBoolean saveFailed = new AtomicBoolean(false);
@@ -481,7 +481,7 @@ public final class ConfigSaveController {
                     );
                 }
             } catch (InterruptedException e) {
-                handleInterruptedSave(request, e);
+                handleInterruptedSave(request);
             } catch (Exception e) {
                 handleDisconnectFailure(request, e);
             }
@@ -718,8 +718,7 @@ public final class ConfigSaveController {
     }
 
     private void handleInterruptedSave(
-        SaveRequest request,
-        InterruptedException error
+        SaveRequest request
     ) {
         Thread.currentThread().interrupt();
         log.warn("Config save thread interrupted");
@@ -740,12 +739,9 @@ public final class ConfigSaveController {
         List<ConfigProtos.Config> configs,
         List<ModuleConfigProtos.ModuleConfig> moduleConfigs,
         List<ChannelProtos.Channel> channels,
-        boolean ownerModified,
-        boolean positionModified,
         boolean requiresReconnect
     ) {
-        List<Runnable> tasks = new ArrayList<>();
-        tasks.addAll(
+        List<Runnable> tasks = new ArrayList<>(
             channels
                 .stream()
                 .map(channel ->
@@ -785,24 +781,24 @@ public final class ConfigSaveController {
             tasks.addAll(
                 Stream
                     .concat(
-                        IntStream
-                            .range(0, configs.size())
-                            .mapToObj(index ->
+                        configs
+                            .stream()
+                            .map(config ->
                                 configSaveTask(
                                     activeTransport,
                                     actionHandler,
                                     actionState,
-                                    configs.get(index)
+                                    config
                                 )
                             ),
-                        IntStream
-                            .range(0, moduleConfigs.size())
-                            .mapToObj(index ->
+                        moduleConfigs
+                            .stream()
+                            .map(config ->
                                 moduleConfigSaveTask(
                                     activeTransport,
                                     actionHandler,
                                     actionState,
-                                    moduleConfigs.get(index)
+                                    config
                                 )
                             )
                     )

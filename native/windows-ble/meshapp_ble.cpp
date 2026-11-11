@@ -1118,6 +1118,16 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
         return run_on_worker([copy]() -> int {
             if (!g_connected || !g_ble || g_ble->to_radio == nullptr) return -1;
             try {
+                if (active_profile() == PROFILE_MESHCORE && g_ble->service != nullptr) {
+                    auto session = g_ble->service.Session();
+                    if (session != nullptr) {
+                        auto mtu = session.MaxPduSize();
+                        if (mtu > 3 && copy.size() > static_cast<size_t>(mtu - 3)) {
+                            log_msg("[meshble] Companion frame exceeds negotiated ATT payload (%u)", mtu - 3);
+                            return -1;
+                        }
+                    }
+                }
                 auto buf = bytes_to_buffer(copy.data(), (int)copy.size());
                 int opt = g_write_option.load();
 

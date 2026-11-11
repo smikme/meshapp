@@ -108,21 +108,25 @@ public class TcpConnection implements MeshtasticConnection, FrameFormatAwareConn
     }
 
     @Override
-    public synchronized void sendBytes(byte[] data) {
-        if (!isConnected()) {
-            log.warn("Cannot send: not connected");
-            return;
-        }
+    public synchronized void sendBytes(byte[] data) { sendBytes(data, true); }
+
+    @Override
+    public synchronized void sendBytes(byte[] data, boolean expectResponse) {
+        sendBytesAsync(data, expectResponse);
+    }
+
+    @Override
+    public synchronized java.util.concurrent.CompletableFuture<Void> sendBytesAsync(byte[] data, boolean expectResponse) {
+        if (!isConnected()) return java.util.concurrent.CompletableFuture.failedFuture(
+                new IllegalStateException("Transport disconnected"));
         try {
             outputStream.write(data);
             outputStream.flush();
-            log.trace("Sent {} bytes to TCP {}:{}", data.length, host, port);
-        } catch (IOException e) {
-            log.error("Write failed to {}:{}", host, port, e);
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        } catch (Exception e) {
             ConnectionListener listener = connectionListener;
-            if (listener != null) {
-                listener.onConnectionError("Write failed: " + e.getMessage(), e);
-            }
+            if (listener != null) listener.onConnectionError("Write failed: " + e.getMessage(), e);
+            return java.util.concurrent.CompletableFuture.failedFuture(e);
         }
     }
 

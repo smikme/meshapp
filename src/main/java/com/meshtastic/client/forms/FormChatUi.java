@@ -10,13 +10,15 @@ import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
-import com.meshtastic.client.components.chat.MeshFilesImage;
+import com.meshtastic.client.components.chat.ChatImage;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
+import com.meshtastic.client.components.chat.VirtualMessagePane;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.lua.LuaScript;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.ChatItem;
+import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MessageChangeEvent;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
@@ -40,6 +42,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
@@ -110,9 +113,9 @@ abstract class FormChatUi extends FormChatBase {
     private StackPane chatListWrapper;
     private SplitPane.Divider observedChatDivider;
     private Window observedWindow;
-    private final ChangeListener<Number> sceneWidthListener = (obs, oldWidth, newWidth) -> handleResponsiveWidthChanged();
-    private final ChangeListener<Number> windowWidthListener = (obs, oldWidth, newWidth) -> handleResponsiveWidthChanged();
-    private final ChangeListener<Window> sceneWindowListener = (obs, oldWindow, newWindow) -> {
+    private final ChangeListener<Number> sceneWidthListener = (_, _, _) -> handleResponsiveWidthChanged();
+    private final ChangeListener<Number> windowWidthListener = (_, _, _) -> handleResponsiveWidthChanged();
+    private final ChangeListener<Window> sceneWindowListener = (_, _, newWindow) -> {
         detachObservedWindow();
         attachObservedWindow(newWindow);
         Platform.runLater(this::updateResponsiveChatLayout);
@@ -125,10 +128,10 @@ abstract class FormChatUi extends FormChatBase {
     private boolean userDraggingChatDivider;
     private Button chatListToggleButton;
     private Region headerSpacer;
-    private Button quickScriptButton;
     private ContextMenu quickScriptMenu;
     private FormChatMessageSearchController messageSearchController;
     private StackPane imageViewerOverlay;
+    private Runnable imageViewerCleanup;
 
     /**
      * Creates the split layout and reusable controls for the active chat.
@@ -148,8 +151,8 @@ abstract class FormChatUi extends FormChatBase {
         getChildren().add(chatSplitPane);
         chatSplitPane.prefWidthProperty().bind(widthProperty());
         chatSplitPane.prefHeightProperty().bind(heightProperty());
-        widthProperty().addListener((obs, oldWidth, newWidth) -> handleResponsiveWidthChanged());
-        sceneProperty().addListener((obs, oldScene, newScene) -> {
+        widthProperty().addListener((_, _, _) -> handleResponsiveWidthChanged());
+        sceneProperty().addListener((_, oldScene, newScene) -> {
             if (oldScene != null) {
                 oldScene.widthProperty().removeListener(sceneWidthListener);
                 oldScene.windowProperty().removeListener(sceneWindowListener);
@@ -212,7 +215,7 @@ abstract class FormChatUi extends FormChatBase {
         Button button = new Button("✎");
         button.getStyleClass().add("chat-new-btn");
         button.setTooltip(new Tooltip(I18n.t("chat.new.tooltip")));
-        button.setOnAction(event -> showNewChatDialog());
+        button.setOnAction(_ -> showNewChatDialog());
         return button;
     }
 
@@ -225,8 +228,8 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void configureChatFilter(TextField searchField) {
-        filteredChats = new FilteredList<>(chatItems, chat -> true);
-        searchField.textProperty().addListener((obs, oldVal, newVal) ->
+        filteredChats = new FilteredList<>(chatItems, _ -> true);
+        searchField.textProperty().addListener((_, _, newVal) ->
                 filteredChats.setPredicate(chat -> chatMatchesSearch(chat, newVal)));
     }
 
@@ -250,13 +253,13 @@ abstract class FormChatUi extends FormChatBase {
         FormChatUiSupport.applyWindowsHitTestBackground(listView);
         configureChatListCellFactory(listView, false);
         listView.getSelectionModel().selectedItemProperty().addListener(
-                (obs, oldItem, newItem) -> handleChatSelection(newItem));
+                (_, _, newItem) -> handleChatSelection(newItem));
 
         return listView;
     }
 
     private void configureChatListCellFactory(ListView<ChatItem> listView, boolean compact) {
-        listView.setCellFactory(view -> new ChatListCell(
+        listView.setCellFactory(_ -> new ChatListCell(
                 this::deleteChat,
                 this::showChannelProperties,
                 this::toggleChatMute,
@@ -317,7 +320,7 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
         observedChatDivider = divider;
-        divider.positionProperty().addListener((obs, oldVal, newVal) -> {
+        divider.positionProperty().addListener((_, _, _) -> {
             if (!applyingResponsiveLayout
                     && userDraggingChatDivider
                     && currentChatListLayoutMode() == ChatListLayoutMode.SAVED_SPLIT) {
@@ -338,12 +341,12 @@ abstract class FormChatUi extends FormChatBase {
                 userDraggingChatDivider = true;
             }
         });
-        chatSplitPane.addEventFilter(MouseEvent.MOUSE_DRAGGED, event -> {
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_DRAGGED, _ -> {
             if (userDraggingChatDivider) {
                 saveUserChatListWidth();
             }
         });
-        chatSplitPane.addEventFilter(MouseEvent.MOUSE_RELEASED, event -> {
+        chatSplitPane.addEventFilter(MouseEvent.MOUSE_RELEASED, _ -> {
             if (userDraggingChatDivider) {
                 saveUserChatListWidth();
                 userDraggingChatDivider = false;
@@ -516,9 +519,7 @@ abstract class FormChatUi extends FormChatBase {
                         chatSplitPane.setDividerPositions(dividerPositionForListWidth(CHAT_LIST_EXPANDED_WIDTH, formWidth));
                 case SAVED_SPLIT ->
                         chatSplitPane.setDividerPositions(savedChatDividerPosition(formWidth));
-                case HIDDEN -> {
-                    return;
-                }
+                case HIDDEN -> { }
             }
         } finally {
             applyingResponsiveLayout = false;
@@ -574,12 +575,11 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private double clampChatListWidth(double listWidth, double formWidth) {
-        double fallback = CHAT_LIST_EXPANDED_WIDTH;
-        double width = Double.isFinite(listWidth) && listWidth > 0 ? listWidth : fallback;
+        double width = Double.isFinite(listWidth) && listWidth > 0 ? listWidth : CHAT_LIST_EXPANDED_WIDTH;
         double maxListWidth = formWidth > 0
                 ? Math.max(CHAT_LIST_EXPANDED_WIDTH, formWidth - CHAT_DETAIL_MIN_WIDTH)
                 : Double.MAX_VALUE;
-        return Math.max(CHAT_LIST_EXPANDED_WIDTH, Math.min(width, maxListWidth));
+        return Math.clamp(width, CHAT_LIST_EXPANDED_WIDTH, maxListWidth);
     }
 
     private double savedChatDividerPosition(double formWidth) {
@@ -608,6 +608,17 @@ abstract class FormChatUi extends FormChatBase {
         bubbleFactory.setTracerouteView(tracerouteView);
 
         messageScrollPane = createMessageScrollPane();
+        messageContainer.configure(messageScrollPane, (message, row) -> {
+            var rendered = bubbleFactory.buildRendered(message, row);
+            applyMessageSearchHighlight(rendered.row(), message.getDbId());
+            loadedMessageRows.put(message.getDbId(), rendered.row());
+            loadedRenderedMessageRows.put(message.getDbId(), rendered);
+            return rendered;
+        }, rendered -> {
+            loadedMessageRows.values().removeIf(row -> row == rendered.row());
+            loadedRenderedMessageRows.values().removeIf(row -> row == rendered);
+            bubbleFactory.disposeRendered(rendered);
+        });
         messageArea = new StackPane(messageScrollPane, scrollDownWrapper);
         registerMessageScrollListeners();
         chatInputBar = createChatInputBar();
@@ -643,7 +654,7 @@ abstract class FormChatUi extends FormChatBase {
                 "/icons/menu.svg",
                 I18n.t("chat.list.show"),
                 "☰");
-        chatListToggleButton.setOnAction(event -> {
+        chatListToggleButton.setOnAction(_ -> {
             narrowListForcedVisible = true;
             updateResponsiveChatLayout();
         });
@@ -663,7 +674,7 @@ abstract class FormChatUi extends FormChatBase {
         headerNameLabel.getStyleClass().add("chat-header-name");
 
         headerSpacer = new Region();
-        quickScriptButton = createQuickScriptButton();
+        Button quickScriptButton = createQuickScriptButton();
         messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
@@ -701,7 +712,7 @@ abstract class FormChatUi extends FormChatBase {
                 "/icons/autoplay.svg",
                 I18n.t("chat.quickBots.tooltip"),
                 "▶");
-        button.setOnAction(event -> toggleQuickScriptMenu(button));
+        button.setOnAction(_ -> toggleQuickScriptMenu(button));
         return button;
     }
 
@@ -711,8 +722,8 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
         quickScriptMenu = buildQuickScriptMenu();
-        quickScriptMenu.setOnShowing(event -> anchor.getStyleClass().add("chat-header-icon-btn-active"));
-        quickScriptMenu.setOnHidden(event -> anchor.getStyleClass().remove("chat-header-icon-btn-active"));
+        quickScriptMenu.setOnShowing(_ -> anchor.getStyleClass().add("chat-header-icon-btn-active"));
+        quickScriptMenu.setOnHidden(_ -> anchor.getStyleClass().remove("chat-header-icon-btn-active"));
         quickScriptMenu.show(anchor, javafx.geometry.Side.BOTTOM, 0, 4);
     }
 
@@ -730,6 +741,8 @@ abstract class FormChatUi extends FormChatBase {
         return menu;
     }
 
+    // The data-source factory owns this shared source.
+    @SuppressWarnings("resource")
     private List<LuaScript> quickLaunchScripts() {
         try {
             return luaScripts().listScripts().stream()
@@ -750,7 +763,7 @@ abstract class FormChatUi extends FormChatBase {
         String handle = script.getAutomationName().trim();
         MenuItem item = new MenuItem(UnicodeTextUtils.sanitizeForJavaFxDisplay(
                 scriptIcon(script) + "  " + name + "  " + handle));
-        item.setOnAction(event -> launchQuickScript(script));
+        item.setOnAction(_ -> launchQuickScript(script));
         return item;
     }
 
@@ -774,12 +787,8 @@ abstract class FormChatUi extends FormChatBase {
         return hasText(script.getIcon()) ? script.getIcon().trim() : LuaScript.DEFAULT_ICON;
     }
 
-    private VBox createMessageContainer() {
-        VBox container = new VBox(6);
-        container.setPadding(new Insets(10, 15, 10, 15));
-        container.getStyleClass().add("chat-message-container");
-        container.setAlignment(Pos.BOTTOM_LEFT);
-        return container;
+    private VirtualMessagePane createMessageContainer() {
+        return new VirtualMessagePane();
     }
 
     private TracerouteView createTracerouteView() {
@@ -811,15 +820,21 @@ abstract class FormChatUi extends FormChatBase {
                         return FormChatUi.this.isMessageSelectionModeActive();
                     }
                     @Override public boolean retryMessage(MeshMessage msg) { return FormChatUi.this.retryMessage(msg); }
-                    @Override public void openMeshFilesImage(MeshFilesImage image) {
-                        FormChatUi.this.showMeshFilesImage(image);
+                    @Override public void openChatImage(ChatImage image) {
+                        FormChatUi.this.showChatImage(image);
                     }
                 },
-                pendingStatusLabels);
+                pendingStatusLabels, this::loadPreviewImage);
         factory.setRemoteNodeDetailsProvider(this::resolveRemoteNodeForDetails, this::remoteNodeActionDelegate);
         return factory;
     }
 
+    protected Image loadPreviewImage(String url) {
+        return new Image(url, true);
+    }
+
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private CompletableFuture<NodeData> resolveRemoteNodeForDetails(String nodeId) {
         RemoteRpcState rpcState = remoteRpcState;
         if (rpcState == null || nodeId == null || nodeId.isBlank()) {
@@ -858,6 +873,8 @@ abstract class FormChatUi extends FormChatBase {
             }
 
             @Override
+            // The connection manager owns the shared RPC client.
+            @SuppressWarnings("resource")
             public boolean canTraceroute(NodeData node) {
                 return rpcState != null
                         && rpcState.client() != null
@@ -872,6 +889,8 @@ abstract class FormChatUi extends FormChatBase {
             }
 
             @Override
+            // The connection manager owns the shared RPC client.
+            @SuppressWarnings("resource")
             public boolean canRemoteAdmin(NodeData node) {
                 return rpcState != null
                         && rpcState.client() != null
@@ -894,7 +913,7 @@ abstract class FormChatUi extends FormChatBase {
 
             @Override
             public void deleteNode(NodeData node) {
-                callRemoteNodeAction(rpcState, "node.delete", RemoteNodeJson.nodeParams(node), result -> {
+                callRemoteNodeAction(rpcState, "node.delete", RemoteNodeJson.nodeParams(node), _ -> {
                     if (node != null && node.getNodeId() != null) {
                         remoteNodeFavoriteFlags.remove(node.getNodeId());
                         remoteNodeIgnoredFlags.remove(node.getNodeId());
@@ -905,7 +924,7 @@ abstract class FormChatUi extends FormChatBase {
 
             @Override
             public void setFavorite(NodeData node, boolean favorite, Consumer<Boolean> callback) {
-                callRemoteNodeAction(rpcState, "node.favorite", RemoteNodeJson.flagParams(node, favorite), result -> {
+                callRemoteNodeAction(rpcState, "node.favorite", RemoteNodeJson.flagParams(node, favorite), _ -> {
                     updateRemoteNodeFlagMap("node.favorite", node != null ? node.getNodeId() : null, favorite);
                     Optional.ofNullable(callback).ifPresent(cb -> cb.accept(favorite));
                     reloadChatList();
@@ -914,7 +933,7 @@ abstract class FormChatUi extends FormChatBase {
 
             @Override
             public void setIgnored(NodeData node, boolean ignored, Consumer<Boolean> callback) {
-                callRemoteNodeAction(rpcState, "node.ignored", RemoteNodeJson.flagParams(node, ignored), result -> {
+                callRemoteNodeAction(rpcState, "node.ignored", RemoteNodeJson.flagParams(node, ignored), _ -> {
                     updateRemoteNodeFlagMap("node.ignored", node != null ? node.getNodeId() : null, ignored);
                     Optional.ofNullable(callback).ifPresent(cb -> cb.accept(ignored));
                     reloadChatList();
@@ -928,6 +947,8 @@ abstract class FormChatUi extends FormChatBase {
         };
     }
 
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private void callRemoteNodeAction(RemoteRpcState rpcState,
                                       String method,
                                       JsonObject params,
@@ -980,12 +1001,13 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private StackPane scrollDownWrapper;
+    private boolean scrollIndicatorRefreshQueued;
 
     private void createScrollDownWrapper() {
         scrollDownBtn = new Button("↓");
         scrollDownBtn.getStyleClass().add("chat-scroll-down-btn");
         scrollDownBtn.setVisible(false);
-        scrollDownBtn.setOnAction(event -> handleScrollDown());
+        scrollDownBtn.setOnAction(_ -> handleScrollDown());
 
         scrollDownBadge = new Label();
         scrollDownBadge.getStyleClass().add("chat-scroll-down-badge");
@@ -1012,14 +1034,24 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private void registerMessageScrollListeners() {
-        messageScrollPane.vvalueProperty().addListener((obs, oldVal, newVal) ->
+        messageScrollPane.vvalueProperty().addListener((_, _, newVal) ->
                 handleMessageScroll(newVal.doubleValue()));
-        messageContainer.heightProperty().addListener((obs, oldH, newH) ->
-                keepLiveTailPinnedAfterResize());
+        messageContainer.heightProperty().addListener((_, _, _) -> {
+            keepLiveTailPinnedAfterResize();
+            refreshScrollIndicatorAfterLayout();
+        });
+        messageScrollPane.viewportBoundsProperty().addListener((_, _, _) ->
+                refreshScrollIndicatorAfterLayout());
     }
 
     private void handleMessageScroll(double vvalue) {
         if (!formVisible || isScrollStateSyncSuspended()) {
+            return;
+        }
+        if (messageContainer.isAdjustingViewport()) {
+            // Virtual layout changes vvalue while applying its pixel anchor.
+            // Refresh controls after that layout, without treating it as user input.
+            refreshScrollIndicatorAfterLayout();
             return;
         }
         loadAdjacentPagesIfNeeded(vvalue);
@@ -1029,13 +1061,20 @@ abstract class FormChatUi extends FormChatBase {
         saveScrollStateAfterUserScroll();
     }
 
+    private void refreshScrollIndicatorAfterLayout() {
+        if (!formVisible || scrollIndicatorRefreshQueued) return;
+        scrollIndicatorRefreshQueued = true;
+        Platform.runLater(() -> {
+            scrollIndicatorRefreshQueued = false;
+            if (!formVisible || isScrollStateSyncSuspended()) return;
+            // Read the current chat and geometry; a queued refresh may outlive a switch.
+            refreshUnreadTailIndicator();
+            if (!loadedMessages.isEmpty()) markSelectedChatReadWhenViewingTail();
+        });
+    }
+
     private void loadAdjacentPagesIfNeeded(double vvalue) {
-        if (vvalue < PAGE_LOAD_EDGE_THRESHOLD && !allHistoryLoaded && !loadingOlderMessages) {
-            loadOlderMessages();
-        }
-        if (vvalue > 1.0 - PAGE_LOAD_EDGE_THRESHOLD && !allNewerHistoryLoaded && !loadingNewerMessages) {
-            loadNewerMessages();
-        }
+        prefetchAdjacentHistory(vvalue);
     }
 
     private void refreshTailState(boolean atBottom) {
@@ -1052,8 +1091,8 @@ abstract class FormChatUi extends FormChatBase {
 
     private void markSelectedChatReadWhenViewingTail() {
         Optional.ofNullable(selectedChat)
-                .filter(chat -> formVisible)
-                .filter(chat -> isAtLiveTail())
+                .filter(_ -> formVisible)
+                .filter(_ -> isAtLiveTail())
                 .filter(chat -> getUnreadCount(chat) > 0)
                 .ifPresent(this::markAsRead);
     }
@@ -1072,7 +1111,10 @@ abstract class FormChatUi extends FormChatBase {
         long generation = scrollOperationGeneration;
         Platform.runLater(() -> {
             if (isCurrentScrollOperation(generation) && !isScrollStateSyncSuspended() && isAtLiveTail()) {
-                messageScrollPane.setVvalue(1.0);
+                // Keep the virtual viewport's pending bottom anchor. Setting
+                // vvalue before the new page is laid out looks like user input
+                // and can replace that anchor with the old empty geometry.
+                scrollToBottom();
             }
         });
     }
@@ -1116,19 +1158,14 @@ abstract class FormChatUi extends FormChatBase {
         }
     }
 
-    protected void closeMessageSearch(boolean focusInput) {
+    protected void closeMessageSearch() {
         Optional.ofNullable(messageSearchController)
-                .ifPresent(controller -> controller.close(focusInput));
+                .ifPresent(controller -> controller.close(false));
     }
 
-    protected void refreshMessageSearchResults(boolean jumpToLatest) {
+    protected void refreshMessageSearchResults() {
         Optional.ofNullable(messageSearchController)
-                .ifPresent(controller -> controller.refreshResults(jumpToLatest));
-    }
-
-    protected void refreshMessageSearchHighlight() {
-        Optional.ofNullable(messageSearchController)
-                .ifPresent(FormChatMessageSearchController::refreshHighlight);
+                .ifPresent(controller -> controller.refreshResults(false));
     }
 
     protected void applyMessageSearchHighlight(HBox row, long dbId) {
@@ -1137,55 +1174,94 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     private ChatInputBar createChatInputBar() {
-        return new ChatInputBar(
+        ChatInputBar input = new ChatInputBar(
                 this::sendChatMessage,
                 this::handleBotCommand,
                 this::suggestBotCommands,
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8),
-                this::showMeshFilesImage
+                this::showChatImage
         );
+        input.setProtocolTextLimit(() -> meshCoreCompanionRuntime == null ? -1 : meshCoreCompanionRuntime.maxTextBytes(
+                selectedChat != null && selectedChat.getType() == ChatItem.ChatType.DIRECT_MESSAGE));
+        input.setAuthenticationOverheadSupplier(() ->
+                meshCoreCompanionRuntime == null && selectedChat != null
+                        && selectedChat.getType() == ChatItem.ChatType.CHANNEL
+                        ? com.meshtastic.client.utils.MeshtasticPayloadLimits.channelAuthenticationOverhead(
+                                state, selectedChat.getChannelIndex()) : 0);
+        return input;
     }
 
     /**
-     * Shows a full-size MeshFiles image overlay scaled to the chat message area.
+     * Shows a full-size chat image overlay scaled to the chat message area.
      *
-     * @param image normalized MeshFiles image URLs
+     * @param image normalized chat image URLs
      */
-    private void showMeshFilesImage(MeshFilesImage image) {
+    private void showChatImage(ChatImage image) {
+        showChatImage(image, url -> new Image(url, true));
+    }
+
+    void showChatImage(ChatImage image, java.util.function.Function<String, Image> imageLoader) {
         if (image == null || messageArea == null) {
             return;
         }
 
-        hideMeshFilesImage();
+        hideChatImage();
 
-        ImageView imageView = new ImageView(new Image(image.url(), true));
+        Image fullImage = imageLoader.apply(image.fullUrl());
+        ImageView imageView = new ImageView(fullImage);
         imageView.getStyleClass().add("chat-image-viewer-image");
         imageView.setPreserveRatio(true);
         imageView.setSmooth(true);
         imageView.fitWidthProperty().bind(messageArea.widthProperty().subtract(48));
         imageView.fitHeightProperty().bind(messageArea.heightProperty().subtract(48));
 
-        StackPane imageFrame = new StackPane(imageView);
+        Label imageStatus = new Label(I18n.t("chat.image.loading"));
+        Hyperlink publicLink = new Hyperlink(image.shareUrl());
+        publicLink.setOnAction(_ -> com.meshtastic.client.utils.ExternalUrlLauncher.open(image.shareUrl()));
+        VBox fallback = new VBox(8, imageStatus, publicLink);
+        fallback.setAlignment(Pos.CENTER);
+        Runnable updateStatus = () -> {
+            boolean failed = fullImage.isError() || image.isExpired();
+            boolean ready = fullImage.getProgress() >= 1 && !failed;
+            fallback.setVisible(!ready);
+            fallback.setManaged(!ready);
+            imageView.setVisible(ready);
+            imageStatus.setText(I18n.t(failed ? "chat.image.previewFailed" : "chat.image.loading"));
+        };
+        ChangeListener<Number> progress = (_, _, _) -> updateStatus.run();
+        ChangeListener<Boolean> failure = (_, _, _) -> updateStatus.run();
+        fullImage.progressProperty().addListener(progress);
+        fullImage.errorProperty().addListener(failure);
+        updateStatus.run();
+        imageViewerCleanup = () -> {
+            fullImage.cancel();
+            fullImage.progressProperty().removeListener(progress);
+            fullImage.errorProperty().removeListener(failure);
+            imageView.fitWidthProperty().unbind();
+            imageView.fitHeightProperty().unbind();
+            imageView.setImage(null);
+        };
+        StackPane imageFrame = new StackPane(imageView, fallback);
         imageFrame.getStyleClass().add("chat-image-viewer-frame");
-        imageFrame.setOnMouseClicked(event -> event.consume());
+        imageFrame.setOnMouseClicked(javafx.event.Event::consume);
 
         Button closeButton = new Button("✕");
         closeButton.getStyleClass().add("chat-image-viewer-close");
         closeButton.setTooltip(new Tooltip(I18n.t("common.close")));
-        closeButton.setOnAction(event -> hideMeshFilesImage());
+        closeButton.setOnAction(_ -> hideChatImage());
 
         StackPane overlay = new StackPane(imageFrame, closeButton);
         overlay.getStyleClass().add("chat-image-viewer-overlay");
         overlay.setFocusTraversable(true);
         overlay.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.PRIMARY) {
-                hideMeshFilesImage();
+                hideChatImage();
             }
             event.consume();
         });
         overlay.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ESCAPE) {
-                hideMeshFilesImage();
+                hideChatImage();
                 event.consume();
             }
         });
@@ -1198,9 +1274,13 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     /**
-     * Closes the active MeshFiles image overlay, if any.
+     * Closes the active chat image overlay, if any.
      */
-    private void hideMeshFilesImage() {
+    private void hideChatImage() {
+        if (imageViewerCleanup != null) {
+            imageViewerCleanup.run();
+            imageViewerCleanup = null;
+        }
         if (imageViewerOverlay == null) {
             return;
         }
@@ -1214,6 +1294,8 @@ abstract class FormChatUi extends FormChatBase {
         return ChatBotCommandHelper.suggestBots(query, automationBotDefinitions());
     }
 
+    // The data-source factory owns this shared source.
+    @SuppressWarnings("resource")
     private List<ChatBotCommandHelper.BotDefinition> automationBotDefinitions() {
         try {
             return luaScripts().listScripts().stream()
@@ -1255,15 +1337,24 @@ abstract class FormChatUi extends FormChatBase {
             return;
         }
 
-        boolean sent = switch (selectedChat.getType()) {
+        boolean sent;
+        try { sent = switch (selectedChat.getType()) {
             case CHANNEL -> sendChannelMessage(request);
             case DIRECT_MESSAGE -> sendDirectMessage(request);
-        };
+        }; } catch (RuntimeException error) {
+            Toast.show(Toast.Type.ERROR, com.meshtastic.client.components.chat.MeshCoreChannelDialog.message(error));
+            throw error; // ChatInputBar keeps the draft when the send callback fails.
+        }
         if (sent) {
             refreshCurrentChatAfterLocalSend();
+        } else if(meshCoreCompanionRuntime!=null) {
+            Toast.show(Toast.Type.ERROR,I18n.t("meshcore.sendRejected"));
+            throw new IllegalStateException(I18n.t("meshcore.sendRejected"));
         }
     }
 
+    // The connection manager owns the shared RPC client.
+    @SuppressWarnings("resource")
     private void sendRemoteChatMessage(ChatInputBar.SendRequest request) {
         if (selectedChat == null || remoteRpcState == null || request == null) {
             return;
@@ -1397,12 +1488,13 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     protected void openChat(ChatItem chat) {
+        chatRequestGeneration++;
+        beginScrollOperation();
         suspendScrollStateSync();
         try {
-            closeMessageSearch(false);
-            hideMeshFilesImage();
+            closeMessageSearch();
+            hideChatImage();
             bubbleFactory.hideOpenReactionPopup();
-            scrollOperationGeneration++;
             this.selectedChat = chat;
             rememberSelectedChatForBoundConnection();
 
@@ -1417,10 +1509,13 @@ abstract class FormChatUi extends FormChatBase {
 
             // Show header, messages, and input controls.
             applyChatDetailGrowthConstraints();
-            detailPane.getChildren().clear();
-            detailPane.getChildren().addAll(
-                    chatHeader, headerSep, messageSelectionBar, messageArea,
-                    chatInputBar.getInputSeparator(), chatInputBar);
+            if (!detailPane.getChildren().contains(messageArea)) {
+                // These controls are shared across chats. Detaching them from
+                // the scene invalidates CSS for the entire input/viewport tree.
+                detailPane.getChildren().setAll(
+                        chatHeader, headerSep, messageSelectionBar, messageArea,
+                        chatInputBar.getInputSeparator(), chatInputBar);
+            }
 
             // Leaving a chat also leaves reply mode.
             chatInputBar.cancelPendingImageUpload();
@@ -1428,9 +1523,6 @@ abstract class FormChatUi extends FormChatBase {
 
             // Load the latest messages from the database.
             loadInitialMessages(true);
-            // Restore pending request bubbles such as traceroute and node info.
-            restorePendingCountdowns();
-
             updateInputEnabled();
             updateResponsiveChatLayout();
             chatInputBar.focusInput();
@@ -1442,12 +1534,12 @@ abstract class FormChatUi extends FormChatBase {
     protected void handleChatFontSizeChanged() {
         applyChatTypography();
         Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
-        Optional.ofNullable(selectedChat).ifPresent(chat -> refreshLoadedMessageRows(true));
+        Optional.ofNullable(selectedChat).ifPresent(_ -> refreshLoadedMessageRows(true));
     }
 
     protected void applyChatTypography() {
         setStyle("-fx-font-size: " + TypographyManager.getChatFontSize() + "px;");
-        Optional.ofNullable(getScene()).ifPresent(scene -> {
+        Optional.ofNullable(getScene()).ifPresent(_ -> {
             applyCss();
             requestLayout();
         });
@@ -1455,11 +1547,13 @@ abstract class FormChatUi extends FormChatBase {
 
     protected void closeChat() {
         saveCurrentChatScrollState();
-        closeMessageSearch(false);
-        hideMeshFilesImage();
+        cancelHistoryLoading();
+        closeMessageSearch();
+        hideChatImage();
         chatInputBar.cancelPendingImageUpload();
         bubbleFactory.hideOpenReactionPopup();
-        scrollOperationGeneration++;
+        chatRequestGeneration++;
+        beginScrollOperation();
         this.selectedChat = null;
         clearLoadedMessageState();
         detailPane.getChildren().clear();
@@ -1486,13 +1580,13 @@ abstract class FormChatUi extends FormChatBase {
                 I18n.t("chat.selection.delete"),
                 "×");
         deleteSelectedMessagesBtn.getStyleClass().add("chat-message-selection-delete-btn");
-        deleteSelectedMessagesBtn.setOnAction(event -> deleteSelectedMessagesWithConfirmation());
+        deleteSelectedMessagesBtn.setOnAction(_ -> deleteSelectedMessagesWithConfirmation());
 
         clearSelectedMessagesBtn = FormChatUiSupport.createHeaderIconButton(
                 "/icons/close.svg",
                 I18n.t("chat.selection.clear"),
                 "×");
-        clearSelectedMessagesBtn.setOnAction(event -> clearSelectedMessages());
+        clearSelectedMessagesBtn.setOnAction(_ -> clearSelectedMessages());
 
         HBox bar = new HBox(8, messageSelectionLabel, deleteSelectedMessagesBtn, clearSelectedMessagesBtn);
         bar.setAlignment(Pos.CENTER_LEFT);
@@ -1547,7 +1641,7 @@ abstract class FormChatUi extends FormChatBase {
             return AppPreferences.remoteChatOwnerId(boundConnectionId);
         }
         return Optional.ofNullable(state)
-                .map(deviceState -> deviceState.getOwnerNodeId())
+                .map(DeviceState::getOwnerNodeId)
                 .orElse("");
     }
 }

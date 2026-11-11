@@ -34,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
+// H2 schemas are created/migrated at runtime and verified by integration tests.
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 public final class NodeCacheService {
 
     private static final Logger log = LoggerFactory.getLogger(NodeCacheService.class);
@@ -158,10 +160,79 @@ public final class NodeCacheService {
             "rx_snr",
             "rx_rssi",
             "hop_start",
-            "hop_limit"
+            "hop_limit",
+            "adc_voltage_ch0",
+            "adc_voltage_ch1",
+            "adc_voltage_ch2",
+            "adc_voltage_ch3",
+            "adc_voltage_ch4",
+            "adc_voltage_ch5",
+            "adc_voltage_ch6",
+            "adc_voltage_ch7",
+            "one_wire_temperature_ch0",
+            "one_wire_temperature_ch1",
+            "one_wire_temperature_ch2",
+            "one_wire_temperature_ch3",
+            "one_wire_temperature_ch4",
+            "one_wire_temperature_ch5",
+            "one_wire_temperature_ch6",
+            "one_wire_temperature_ch7",
+            "lightning_strike_count_1h",
+            "lightning_distance_km",
+            "pm_status_flags",
+            "soil_ph",
+            "ph",
+            "electrical_conductivity",
+            "salinity",
+            "nitrogen",
+            "phosphorus",
+            "potassium",
+            "dissolved_oxygen",
+            "orp",
+            "chemical_oxygen_demand",
+            "turbidity",
+            "nitrate",
+            "ammonium",
+            "biochemical_oxygen_demand",
+            "solar_irradiance"
     };
 
     private static final String[][] EXTENDED_TELEMETRY_COLUMNS = {
+            {"adc_voltage_ch0", "adc_voltage_ch0 REAL"},
+            {"adc_voltage_ch1", "adc_voltage_ch1 REAL"},
+            {"adc_voltage_ch2", "adc_voltage_ch2 REAL"},
+            {"adc_voltage_ch3", "adc_voltage_ch3 REAL"},
+            {"adc_voltage_ch4", "adc_voltage_ch4 REAL"},
+            {"adc_voltage_ch5", "adc_voltage_ch5 REAL"},
+            {"adc_voltage_ch6", "adc_voltage_ch6 REAL"},
+            {"adc_voltage_ch7", "adc_voltage_ch7 REAL"},
+            {"one_wire_temperature_ch0", "one_wire_temperature_ch0 REAL"},
+            {"one_wire_temperature_ch1", "one_wire_temperature_ch1 REAL"},
+            {"one_wire_temperature_ch2", "one_wire_temperature_ch2 REAL"},
+            {"one_wire_temperature_ch3", "one_wire_temperature_ch3 REAL"},
+            {"one_wire_temperature_ch4", "one_wire_temperature_ch4 REAL"},
+            {"one_wire_temperature_ch5", "one_wire_temperature_ch5 REAL"},
+            {"one_wire_temperature_ch6", "one_wire_temperature_ch6 REAL"},
+            {"one_wire_temperature_ch7", "one_wire_temperature_ch7 REAL"},
+            {"lightning_strike_count_1h", "lightning_strike_count_1h BIGINT"},
+            {"lightning_distance_km", "lightning_distance_km REAL"},
+            {"pm_status_flags", "pm_status_flags BIGINT"},
+            {"soil_ph", "soil_ph REAL"},
+            {"ph", "ph REAL"},
+            {"electrical_conductivity", "electrical_conductivity REAL"},
+            {"salinity", "salinity REAL"},
+            {"nitrogen", "nitrogen REAL"},
+            {"phosphorus", "phosphorus REAL"},
+            {"potassium", "potassium REAL"},
+            {"dissolved_oxygen", "dissolved_oxygen REAL"},
+            {"orp", "orp REAL"},
+            {"chemical_oxygen_demand", "chemical_oxygen_demand REAL"},
+            {"turbidity", "turbidity REAL"},
+            {"nitrate", "nitrate REAL"},
+            {"ammonium", "ammonium REAL"},
+            {"biochemical_oxygen_demand", "biochemical_oxygen_demand REAL"},
+            {"solar_irradiance", "solar_irradiance REAL"},
+
             {"packet_id", "packet_id BIGINT DEFAULT 0"},
             {"telemetry_variant", "telemetry_variant VARCHAR(40)"},
             {"device_uptime_seconds", "device_uptime_seconds BIGINT"},
@@ -276,7 +347,7 @@ public final class NodeCacheService {
     private static Set<String> newBoundedMissingNodeSet() {
         int capacity = (int) (MAX_MISSING_NODE_IDS / 0.75f) + 1;
         return Collections.synchronizedSet(Collections.newSetFromMap(
-                new LinkedHashMap<String, Boolean>(capacity, 0.75f) {
+                new LinkedHashMap<>(capacity, 0.75f) {
                     @Override
                     protected boolean removeEldestEntry(Map.Entry<String, Boolean> eldest) {
                         return size() > MAX_MISSING_NODE_IDS;
@@ -319,7 +390,7 @@ public final class NodeCacheService {
             try (Statement stmt = dbConnection.createStatement()) {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS nodes (
-                        node_id       VARCHAR(20) PRIMARY KEY,
+                        node_id       VARCHAR(80) PRIMARY KEY,
                         node_num      INT,
                         long_name     VARCHAR(100),
                         short_name    VARCHAR(10),
@@ -344,8 +415,8 @@ public final class NodeCacheService {
 
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS node_flags (
-                        owner_node_id VARCHAR(20) NOT NULL DEFAULT '',
-                        node_id       VARCHAR(20) NOT NULL,
+                        owner_node_id VARCHAR(80) NOT NULL DEFAULT '',
+                        node_id       VARCHAR(80) NOT NULL,
                         favorite      BOOLEAN DEFAULT FALSE,
                         ignored       BOOLEAN DEFAULT FALSE,
                         PRIMARY KEY (owner_node_id, node_id)
@@ -356,8 +427,8 @@ public final class NodeCacheService {
                     CREATE TABLE IF NOT EXISTS telemetry_history (
                         id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
                         ts                  BIGINT NOT NULL,
-                        node_id             VARCHAR(20) NOT NULL,
-                        owner_node_id       VARCHAR(20) NOT NULL DEFAULT '',
+                        node_id             VARCHAR(80) NOT NULL,
+                        owner_node_id       VARCHAR(80) NOT NULL DEFAULT '',
                         packet_id           BIGINT DEFAULT 0,
                         telemetry_variant   VARCHAR(40),
                         battery_level       INT,
@@ -502,6 +573,9 @@ public final class NodeCacheService {
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN channel INT DEFAULT 0"); } catch (SQLException ignored) {}
                 // Migration: public_key column in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN public_key VARBINARY"); } catch (SQLException ignored) {}
+                stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS xeddsa_signed BOOLEAN");
+                stmt.execute("ALTER TABLE nodes ADD COLUMN IF NOT EXISTS heard_on_current_lora BOOLEAN");
+
                 // Migration: is_unmessagable flag in nodes table
                 try { stmt.execute("ALTER TABLE nodes ADD COLUMN unmessagable BOOLEAN"); } catch (SQLException ignored) {}
                 // Migration: ignored column (v5 migration may not have run on fresh-install DBs)
@@ -530,8 +604,8 @@ public final class NodeCacheService {
             mergeStmt = dbConnection.prepareStatement("""
                 MERGE INTO nodes (node_id, node_num, long_name, short_name, role, hw_model,
                                   latitude, longitude, altitude, snr, last_heard,
-                                  battery_level, externally_powered, voltage, hops_away, channel, public_key, unmessagable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  battery_level, externally_powered, voltage, hops_away, channel, public_key, unmessagable, xeddsa_signed, heard_on_current_lora)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """);
 
             insertTelemetryStmt = dbConnection.prepareStatement(telemetryInsertSql(), Statement.RETURN_GENERATED_KEYS);
@@ -655,7 +729,7 @@ public final class NodeCacheService {
         String nodeId = fresh.getNodeId();
         if (nodeId == null || nodeId.isEmpty()) { return; }
         missingNodeIds.remove(nodeId);
-        cache.compute(nodeId, (key, existing) -> {
+        cache.compute(nodeId, (_, existing) -> {
             if (existing == null) {
                 existing = loadFromDb(nodeId);
             }
@@ -681,7 +755,7 @@ public final class NodeCacheService {
             String nodeId = fresh.getNodeId();
             if (nodeId == null || nodeId.isEmpty()) { continue; }
             missingNodeIds.remove(nodeId);
-            cache.compute(nodeId, (key, existing) -> {
+            cache.compute(nodeId, (_, existing) -> {
                 if (existing == null) {
                     existing = loadFromDb(nodeId);
                 }
@@ -715,7 +789,8 @@ public final class NodeCacheService {
                 || node.getHwModel() == null
                 || node.getPublicKey() == null
                 || node.getPublicKey().length == 0
-                || node.getUnmessagable() == null;
+                || node.getUnmessagable() == null
+                || node.getXeddsaSigned() == null;
         if (!needsIdentity) { return; }
 
         String nodeId = node.getNodeId();
@@ -743,11 +818,14 @@ public final class NodeCacheService {
         if (node.getUnmessagable() == null && cached.getUnmessagable() != null) {
             node.setUnmessagable(cached.getUnmessagable());
         }
+        if (node.getXeddsaSigned() == null) { node.setXeddsaSigned(cached.getXeddsaSigned()); }
     }
 
     /**
      * Fully clears the cache: removes all rows from H2 and the in-memory cache.
      */
+    // This explicit cache reset intentionally deletes every row.
+    @SuppressWarnings("SqlWithoutWhere")
     public synchronized void clearAll() {
         cache.clear();
         missingNodeIds.clear();
@@ -796,6 +874,7 @@ public final class NodeCacheService {
      * Sets the favorite flag for a node.
      * Legacy overload for callers that do not know the owner device yet.
      */
+    @SuppressWarnings("unused") // Retained legacy overload for callers without an owner-device scope.
     public synchronized void setFavorite(String nodeId, boolean favorite) {
         setFavorite(nodeId, "", favorite);
     }
@@ -854,6 +933,7 @@ public final class NodeCacheService {
      * Loads all favorite nodes from the database.
      * Legacy overload for callers that do not know the owner device yet.
      */
+    @SuppressWarnings("unused") // Retained legacy overload for callers without an owner-device scope.
     public List<NodeData> loadFavoriteNodes() {
         return loadFavoriteNodes("");
     }
@@ -947,6 +1027,7 @@ public final class NodeCacheService {
      * Loads all ignored nodes from the database.
      * Legacy overload for callers that do not know the owner device yet.
      */
+    @SuppressWarnings("unused") // Retained legacy overload for callers without an owner-device scope.
     public List<NodeData> loadIgnoredNodes() {
         return loadIgnoredNodes("");
     }
@@ -1136,7 +1217,7 @@ public final class NodeCacheService {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
             // Inner query takes the latest N rows (DESC); the outer query sorts them ASC.
-        String sql = "SELECT * FROM (SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC";
+        String sql = "SELECT * FROM (SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts DESC LIMIT ?) ORDER BY ts";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             ps.setInt(2, limit);
@@ -1162,8 +1243,8 @@ public final class NodeCacheService {
         List<TelemetryEntry> result = new ArrayList<>();
         if (dbConnection == null) { return result; }
         String sql = sinceEpoch > 0
-                ? "SELECT * FROM telemetry_history WHERE owner_node_id = ? AND ts >= ? ORDER BY ts ASC"
-                : "SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts ASC";
+                ? "SELECT * FROM telemetry_history WHERE owner_node_id = ? AND ts >= ? ORDER BY ts"
+                : "SELECT * FROM telemetry_history WHERE owner_node_id = ? ORDER BY ts";
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
             ps.setString(1, ownerNodeId != null ? ownerNodeId : "");
             if (sinceEpoch > 0) { ps.setLong(2, sinceEpoch); }
@@ -1199,7 +1280,7 @@ public final class NodeCacheService {
               AND ts <= ?
               AND (telemetry_variant IS NOT NULL OR battery_level <> 0 OR channel_utilization <> 0 OR air_util_tx <> 0 OR voltage <> 0 OR num_packets_rx <> 0 OR num_packets_tx <> 0 OR rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
-            ORDER BY ts ASC
+            ORDER BY ts
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
@@ -1300,7 +1381,7 @@ public final class NodeCacheService {
               AND ts <= ?
               AND (rx_snr <> 0 OR hop_start <> 0)
             """ + (sinceEpoch > 0 ? "  AND ts >= ?\n" : "") + """
-            ORDER BY ts ASC
+            ORDER BY ts
             """;
 
         try (PreparedStatement ps = dbConnection.prepareStatement(sql)) {
@@ -1447,6 +1528,41 @@ public final class NodeCacheService {
         e.setRxRssi(rs.getInt("rx_rssi"));
         e.setHopStart(rs.getInt("hop_start"));
         e.setHopLimit(rs.getInt("hop_limit"));
+        e.setAdcVoltageCh0(nullableFloat(rs, "adc_voltage_ch0"));
+        e.setAdcVoltageCh1(nullableFloat(rs, "adc_voltage_ch1"));
+        e.setAdcVoltageCh2(nullableFloat(rs, "adc_voltage_ch2"));
+        e.setAdcVoltageCh3(nullableFloat(rs, "adc_voltage_ch3"));
+        e.setAdcVoltageCh4(nullableFloat(rs, "adc_voltage_ch4"));
+        e.setAdcVoltageCh5(nullableFloat(rs, "adc_voltage_ch5"));
+        e.setAdcVoltageCh6(nullableFloat(rs, "adc_voltage_ch6"));
+        e.setAdcVoltageCh7(nullableFloat(rs, "adc_voltage_ch7"));
+        e.setOneWireTemperatureCh0(nullableFloat(rs, "one_wire_temperature_ch0"));
+        e.setOneWireTemperatureCh1(nullableFloat(rs, "one_wire_temperature_ch1"));
+        e.setOneWireTemperatureCh2(nullableFloat(rs, "one_wire_temperature_ch2"));
+        e.setOneWireTemperatureCh3(nullableFloat(rs, "one_wire_temperature_ch3"));
+        e.setOneWireTemperatureCh4(nullableFloat(rs, "one_wire_temperature_ch4"));
+        e.setOneWireTemperatureCh5(nullableFloat(rs, "one_wire_temperature_ch5"));
+        e.setOneWireTemperatureCh6(nullableFloat(rs, "one_wire_temperature_ch6"));
+        e.setOneWireTemperatureCh7(nullableFloat(rs, "one_wire_temperature_ch7"));
+        e.setLightningStrikeCount1h(nullableLong(rs, "lightning_strike_count_1h"));
+        e.setLightningDistanceKm(nullableFloat(rs, "lightning_distance_km"));
+        e.setPmStatusFlags(nullableLong(rs, "pm_status_flags"));
+        e.setSoilPh(nullableFloat(rs, "soil_ph"));
+        e.setPh(nullableFloat(rs, "ph"));
+        e.setElectricalConductivity(nullableFloat(rs, "electrical_conductivity"));
+        e.setSalinity(nullableFloat(rs, "salinity"));
+        e.setNitrogen(nullableFloat(rs, "nitrogen"));
+        e.setPhosphorus(nullableFloat(rs, "phosphorus"));
+        e.setPotassium(nullableFloat(rs, "potassium"));
+        e.setDissolvedOxygen(nullableFloat(rs, "dissolved_oxygen"));
+        e.setOrp(nullableFloat(rs, "orp"));
+        e.setChemicalOxygenDemand(nullableFloat(rs, "chemical_oxygen_demand"));
+        e.setTurbidity(nullableFloat(rs, "turbidity"));
+        e.setNitrate(nullableFloat(rs, "nitrate"));
+        e.setAmmonium(nullableFloat(rs, "ammonium"));
+        e.setBiochemicalOxygenDemand(nullableFloat(rs, "biochemical_oxygen_demand"));
+        e.setSolarIrradiance(nullableFloat(rs, "solar_irradiance"));
+
         loadOneWireTemperatures(telemetryId, e);
         return e;
     }
@@ -1457,6 +1573,7 @@ public final class NodeCacheService {
      * @param days number of days; older entries are removed
      * @return number of deleted rows
      */
+    @SuppressWarnings("UnusedReturnValue") // The deletion count remains available to callers.
     public int pruneTelemetryHistory(int days, String ownerNodeId) {
         if (dbConnection == null) { return 0; }
         long cutoff = System.currentTimeMillis() / 1000 - (long) days * 86400;
@@ -1700,6 +1817,8 @@ public final class NodeCacheService {
         if (src.getUnmessagable() != null) {
             dst.setUnmessagable(src.getUnmessagable());
         }
+        if (src.getXeddsaSigned() != null) { dst.setXeddsaSigned(src.getXeddsaSigned()); }
+        if (src.getHeardOnCurrentLora() != null) { dst.setHeardOnCurrentLora(src.getHeardOnCurrentLora()); }
 
     }
 
@@ -1874,6 +1993,8 @@ public final class NodeCacheService {
         } else {
             ps.setNull(18, Types.BOOLEAN);
         }
+        ps.setObject(19, n.getXeddsaSigned(), Types.BOOLEAN);
+        ps.setObject(20, n.getHeardOnCurrentLora(), Types.BOOLEAN);
     }
 
     private static void bindTelemetry(PreparedStatement ps, TelemetryEntry entry, String ownerNodeId) throws SQLException {
@@ -1988,6 +2109,40 @@ public final class NodeCacheService {
         ps.setInt(i++, entry.getRxRssi());
         ps.setInt(i++, entry.getHopStart());
         ps.setInt(i++, entry.getHopLimit());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh0());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh1());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh2());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh3());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh4());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh5());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh6());
+        setNullableFloat(ps, i++, entry.getAdcVoltageCh7());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh0());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh1());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh2());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh3());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh4());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh5());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh6());
+        setNullableFloat(ps, i++, entry.getOneWireTemperatureCh7());
+        setNullableLong(ps, i++, entry.getLightningStrikeCount1h());
+        setNullableFloat(ps, i++, entry.getLightningDistanceKm());
+        setNullableLong(ps, i++, entry.getPmStatusFlags());
+        setNullableFloat(ps, i++, entry.getSoilPh());
+        setNullableFloat(ps, i++, entry.getPh());
+        setNullableFloat(ps, i++, entry.getElectricalConductivity());
+        setNullableFloat(ps, i++, entry.getSalinity());
+        setNullableFloat(ps, i++, entry.getNitrogen());
+        setNullableFloat(ps, i++, entry.getPhosphorus());
+        setNullableFloat(ps, i++, entry.getPotassium());
+        setNullableFloat(ps, i++, entry.getDissolvedOxygen());
+        setNullableFloat(ps, i++, entry.getOrp());
+        setNullableFloat(ps, i++, entry.getChemicalOxygenDemand());
+        setNullableFloat(ps, i++, entry.getTurbidity());
+        setNullableFloat(ps, i++, entry.getNitrate());
+        setNullableFloat(ps, i++, entry.getAmmonium());
+        setNullableFloat(ps, i++, entry.getBiochemicalOxygenDemand());
+        setNullableFloat(ps, i++, entry.getSolarIrradiance());
         if (i != TELEMETRY_HISTORY_COLUMNS.length + 1) {
             throw new SQLException("Telemetry bind count mismatch: expected "
                     + TELEMETRY_HISTORY_COLUMNS.length + ", bound " + (i - 1));
@@ -2025,7 +2180,7 @@ public final class NodeCacheService {
                 SELECT temperature
                 FROM telemetry_one_wire_temperature
                 WHERE telemetry_id = ?
-                ORDER BY sensor_index ASC
+                ORDER BY sensor_index
                 """)) {
             ps.setLong(1, telemetryId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -2078,6 +2233,7 @@ public final class NodeCacheService {
         return rs.wasNull() ? null : value;
     }
 
+    @SuppressWarnings("SameParameterValue") // Keep the JDBC helper independent of a particular column/table.
     private static Integer nullableInteger(ResultSet rs, String columnName) throws SQLException {
         int value = rs.getInt(columnName);
         return rs.wasNull() ? null : value;
@@ -2128,6 +2284,8 @@ public final class NodeCacheService {
         if (!rs.wasNull()) {
             node.setUnmessagable(unmessagable);
         }
+        node.setXeddsaSigned(rs.getObject("xeddsa_signed", Boolean.class));
+        node.setHeardOnCurrentLora(rs.getObject("heard_on_current_lora", Boolean.class));
         return node;
     }
 

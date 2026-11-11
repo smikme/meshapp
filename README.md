@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Java-25-orange?logo=openjdk" alt="Java 25"/>
-  <img src="https://img.shields.io/badge/JavaFX-25.0.3-blue?logo=java" alt="JavaFX"/>
+  <img src="https://img.shields.io/badge/JavaFX-27.0.1-blue?logo=java" alt="JavaFX"/>
   <img src="https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-brightgreen" alt="Platform"/>
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License"/>
   <a href="https://t.me/+SRaOd1gftoo5MWRi">
@@ -23,12 +23,10 @@
 
 <p align="center">
   Main development platform:
-  <a href="https://git.privatepractice.app/covox/meshapp">git.privatepractice.app/covox/meshapp</a>
+  <a href="https://github.com/smikme/meshapp">github.com/smikme/meshapp</a>
 </p>
 
-<p align="center">
-  <a href="#installation">Installation</a>
-</p>
+[Installation](#installation)
 
 <div align="right">
 
@@ -57,32 +55,22 @@ The connection type and protocol are selected separately. For example, you can c
 
 ## Installation
 
-Ready-made packages are published on the [Gitea releases page](https://git.privatepractice.app/covox/meshapp/releases).
+Ready-made packages are published on the [GitHub Releases](https://github.com/smikme/meshapp/releases).
 
 - macOS: download the `.dmg`, open it, and move MeshApp to Applications.
 - Windows: download and run the `.msi` installer.
 - Debian / Ubuntu: download the `.deb` package and install it with `apt` or your package manager.
 - Linux AppImage: download the `.AppImage`, make it executable, and run it.
 
-Flatpak users can install MeshApp through the published Flatpak ref:
+Download the `.flatpak` bundle from GitHub Releases. Install or update it locally (replace the filename with the downloaded version):
 
 ```bash
-flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.freedesktop.Platform//25.08
+flatpak install --user ./MeshApp-v2.4.0-linux-x86_64.flatpak
 flatpak run app.privatepractice.meshapp
 ```
 
-If the `meshapp` repository was previously added with the old direct `/repo/` command and Flatpak reports `public key not found`, remove the old remote and add it again:
-
-```bash
-flatpak remote-delete --user --force meshapp
-flatpak install --user https://flatpak.privatepractice.app/app.privatepractice.meshapp.flatpakref
-```
-
-To update the Flatpak installation:
-
-```bash
-flatpak update app.privatepractice.meshapp
-```
 
 ---
 
@@ -195,42 +183,34 @@ For Meshtastic firmware 2.8.0 and newer, MeshApp supports the compact initial
 node database followed by background position and telemetry replay. Older
 firmware keeps the legacy connection flow.
 
+The bundled schemas are pinned to the released [Meshtastic 2.8.2 Alpha](https://github.com/meshtastic/firmware/releases/tag/v2.8.2.d5f1619), protobuf commit `8d0ed0c135f91ad1d6f9c60bc341277d64946bce`:
+
+- AES-CCM channel settings and authenticated MQTT packet decoding (firmware 2.8.1+).
+- A distinct verified delivery status for valid ACK proofs; invalid proofs cannot settle messages or requests. Legacy receipts retain their previous behavior.
+- Eight ADC and eight independent 1-Wire channels, lightning metrics, PM sensor status, and soil/water telemetry. Values survive database, RPC and Lua round trips; the dashboard shows sensor readings.
+- Mesh Beacon messages in chat, frequency-slot settings, a 60-byte UTF-8 message limit, and decoded offers in the packet monitor.
+- Node signature history, current-LoRa reception flags, new hardware identifiers and firmware metadata for settings compatibility.
+
+`scripts/update-protos.sh` downloads this release and applies `scripts/meshtastic-legacy-compat.patch` for older radios. It does not track upstream `master`. The database migration preserves existing history. LoRaWAN, waypoint and TAK payload schemas are available for inspection; this does not turn MeshApp into a LoRaWAN gateway or TAK client.
+
 ### MeshCore
 
-MeshCore is supported in two variants:
+Choose `MeshCore Companion` for chats and device management over BLE, TCP or
+USB/Serial. TCP/Serial uses official length-prefixed frames (`3C` host → radio,
+`3E` radio → host); BLE carries one raw payload per GATT operation.
 
-- `MeshCore KISS` works over TCP or Serial / USB.
-- `MeshCore Companion` works over BLE, TCP, or Serial / USB.
+Companion supports persistent channel/DM history, ACK tracking and retry, editable
+radio settings, contacts, channels, sharing links/QR and advanced diagnostic/RPC
+operations. KISS is a separate modem mode with radio/power settings, raw DATA and
+TxDone; it does not provide Companion chats.
 
-MeshCore Companion does not use the KISS format. For BLE it uses:
+The implementation targets official Companion protocol 14. Software tests pass;
+physical-radio acceptance and some advanced-operation fixtures are still pending.
+Existing custom raw-stream bridges must adopt official framing.
 
-- service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- RX characteristic `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
-- TX notifications `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
+Details: [support and limitations](docs/meshcore-support.md),
+[capability matrix](docs/meshcore-capabilities.md), [API](docs/meshcore-api.md).
 
-When connecting over TCP or Serial, the device must send Companion packets without an additional KISS wrapper.
-
-Currently supported:
-
-- KISS format (`FEND`, `FESC`, and escape sequences) for TCP and Serial
-- reading device information through MeshCore `SetHardware`: name, version, identifier, LoRa parameters, TX power, battery, statistics, RSSI/SNR data, and TX status
-- MeshCore Companion BLE profile with RX/TX UUIDs, subscription to TX notifications, and `APP_START`
-- `FrameFormat.MESHCORE_COMPANION` for Companion packets over TCP and Serial
-- information about the local device, public key, device data, battery, and storage
-- contacts and channel information in the shared nodes and chat screens
-- incoming and outgoing channel messages and direct messages through Companion Protocol
-- viewing MeshCore information in settings without editing
-- MeshCore Companion packets in LoRa Debug
-- active protocol display in the connection card
-
-Limitations:
-
-- MeshCore KISS works only over TCP and Serial.
-- MeshCore Companion over TCP/Serial works only with devices that send Companion packets without a KISS wrapper.
-- MeshCore KISS is currently used for modem mode and reading device information; chats, direct messages, and the main user workflows are implemented through MeshCore Companion.
-- MeshCore Companion does not include functions that belong only to Meshtastic: saving settings through Admin protobuf, reactions, route checks, and Meshtastic bot commands.
-
-Details: [docs/meshcore-support.md](docs/meshcore-support.md).
 
 ---
 
@@ -360,7 +340,7 @@ Ready-made packages (`.dmg`, `.msi`, `.deb`, `.AppImage`, `.flatpak`) do not nee
 ### Running from Source
 
 ```bash
-git clone https://git.privatepractice.app/covox/meshapp.git
+git clone https://github.com/smikme/meshapp.git
 cd meshapp
 
 # JavaFX application
@@ -452,8 +432,9 @@ If VisualVM shows `Provided Memory settings are invalid`, open memory profiler s
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Interface | JavaFX 25.0.3 + AtlantaFX | Main interface |
-| Meshtastic | Protobuf 4.33.4 + Meshtastic schemas | `ToRadio` / `FromRadio` and mesh packets |
+| Interface | JavaFX 27.0.1 + AtlantaFX | Main interface |
+| Meshtastic | Protobuf 4.36.2 + Meshtastic schemas | `ToRadio` / `FromRadio` and mesh packets |
+| Channel encryption | Bouncy Castle 1.86 | AES-CCM verification for MQTT packets |
 | MeshCore KISS | KISS format + MeshCore `SetHardware` | Initial exchange and MeshCore KISS modem information |
 | MeshCore Companion | Companion Protocol + BLE RX/TX or TCP/Serial without KISS wrapper | Initial exchange, device information, contacts, channels, chats, and packet viewing |
 | Transport | `TransportConnection` | Shared contract for TCP, Serial, BLE, and future connection methods |
@@ -467,7 +448,7 @@ If VisualVM shows `Provided Memory settings are invalid`, open memory profiler s
 | Serial | Native JNA backends + jSerialComm discovery | Native COM/tty access |
 | BLE | CoreBluetooth / WinRT / BlueZ through JNA | BLE device discovery, GATT, and pairing |
 | Native integrations | JNA + OS integrations | Mica, vibrancy, system tray/status item, and platform layers |
-| Build | Gradle 9.4.1 + Protobuf + CMake + jpackage | Java code, native library, and installer builds |
+| Build | Gradle 9.8.2 + Protobuf + CMake + jpackage | Java code, native library, and installer builds |
 
 ---
 
@@ -563,7 +544,7 @@ flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedeskto
 
 The runtime can be overridden with `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...`, and `-PflatpakBranch=...`.
 
-Flathub publishing uses `app.privatepractice.meshapp.yml`. After changing Gradle dependencies, rebuild the Maven source list for offline builds:
+Local offline Flatpak builds use `app.privatepractice.meshapp.yml`. After changing Gradle dependencies, rebuild the Maven source list for offline builds:
 
 ```bash
 scripts/update-flatpak-sources.sh
@@ -588,34 +569,11 @@ During `processResources`, Gradle builds native components:
 - macOS: `libmeshapp-serial.dylib` for serial modem control lines
 - macOS: `libmeshapp-tray.dylib` for the system tray/status item
 
-### Signing and Notarization on macOS
+### macOS release signing
 
-By default, `./gradlew jpackage` on macOS applies an ad-hoc signature to `.app`. This is enough for local testing, but a `.dmg` downloaded from a browser may receive the Gatekeeper message **"The application is damaged and can't be opened."**
+GitHub releases use ad-hoc signatures, with separate DMG files for Apple Silicon and Intel. Developer ID and notarization are not configured. Gatekeeper may require explicit permission to open a downloaded build.
 
-Release builds need credentials for `Developer ID` signing:
-
-- `MAC_SIGNING_KEY_USER_NAME` or `-PmacSigningKeyUserName=...`
-- `MAC_SIGNING_KEYCHAIN` or `-PmacSigningKeychain=...`
-- `MAC_PACKAGE_SIGNING_PREFIX` or `-PmacPackageSigningPrefix=...`, defaults to `com.meshtastic`
-
-For a Gitea runner in daemon mode, it is better to import the certificate from secrets into a temporary keychain:
-
-- `MAC_SIGNING_CERTIFICATE_P12`
-- `MAC_SIGNING_CERTIFICATE_PASSWORD`
-- `MAC_SIGNING_KEYCHAIN_PASSWORD`
-
-Downloadable builds need `Developer ID Application`. `Apple Development` is suitable for development, but not for release DMG builds.
-
-Notarization can be enabled in one of these ways:
-
-- `MAC_NOTARY_KEYCHAIN_PROFILE` or `-PmacNotaryKeychainProfile=...`
-- `MAC_NOTARY_APPLE_ID` + `MAC_NOTARY_TEAM_ID` + `MAC_NOTARY_PASSWORD`
-- `MAC_NOTARY_KEY_FILE` + `MAC_NOTARY_KEY_ID` + `MAC_NOTARY_ISSUER`
-- In CI, `MAC_NOTARY_KEY_FILE_BASE64` can be passed instead of `MAC_NOTARY_KEY_FILE`
-
-After that, `./gradlew jpackage` builds signed `.app` and `.dmg`, then runs `notarytool submit --wait` and `stapler`.
-
-If the Gitea runner does not have `Developer ID Application`, the workflow still builds the macOS artifact with the same name, but skips `spctl` and notarization checks.
+See [GitHub build and release setup](docs/github-release.md) for the complete release cycle and [self-update format](docs/self-update.md) for signed application updates.
 
 ### Installation on macOS
 
