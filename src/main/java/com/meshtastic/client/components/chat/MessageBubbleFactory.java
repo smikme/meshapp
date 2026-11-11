@@ -146,10 +146,10 @@ public class MessageBubbleFactory {
         /** Resends an undelivered message. */
         boolean retryMessage(MeshMessage msg);
 
-        /** Opens a MeshFiles image preview in the chat image viewer. */
-        default void openMeshFilesImage(MeshFilesImage image) {
+        /** Opens a chat image preview in the chat image viewer. */
+        default void openChatImage(ChatImage image) {
             Optional.ofNullable(image)
-                    .map(MeshFilesImage::url)
+                    .map(ChatImage::shareUrl)
                     .ifPresent(ExternalUrlLauncher::open);
         }
     }
@@ -486,7 +486,7 @@ public class MessageBubbleFactory {
                 createSenderNameLabel(senderPresentation.senderName()),
                 quoteSlot,
                 createTextNode(msg),
-                createMeshFilesPreviewNode(msg).orElse(null),
+                createChatImagePreviewNode(msg).orElse(null),
                 buildIncomingFooter(msg, reactionSlot, meta)
         ));
 
@@ -525,7 +525,7 @@ public class MessageBubbleFactory {
         content.getChildren().addAll(nodes(
                 quoteSlot,
                 createTextNode(msg),
-                createMeshFilesPreviewNode(msg).orElse(null),
+                createChatImagePreviewNode(msg).orElse(null),
                 buildOutgoingFooter(reactionSlot, meta)
         ));
 
@@ -569,7 +569,7 @@ public class MessageBubbleFactory {
         content.setMinHeight(Region.USE_PREF_SIZE);
         content.getChildren().addAll(nodes(
                 createBubbleTextFlow(msg.getText(), MESSAGE_TEXT_EMOJI_SIZE, "chat-bubble-text-node", "chat-bubble-text"),
-                createMeshFilesPreviewNode(msg).orElse(null),
+                createChatImagePreviewNode(msg).orElse(null),
                 createTimeLabel(msg.getTimestamp())
         ));
 
@@ -1068,13 +1068,13 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Creates inline image previews for MeshFiles URLs found in a message.
+     * Creates inline image previews for image links found in a message.
      *
-     * @param msg message whose text may contain MeshFiles links
-     * @return image preview list, or empty when the message has no MeshFiles images
+     * @param msg message whose text may contain image links
+     * @return image preview list, or empty when the message has no chat images
      */
-    private Optional<Node> createMeshFilesPreviewNode(MeshMessage msg) {
-        List<MeshFilesImage> images = ChatUrlParser.findMeshFilesImages(msg != null ? msg.getText() : "");
+    private Optional<Node> createChatImagePreviewNode(MeshMessage msg) {
+        List<ChatImage> images = ChatUrlParser.findChatImages(msg != null ? msg.getText() : "");
         if (images.isEmpty()) {
             return Optional.empty();
         }
@@ -1082,18 +1082,18 @@ public class MessageBubbleFactory {
         VBox imageList = new VBox(IMAGE_PREVIEW_SPACING);
         imageList.getStyleClass().add("chat-bubble-image-list");
         images.stream()
-                .map(this::createMeshFilesPreview)
+                .map(this::createChatImagePreview)
                 .forEach(imageList.getChildren()::add);
         return Optional.of(imageList);
     }
 
     /**
-     * Creates one clickable MeshFiles preview image for a message bubble.
+     * Creates one clickable image preview for a message bubble.
      *
-     * @param meshImage normalized MeshFiles image URLs
+     * @param meshImage normalized chat image URLs
      * @return preview node that opens the original image when clicked
      */
-    private Node createMeshFilesPreview(MeshFilesImage meshImage) {
+    private Node createChatImagePreview(ChatImage meshImage) {
         String previewUrl = meshImage.previewUrl();
         Image cached = completedPreviews.get(previewUrl);
         Image previewImage = cached != null ? cached : previewImageLoader.apply(previewUrl);
@@ -1125,6 +1125,8 @@ public class MessageBubbleFactory {
             failedLabel.setManaged(true);
         };
         previewImage.errorProperty().addListener(errorListener);
+        // A cached/fixture image can already have failed before listeners are installed.
+        errorListener.changed(previewImage.errorProperty(), false, previewImage.isError());
 
         StackPane frame = new StackPane(imageView, failedLabel);
         frame.getProperties().put(DISPOSE_ACTION, (Runnable) () -> {
@@ -1141,7 +1143,7 @@ public class MessageBubbleFactory {
                 return;
             }
             if (event.getClickCount() == 1) {
-                actions.openMeshFilesImage(meshImage);
+                actions.openChatImage(meshImage);
             }
             event.consume();
         });

@@ -38,6 +38,44 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MessageBubbleFactoryTest {
 
+    @Test
+    void meshpicPreviewsWorkForIncomingOutgoingAndRestoredMessages() {
+        onFxThread(() -> {
+            var opened = new AtomicReference<ChatImage>();
+            var loaded = new java.util.ArrayList<String>();
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions() { @Override public void openChatImage(ChatImage image) { opened.set(image); } },
+                    new HashMap<>(), url -> { loaded.add(url); return new javafx.scene.image.WritableImage(2, 2); });
+            for (boolean outgoing : new boolean[]{false, true}) {
+                var message = new MeshMessage("!2", "!ffffffff", 0, "Фото https://meshpic.org/feZ.", 1, outgoing);
+                message.setDbId(42); // The same text path is used for restored history.
+                var rendered = factory.buildRendered(message);
+                StackPane frame = findNodeWithStyle(rendered.row(), "chat-bubble-image-preview", StackPane.class).orElseThrow();
+                frame.getOnMouseClicked().handle(new javafx.scene.input.MouseEvent(
+                        javafx.scene.input.MouseEvent.MOUSE_CLICKED, 0, 0, 0, 0,
+                        javafx.scene.input.MouseButton.PRIMARY, 1, false, false, false, false,
+                        false, false, false, false, false, false, null));
+                assertEquals("https://meshpic.org/image/feZ", opened.get().fullUrl());
+                factory.disposeRendered(rendered);
+            }
+            assertEquals(java.util.List.of("https://meshpic.org/image/feZ?s=t"), loaded);
+        });
+    }
+
+    @Test
+    void missingPreviewKeepsMessageLinkAndShowsErrorImmediately() {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(), new HashMap<>(),
+                    _ -> new javafx.scene.image.Image(new java.io.ByteArrayInputStream(new byte[]{1})));
+            var message = new MeshMessage("!2", "!ffffffff", 0, "https://meshpic.org/feZ", 1, false);
+            var rendered = factory.buildRendered(message);
+            assertTrue(findNodeWithStyle(rendered.row(), "chat-bubble-image-error", Label.class).orElseThrow().isVisible());
+            assertEquals("https://meshpic.org/feZ", findNodeWithStyle(rendered.row(), "chat-bubble-url-node", Text.class).orElseThrow().getText());
+            factory.disposeRendered(rendered);
+        });
+    }
+
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();

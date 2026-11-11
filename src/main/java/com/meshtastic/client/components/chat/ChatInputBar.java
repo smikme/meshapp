@@ -6,7 +6,7 @@ import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.modal.Toast;
 import com.meshtastic.client.model.MeshMessage;
-import com.meshtastic.client.service.MeshFilesUploadService;
+import com.meshtastic.client.service.MeshpicUploadService;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -37,6 +37,10 @@ import javafx.stage.FileChooser;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.concurrent.CompletableFuture;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -67,8 +71,7 @@ public class ChatInputBar extends VBox {
     private static final double IMAGE_ICON_SIZE = 22;
     private static final double ATTACHMENT_PREVIEW_WIDTH = 156;
     private static final double ATTACHMENT_PREVIEW_HEIGHT = 104;
-    private static final List<String> SUPPORTED_IMAGE_EXTENSIONS = List.of(
-            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff");
+    private static final List<String> SUPPORTED_IMAGE_EXTENSIONS = MeshpicUploadService.IMAGE_EXTENSIONS;
 
     /** Data passed to the send callback. */
     public record SendRequest(String text, int replyId) {}
@@ -90,8 +93,9 @@ public class ChatInputBar extends VBox {
     private final Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand;
     private final Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider;
     private final Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider;
-    private final Consumer<MeshFilesImage> onOpenImage;
-    private final MeshFilesUploadService meshFilesUploadService = MeshFilesUploadService.getInstance();
+    private final Consumer<ChatImage> onOpenImage;
+    private final Function<Path, CompletableFuture<ChatImage>> imageUploader;
+    private final Function<String, Image> previewLoader;
     private final EmojiTextField messageInput;
     private final SendButtonWithRing sendRing;
     private final EmojiPicker emojiPicker;
@@ -101,13 +105,14 @@ public class ChatInputBar extends VBox {
     private final ImageView imagePreview;
     private final Label imagePreviewStatus;
     private final Button clearImagePreviewBtn;
+    private Runnable imagePreviewCleanup;
 
     private final HBox replyBar;
     private final Label replyQuoteLabel;
     private final Separator inputSep;
 
     private MeshMessage replyToMessage;
-    private MeshFilesImage attachedImage;
+    private ChatImage attachedImage;
     private String protectedImageBlock;
     private int protectedImageCaretPosition;
     private int savedCaretPosition;
@@ -142,8 +147,21 @@ public class ChatInputBar extends VBox {
                         Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
                         Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider,
                         Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider,
-                        Consumer<MeshFilesImage> onOpenImage) {
+                        Consumer<ChatImage> onOpenImage) {
+        this(onSend, onBotCommand, botSuggestionProvider, nodeSuggestionProvider, onOpenImage,
+                MeshpicUploadService.getInstance()::upload, url -> new Image(url, true));
+    }
+
+    ChatInputBar(Consumer<SendRequest> onSend,
+                 Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
+                 Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider,
+                 Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider,
+                 Consumer<ChatImage> onOpenImage,
+                 Function<Path, CompletableFuture<ChatImage>> imageUploader,
+                 Function<String, Image> previewLoader) {
         this.onSend = onSend;
+        this.imageUploader = imageUploader;
+        this.previewLoader = previewLoader;
         this.onBotCommand = onBotCommand;
         this.onOpenImage = onOpenImage;
         this.botSuggestionProvider = botSuggestionProvider != null
@@ -409,8 +427,7 @@ public class ChatInputBar extends VBox {
     /**
      * Uploads the first supported image file from a drag-and-drop payload.
      *
-     * <p>If another image is already attached, it is explicitly removed from the
-     * input text before the new upload starts.
+     * <p>An existing attachment is replaced only after the new upload succeeds.
      *
      * @param files files carried by a dragboard
      * @return {@code true} when a supported image file was accepted for upload
@@ -432,7 +449,7 @@ public class ChatInputBar extends VBox {
      * Checks whether a file name has an image extension accepted by the chat UI.
      *
      * <p>The upload service still validates magic bytes before sending data to
-     * MeshFiles; this check is only the UI/drop filter.
+     * Meshpic; this check is only the UI/drop filter.
      *
      * @param file candidate local file
      * @return {@code true} when the extension is one of the supported image types
@@ -460,7 +477,7 @@ public class ChatInputBar extends VBox {
         Button button = new Button();
         button.setGraphic(createImageIcon());
         button.getStyleClass().addAll("chat-emoji-btn", "chat-image-btn");
-        button.setTooltip(new Tooltip(I18n.t("chat.image.attach")));
+        button.setTooltip(new Tooltip(I18n.t("chat.image.attach") + "\n" + I18n.t("chat.image.temporary")));
         button.setOnAction(_ -> chooseAndUploadImage());
         return button;
     }
@@ -513,7 +530,7 @@ public class ChatInputBar extends VBox {
         chooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter(
                         I18n.t("chat.image.files"),
-                        "*.jpg", "*.jpeg", "*.png", "*.gif", "*.bmp", "*.tif", "*.tiff"),
+                        SUPPORTED_IMAGE_EXTENSIONS.stream().map(extension -> "*" + extension).toList()),
                 new FileChooser.ExtensionFilter(I18n.t("chat.image.allFiles"), "*.*")
         );
 
@@ -529,12 +546,9 @@ public class ChatInputBar extends VBox {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.image.unsupported"));
             return;
         }
-        if (attachedImage != null || protectedImageBlock != null) {
-            clearAttachedImage(true);
-        }
         long generation = ++imageUploadGeneration;
         showImageUploadProgress(selectedFile.getName());
-        meshFilesUploadService.upload(selectedFile.toPath())
+        imageUploader.apply(selectedFile.toPath())
                 .whenComplete((image, failure) -> Platform.runLater(() -> {
                     if (generation != imageUploadGeneration) {
                         return;
@@ -542,8 +556,8 @@ public class ChatInputBar extends VBox {
                     imageUploadInProgress = false;
                     updateImageButtonState();
                     if (failure != null) {
-                        hideImagePreviewBar();
-                        Toast.show(Toast.Type.ERROR, I18n.t("chat.image.uploadFailed"));
+                        restoreAttachedPreview();
+                        Toast.show(Toast.Type.ERROR, I18n.t(MeshpicUploadService.errorKey(failure)));
                         return;
                     }
                     attachUploadedImage(image);
@@ -551,9 +565,8 @@ public class ChatInputBar extends VBox {
     }
 
     private void showImageUploadProgress(String fileName) {
-        attachedImage = null;
         imageUploadInProgress = true;
-        imagePreview.setImage(null);
+        disposeImagePreview();
         imagePreview.setVisible(false);
         imagePreview.setManaged(false);
         imagePreviewStatus.setText(I18n.t("chat.image.uploading", fileName != null ? fileName : ""));
@@ -564,22 +577,14 @@ public class ChatInputBar extends VBox {
         updateImageButtonState();
     }
 
-    private void attachUploadedImage(MeshFilesImage image) {
-        if (image == null || !insertImageUrl(image.url())) {
-            hideImagePreviewBar();
+    private void attachUploadedImage(ChatImage image) {
+        if (image == null || !insertImageUrl(image.shareUrl())) {
+            restoreAttachedPreview();
             return;
         }
 
         attachedImage = image;
-        Image previewImage = new Image(image.previewUrl(), true);
-        imagePreview.setImage(previewImage);
-        imagePreview.setVisible(true);
-        imagePreview.setManaged(true);
-        imagePreviewStatus.setText(I18n.t("chat.image.ready"));
-        clearImagePreviewBtn.setVisible(true);
-        clearImagePreviewBtn.setManaged(true);
-        imagePreviewBar.setVisible(true);
-        imagePreviewBar.setManaged(true);
+        restoreAttachedPreview();
 
         Platform.runLater(() -> {
             messageInput.requestFocus();
@@ -587,10 +592,54 @@ public class ChatInputBar extends VBox {
         });
     }
 
+    private void restoreAttachedPreview() {
+        if (attachedImage == null) {
+            hideImagePreviewBar();
+            return;
+        }
+        ChatImage image = attachedImage;
+        disposeImagePreview();
+        Image previewImage = previewLoader.apply(image.previewUrl());
+        imagePreview.setImage(previewImage);
+        imagePreview.setVisible(true);
+        imagePreview.setManaged(true);
+        String status = image.expiresAt() == null ? I18n.t("chat.image.temporary")
+                : I18n.t("chat.image.expiresAt", DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                        .withZone(ZoneId.systemDefault()).format(image.expiresAt()));
+        imagePreviewStatus.setText(status);
+        Runnable showError = () -> {
+            if (imagePreview.getImage() == previewImage && (previewImage.isError() || image.isExpired())) {
+                imagePreview.setVisible(false);
+                imagePreview.setManaged(false);
+                imagePreviewStatus.setText(I18n.t("chat.image.previewFailed"));
+            }
+        };
+        javafx.beans.value.ChangeListener<Boolean> errorListener = (_, _, _) -> showError.run();
+        previewImage.errorProperty().addListener(errorListener);
+        imagePreviewCleanup = () -> {
+            previewImage.cancel();
+            previewImage.errorProperty().removeListener(errorListener);
+        };
+        showError.run();
+        clearImagePreviewBtn.setVisible(true);
+        clearImagePreviewBtn.setManaged(true);
+        imagePreviewBar.setVisible(true);
+        imagePreviewBar.setManaged(true);
+    }
+
     private boolean insertImageUrl(String url) {
         String current = messageInput.getText();
         int rawCaret = messageInput.isFocused() ? messageInput.getCaretPosition() : savedCaretPosition;
         int caret = Math.clamp(rawCaret, 0, current.length());
+        // Prepare replacement locally: a failed upload or byte-limit check must keep the draft intact.
+        int previousStart = protectedImageBlock == null ? -1 : current.indexOf(protectedImageBlock);
+        if (previousStart >= 0) {
+            int end = previousStart + protectedImageBlock.length();
+            String remaining = removeRangePreservingSpacing(current, previousStart, end);
+            int removedLength = current.length() - remaining.length();
+            current = remaining;
+            caret = caret >= end ? caret - removedLength : Math.min(caret, previousStart);
+        }
         ImageUrlInsertion insertion = imageUrlInsertion(current, caret, url);
         if (textByteLength(insertion.text()) > getMaxTextBytes()) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.image.tooLong"));
@@ -606,7 +655,7 @@ public class ChatInputBar extends VBox {
     }
 
     /**
-     * Inserts a MeshFiles URL as a protected block with whitespace around it.
+     * Inserts a public image URL as a protected block with whitespace around it.
      *
      * <p>The trailing space keeps subsequently typed text from corrupting the URL.
      * The whole block is later restored on accidental edits and removed only by
@@ -669,7 +718,7 @@ public class ChatInputBar extends VBox {
     private void clearAttachedImage(boolean removeUrl) {
         imageUploadGeneration++;
         imageUploadInProgress = false;
-        String imageUrl = attachedImage != null ? attachedImage.url() : null;
+        String imageUrl = attachedImage != null ? attachedImage.shareUrl() : null;
         String imageBlock = protectedImageBlock;
         attachedImage = null;
         protectedImageBlock = null;
@@ -742,8 +791,16 @@ public class ChatInputBar extends VBox {
         return needsSeparator ? before + " " + after : before + after;
     }
 
-    private void hideImagePreviewBar() {
+    private void disposeImagePreview() {
+        if (imagePreviewCleanup != null) {
+            imagePreviewCleanup.run();
+            imagePreviewCleanup = null;
+        }
         imagePreview.setImage(null);
+    }
+
+    private void hideImagePreviewBar() {
+        disposeImagePreview();
         imagePreview.setVisible(false);
         imagePreview.setManaged(false);
         imagePreviewStatus.setText("");
@@ -761,7 +818,7 @@ public class ChatInputBar extends VBox {
             onOpenImage.accept(attachedImage);
             return;
         }
-        com.meshtastic.client.utils.ExternalUrlLauncher.open(attachedImage.url());
+        com.meshtastic.client.utils.ExternalUrlLauncher.open(attachedImage.shareUrl());
     }
 
     private void updateImageButtonState() {

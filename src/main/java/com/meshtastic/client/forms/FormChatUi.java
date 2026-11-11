@@ -10,7 +10,7 @@ import com.meshtastic.client.components.chat.ChatDbKey;
 import com.meshtastic.client.components.chat.ChatInputBar;
 import com.meshtastic.client.components.chat.ChatListCell;
 import com.meshtastic.client.components.chat.ChatNameResolver;
-import com.meshtastic.client.components.chat.MeshFilesImage;
+import com.meshtastic.client.components.chat.ChatImage;
 import com.meshtastic.client.components.chat.MessageBubbleFactory;
 import com.meshtastic.client.components.chat.TracerouteView;
 import com.meshtastic.client.components.chat.VirtualMessagePane;
@@ -42,6 +42,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.ListView;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.ScrollPane;
@@ -130,6 +131,7 @@ abstract class FormChatUi extends FormChatBase {
     private ContextMenu quickScriptMenu;
     private FormChatMessageSearchController messageSearchController;
     private StackPane imageViewerOverlay;
+    private Runnable imageViewerCleanup;
 
     /**
      * Creates the split layout and reusable controls for the active chat.
@@ -818,8 +820,8 @@ abstract class FormChatUi extends FormChatBase {
                         return FormChatUi.this.isMessageSelectionModeActive();
                     }
                     @Override public boolean retryMessage(MeshMessage msg) { return FormChatUi.this.retryMessage(msg); }
-                    @Override public void openMeshFilesImage(MeshFilesImage image) {
-                        FormChatUi.this.showMeshFilesImage(image);
+                    @Override public void openChatImage(ChatImage image) {
+                        FormChatUi.this.showChatImage(image);
                     }
                 },
                 pendingStatusLabels, this::loadPreviewImage);
@@ -1177,7 +1179,7 @@ abstract class FormChatUi extends FormChatBase {
                 this::handleBotCommand,
                 this::suggestBotCommands,
                 query -> ChatBotCommandHelper.suggestNodes(listBotCommandNodes(), query, 8),
-                this::showMeshFilesImage
+                this::showChatImage
         );
         input.setProtocolTextLimit(() -> meshCoreCompanionRuntime == null ? -1 : meshCoreCompanionRuntime.maxTextBytes(
                 selectedChat != null && selectedChat.getType() == ChatItem.ChatType.DIRECT_MESSAGE));
@@ -1190,45 +1192,76 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     /**
-     * Shows a full-size MeshFiles image overlay scaled to the chat message area.
+     * Shows a full-size chat image overlay scaled to the chat message area.
      *
-     * @param image normalized MeshFiles image URLs
+     * @param image normalized chat image URLs
      */
-    private void showMeshFilesImage(MeshFilesImage image) {
+    private void showChatImage(ChatImage image) {
+        showChatImage(image, url -> new Image(url, true));
+    }
+
+    void showChatImage(ChatImage image, java.util.function.Function<String, Image> imageLoader) {
         if (image == null || messageArea == null) {
             return;
         }
 
-        hideMeshFilesImage();
+        hideChatImage();
 
-        ImageView imageView = new ImageView(new Image(image.url(), true));
+        Image fullImage = imageLoader.apply(image.fullUrl());
+        ImageView imageView = new ImageView(fullImage);
         imageView.getStyleClass().add("chat-image-viewer-image");
         imageView.setPreserveRatio(true);
         imageView.setSmooth(true);
         imageView.fitWidthProperty().bind(messageArea.widthProperty().subtract(48));
         imageView.fitHeightProperty().bind(messageArea.heightProperty().subtract(48));
 
-        StackPane imageFrame = new StackPane(imageView);
+        Label imageStatus = new Label(I18n.t("chat.image.loading"));
+        Hyperlink publicLink = new Hyperlink(image.shareUrl());
+        publicLink.setOnAction(_ -> com.meshtastic.client.utils.ExternalUrlLauncher.open(image.shareUrl()));
+        VBox fallback = new VBox(8, imageStatus, publicLink);
+        fallback.setAlignment(Pos.CENTER);
+        Runnable updateStatus = () -> {
+            boolean failed = fullImage.isError() || image.isExpired();
+            boolean ready = fullImage.getProgress() >= 1 && !failed;
+            fallback.setVisible(!ready);
+            fallback.setManaged(!ready);
+            imageView.setVisible(ready);
+            imageStatus.setText(I18n.t(failed ? "chat.image.previewFailed" : "chat.image.loading"));
+        };
+        ChangeListener<Number> progress = (_, _, _) -> updateStatus.run();
+        ChangeListener<Boolean> failure = (_, _, _) -> updateStatus.run();
+        fullImage.progressProperty().addListener(progress);
+        fullImage.errorProperty().addListener(failure);
+        updateStatus.run();
+        imageViewerCleanup = () -> {
+            fullImage.cancel();
+            fullImage.progressProperty().removeListener(progress);
+            fullImage.errorProperty().removeListener(failure);
+            imageView.fitWidthProperty().unbind();
+            imageView.fitHeightProperty().unbind();
+            imageView.setImage(null);
+        };
+        StackPane imageFrame = new StackPane(imageView, fallback);
         imageFrame.getStyleClass().add("chat-image-viewer-frame");
         imageFrame.setOnMouseClicked(javafx.event.Event::consume);
 
         Button closeButton = new Button("✕");
         closeButton.getStyleClass().add("chat-image-viewer-close");
         closeButton.setTooltip(new Tooltip(I18n.t("common.close")));
-        closeButton.setOnAction(_ -> hideMeshFilesImage());
+        closeButton.setOnAction(_ -> hideChatImage());
 
         StackPane overlay = new StackPane(imageFrame, closeButton);
         overlay.getStyleClass().add("chat-image-viewer-overlay");
         overlay.setFocusTraversable(true);
         overlay.setOnMouseClicked(event -> {
             if (event.getButton() == MouseButton.PRIMARY) {
-                hideMeshFilesImage();
+                hideChatImage();
             }
             event.consume();
         });
         overlay.setOnKeyPressed(event -> {
             if (event.getCode() == KeyCode.ESCAPE) {
-                hideMeshFilesImage();
+                hideChatImage();
                 event.consume();
             }
         });
@@ -1241,9 +1274,13 @@ abstract class FormChatUi extends FormChatBase {
     }
 
     /**
-     * Closes the active MeshFiles image overlay, if any.
+     * Closes the active chat image overlay, if any.
      */
-    private void hideMeshFilesImage() {
+    private void hideChatImage() {
+        if (imageViewerCleanup != null) {
+            imageViewerCleanup.run();
+            imageViewerCleanup = null;
+        }
         if (imageViewerOverlay == null) {
             return;
         }
@@ -1456,7 +1493,7 @@ abstract class FormChatUi extends FormChatBase {
         suspendScrollStateSync();
         try {
             closeMessageSearch();
-            hideMeshFilesImage();
+            hideChatImage();
             bubbleFactory.hideOpenReactionPopup();
             this.selectedChat = chat;
             rememberSelectedChatForBoundConnection();
@@ -1512,7 +1549,7 @@ abstract class FormChatUi extends FormChatBase {
         saveCurrentChatScrollState();
         cancelHistoryLoading();
         closeMessageSearch();
-        hideMeshFilesImage();
+        hideChatImage();
         chatInputBar.cancelPendingImageUpload();
         bubbleFactory.hideOpenReactionPopup();
         chatRequestGeneration++;
