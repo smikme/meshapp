@@ -380,7 +380,8 @@ public final class SelfUpdateLauncher {
                                                           PayloadPlan plan) {
         Optional<VersionInfo> currentInfo = payloadVersionInfo(currentDir);
         if (currentInfo.isPresent() && currentInfo.get().versionCode() > 0) {
-            return currentInfo.get().versionCode() >= plan.bundledVersionCode();
+            return ReleaseVersion.compare(currentInfo.get().version(), currentInfo.get().versionCode(),
+                    plan.bundledVersion(), plan.bundledVersionCode()) >= 0;
         }
         return compareVersionNames(currentVersion, plan.bundledVersion()) >= 0;
     }
@@ -434,6 +435,11 @@ public final class SelfUpdateLauncher {
     }
 
     private static int compareVersionNames(String left, String right) {
+        var leftRelease = ReleaseVersion.parse(left);
+        var rightRelease = ReleaseVersion.parse(right);
+        if (leftRelease.isPresent() && rightRelease.isPresent()) {
+            return leftRelease.get().compareTo(rightRelease.get());
+        }
         int[] leftParts = numericVersionParts(left);
         int[] rightParts = numericVersionParts(right);
         for (int i = 0; i < Math.max(leftParts.length, rightParts.length); i++) {
@@ -636,7 +642,7 @@ public final class SelfUpdateLauncher {
     }
 
     private static String sanitizeVersion(String version) {
-        String sanitized = version.trim().replaceAll("[^A-Za-z0-9._-]+", "_");
+        String sanitized = version.trim().replaceAll("[^A-Za-z0-9.+_-]+", "_");
         if (!isSafeVersion(sanitized)) {
             throw new IllegalArgumentException("Unsafe payload version: " + version);
         }

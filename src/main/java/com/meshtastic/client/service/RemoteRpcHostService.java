@@ -350,6 +350,7 @@ public final class RemoteRpcHostService {
                     result.addProperty("app", "MeshApp");
                     result.addProperty("version", MeshApp.APPLICATION_VERSION);
                     result.addProperty("versionCode", MeshApp.VERSION_CODE);
+                    result.addProperty("buildNumber", MeshApp.BUILD_NUMBER);
                     result.addProperty("remoteRpc", true);
                     result.addProperty("activeConnections",
                             ConnectionManager.getInstance().getActiveConnectionEntries().size());

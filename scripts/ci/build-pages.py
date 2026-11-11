@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 
-def build(source, output, base_url, manifest=None):
+def build(source, output, base_url, manifest=None, channel="stable", feeds_dir=None):
     output.mkdir(parents=True, exist_ok=True)
     (output / ".nojekyll").touch()
     shutil.copyfile(source / "index.html", output / "index.html")
@@ -27,8 +27,18 @@ def build(source, output, base_url, manifest=None):
             shutil.copyfile(script, target / script.name)
             entries.append(dict(name=script.name, type="file", download_url=f"{base_url.rstrip('/')}/store/{language}/{script.name}"))
         (target / "catalog.json").write_text(json.dumps(entries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if channel not in ("stable", "unstable"):
+        raise ValueError("Unknown update channel")
+    for name in ("stable", "unstable"):
+        previous = feeds_dir / f"{name}.json" if feeds_dir else None
+        feed = output / "updates" / name / "meshapp.json"
+        if previous and previous.is_file():
+            feed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(previous, feed)
+        else:
+            feed.unlink(missing_ok=True)
     if manifest:
-        feed = output / "updates/stable/meshapp.json"
+        feed = output / "updates" / channel / "meshapp.json"
         feed.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(manifest, feed)
 
@@ -39,5 +49,7 @@ if __name__ == "__main__":
     p.add_argument("--output", type=Path, default=Path("build/pages"))
     p.add_argument("--base-url", default="https://smikme.github.io/meshapp")
     p.add_argument("--manifest", type=Path)
+    p.add_argument("--channel", choices=("stable", "unstable"), default="stable")
+    p.add_argument("--feeds-dir", type=Path)
     a = p.parse_args()
-    build(a.source, a.output, a.base_url, a.manifest)
+    build(a.source, a.output, a.base_url, a.manifest, a.channel, a.feeds_dir)

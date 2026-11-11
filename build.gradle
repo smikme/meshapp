@@ -226,7 +226,13 @@ def gitOutput = { List<String> arguments ->
 def gitHeadTags = gitOutput(['tag', '--points-at', 'HEAD'])
 def gitDescription = gitOutput(['describe', '--tags', '--always', '--dirty'])
 def gitCommitCount = gitOutput(['rev-list', '--count', 'HEAD'])
-def gitShortHash = gitOutput(['rev-parse', '--short=4', 'HEAD'])
+def nativeBuildVersion = { long build ->
+	if (build < 1 || build > 4244635647L) {
+		throw new GradleException('Build number must be in 1..4244635647')
+	}
+	// Separate installer epoch, above existing 2.x packages; all three MSI fields participate.
+	return "${3 + build.intdiv(16777216L)}.${build.intdiv(65536L) % 256}.${build % 65536}"
+}
 
 // Native package versions stay numeric; the application/tag may carry -unstable.N.
 def parseReleaseVersionInfo = { rawTag ->
@@ -237,15 +243,19 @@ def parseReleaseVersionInfo = { rawTag ->
 	if (tag.startsWith('refs/tags/')) {
 		tag = tag.substring('refs/tags/'.length())
 	}
-	def matcher = tag =~ /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-unstable\.[1-9]\d*)?$/
+	def matcher = tag =~ /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-unstable\.([1-9]\d*)|\+build\.([1-9]\d*))?$/
 	if (!matcher.matches()) {
 		return null
 	}
-	def packageVersion = "${matcher.group(1)}.${matcher.group(2)}.${matcher.group(3)}"
+	def baseVersion = "${matcher.group(1)}.${matcher.group(2)}.${matcher.group(3)}"
+	long buildNumber = (matcher.group(4) ?: matcher.group(5) ?: '0').toLong()
 	return [
 		tag: tag.startsWith('v') ? tag : "v${tag}",
-		packageVersion: packageVersion,
-		unstable: matcher.group(4) != null
+		baseVersion: baseVersion,
+		packageVersion: buildNumber ? nativeBuildVersion(buildNumber) : baseVersion,
+		buildNumber: buildNumber,
+		unstable: matcher.group(4) != null,
+		channel: matcher.group(4) != null ? 'unstable' : 'stable'
 	]
 }
 
@@ -264,6 +274,8 @@ def resolveReleaseVersionInfo = {
 			return versionInfo
 		}
 	}
+	// A local checkout, including a tagged commit, is a dev build unless explicitly requested.
+	if (System.getenv('CI') != 'true') return null
 
 	try {
 		def tags = gitHeadTags.get().readLines()
@@ -275,15 +287,15 @@ def resolveReleaseVersionInfo = {
 			}
 			.findAll { it != null }
 			.sort { a, b ->
-				List<Integer> left = a.versionInfo.packageVersion.toString().tokenize('.').collect { it.toInteger() }
-				List<Integer> right = b.versionInfo.packageVersion.toString().tokenize('.').collect { it.toInteger() }
+				List<Integer> left = a.versionInfo.baseVersion.toString().tokenize('.').collect { it.toInteger() }
+				List<Integer> right = b.versionInfo.baseVersion.toString().tokenize('.').collect { it.toInteger() }
 				for (int i = 0; i < 3; i++) {
 					def cmp = right.get(i) <=> left.get(i)
 					if (cmp != 0) {
 						return cmp
 					}
 				}
-				return a.tag <=> b.tag
+				return (a.versionInfo.unstable <=> b.versionInfo.unstable) ?: (b.versionInfo.buildNumber <=> a.versionInfo.buildNumber)
 			}
 		if (!tags.isEmpty()) {
 			return tags[0].versionInfo
@@ -302,18 +314,48 @@ def configuredApplicationVersion = providers.gradleProperty('meshappVersion')
 		.orElse('')
 		.get()
 def releaseVersionInfo = resolveReleaseVersionInfo()
-version = configuredApplicationVersion ?: {
-	if (releaseVersionInfo != null) {
-		return releaseVersionInfo.tag
+// Reserve a local number once per packaging invocation, not once per artifact/task.
+// Keep it outside build/ so `clean` does not reset it; lock concurrent invocations.
+def localBuildNumber = 0L
+if (releaseVersionInfo == null) {
+	def packagingTasks = ['build', 'assemble', 'jar', 'installDist', 'distZip', 'distTar',
+		'jpackage', 'appImage', 'flatpak', 'selfUpdateImage', 'selfUpdateArchive', 'verifySelfUpdatePackage']
+	boolean reserve = !gradle.startParameter.dryRun && gradle.startParameter.taskNames.any {
+		packagingTasks.contains(it.tokenize(':').last())
 	}
+	def counterFile = new File(projectDir, '.gradle/meshapp-local-build-number')
+	if (reserve || counterFile.exists()) {
+		counterFile.parentFile.mkdirs()
+		try (def counter = java.nio.channels.FileChannel.open(counterFile.toPath(),
+				java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.READ, java.nio.file.StandardOpenOption.WRITE);
+			 def lock = counter.lock()) {
+			def buffer = java.nio.ByteBuffer.allocate(64)
+			counter.read(buffer)
+			buffer.flip()
+			def stored = StandardCharsets.UTF_8.decode(buffer).toString().trim()
+			localBuildNumber = stored ? Long.parseLong(stored) : 0L
+			if (reserve) {
+				localBuildNumber++
+				nativeBuildVersion(localBuildNumber) // fail before wrapping an installer version
+				counter.truncate(0)
+				counter.position(0)
+				counter.write(StandardCharsets.UTF_8.encode("${localBuildNumber}\n"))
+				counter.force(true)
+			}
+		}
+	}
+}
+version = releaseVersionInfo?.tag ?: configuredApplicationVersion ?: {
 	try {
-		return gitDescription.get() ?: 'dev'
+		return "${gitDescription.get() ?: 'dev'}+local.${localBuildNumber}"
 	} catch (ignored) {
-		return 'dev'
+		return "dev+local.${localBuildNumber}"
 	}
 }()
 def applicationName = project.name.toString()
 def applicationVersion = version.toString()
+def applicationBuildNumber = releaseVersionInfo?.buildNumber ?: localBuildNumber
+def applicationChannel = releaseVersionInfo?.channel ?: 'dev'
 def applicationJarName = "${applicationName}-${applicationVersion}.jar"
 def projectRootDir = project.projectDir
 
@@ -466,7 +508,7 @@ tasks.register('generateVersionProperties') {
 		// participate in the public update channel. Keep in sync with scripts/ci/release.py.
 		def versionCode = 0
 		if (releaseVersionInfo != null) {
-			def parts = releaseVersionInfo.packageVersion.tokenize('.').collect { it.toInteger() }
+			def parts = releaseVersionInfo.baseVersion.tokenize('.').collect { it.toInteger() }
 			if (parts[0] > 255 || parts[1] > 255 || parts[2] > 999) {
 				throw new GradleException('Release version must fit major/minor 0..255 and patch 0..999')
 			}
@@ -480,7 +522,11 @@ tasks.register('generateVersionProperties') {
 		}
 		new File(dir, 'version.properties').text =
 			"version=${applicationVersion}\n" +
-			"versionCode=${versionCode}\n"
+			"versionCode=${versionCode}\n" +
+			"releaseVersion=${releaseVersionInfo?.baseVersion ?: 'dev'}\n" +
+			"channel=${applicationChannel}\n" +
+			"buildNumber=${applicationBuildNumber}\n" +
+			"packageVersion=${releaseVersionInfo?.packageVersion ?: (localBuildNumber ? nativeBuildVersion(localBuildNumber) : '0.0.0')}\n"
 	}
 }
 
@@ -782,7 +828,7 @@ def resolveReleasePackageVersion = {
 	return resolveReleaseVersionInfo()?.packageVersion
 }
 
-def resolvePackageVersion = { os ->
+def resolvePackageVersion = {
 	// Native package managers require numeric versions. Releases use the Git tag, while dev
 	// builds receive a reproducible numeric fallback derived from commit count and hash.
 	def releasePackageVersion = resolveReleasePackageVersion()
@@ -790,18 +836,9 @@ def resolvePackageVersion = { os ->
 		return releasePackageVersion
 	}
 	try {
-		def count = gitCommitCount.get()
-		if (os.isMacOsX()) {
-			// macOS jpackage allows 1-3 numbers only
-			return "2.0.${count}"
-		}
-		def hash = gitShortHash.get()
-		// Fallback for dev builds without a release tag; MSI upgrades still use
-		// the first three version components.
-		def minor = Integer.parseInt(hash, 16) % 65536
-		return "2.0.${count}.${minor}"
+		return localBuildNumber ? nativeBuildVersion(localBuildNumber) : "2.0.${gitCommitCount.get()}"
 	} catch (ignored) {
-		return os.isMacOsX() ? '2.0.0' : '2.0.0.0'
+		return '2.0.0'
 	}
 }
 
@@ -1426,7 +1463,7 @@ def adHocSignMacBundle = { File appDir, File entitlements ->
 }
 
 def sanitizeArtifactVersion = { value ->
-	value.replaceAll(/[^A-Za-z0-9._-]+/, '_')
+	value.replaceAll(/[^A-Za-z0-9.+_-]+/, '_')
 }
 
 def normalizeArtifactArch = {
@@ -1543,7 +1580,7 @@ def buildLinuxAppImage = { File installDir, File workDir, String taskName ->
 	}
 	workDir.mkdirs()
 
-	def appVersion = resolvePackageVersion(os)
+	def appVersion = resolvePackageVersion()
 	def javaHome = resolvePackagingJavaHome()
 	def jpackageBin = "${javaHome}/bin/jpackage"
 	def libDir = preparePackagingLibDir(os, installDir, new File(workDir, 'input'))
@@ -1598,7 +1635,7 @@ def writeFlatpakMetainfo = { File sourceFile, File targetFile, String appVersion
 	release.attributes()['version'] = appVersion
 	release.attributes()['date'] = resolveFlatpakReleaseDate()
 
-	def releaseTag = parseReleaseVersionInfo(appVersion)?.tag
+	def releaseTag = releaseVersionInfo?.tag
 	if (releaseTag) {
 		component.depthFirst()
 			.findAll { it.name() == 'image' }
@@ -1982,6 +2019,7 @@ def selfUpdateRequiredJarEntries = [
 	'com/meshtastic/client/notification/MacOsNotificationService.class',
 	'com/meshtastic/client/notification/NotificationService.class',
 	'com/meshtastic/client/update/SelfUpdateLauncher.class',
+	'com/meshtastic/client/update/ReleaseVersion.class',
 	'com/meshtastic/client/update/SelfUpdateEnvironment.class',
 	'com/meshtastic/client/update/SelfUpdateInstaller.class',
 	'com/meshtastic/client/update/SelfUpdateInstallerMain.class',
@@ -2212,7 +2250,7 @@ tasks.register('jpackage') {
 		def outputDir = layout.buildDirectory.dir("jpackage").get().asFile
 		if (outputDir.exists()) outputDir.deleteDir()
 		outputDir.mkdirs()
-		def appVersion = resolvePackageVersion(os)
+		def appVersion = resolvePackageVersion()
 
 		def javaHome = resolvePackagingJavaHome()
 		logger.lifecycle("jpackage: using Java runtime from ${javaHome}")

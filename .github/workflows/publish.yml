@@ -1,9 +1,13 @@
 name: Publish release
 on:
+  workflow_run:
+    workflows: ['Build release']
+    types: [completed]
+    branches: ['unstable/*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Verified draft version, for example 2.4.0. Run from main.'
+        description: 'Full draft tag, for example 2.4.0+build.126 or 2.4.0-unstable.126. Run from main.'
         required: true
         type: string
       release_notes_ru:
@@ -17,6 +21,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     environment: production
@@ -32,11 +40,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-        run: python3 scripts/ci/github-release.py prepare-publish --version "$RELEASE_VERSION" --repository "$GITHUB_REPOSITORY"
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            RELEASE_VERSION="${SOURCE_BRANCH#unstable/}-unstable.${SOURCE_RUN_NUMBER}"
+          fi
+          python3 scripts/ci/github-release.py prepare-publish --version "$RELEASE_VERSION" --repository "$GITHUB_REPOSITORY"
       - name: Sign update metadata
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.MESHAPP_UPDATE_ED25519_PRIVATE_KEY }}
           RELEASE_VERSION: ${{ steps.release.outputs.tag }}
+          RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
           RELEASE_NOTES_RU: ${{ inputs.release_notes_ru }}
         run: |
           set -euo pipefail
@@ -46,9 +62,11 @@ jobs:
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$UPDATE_PRIVATE_KEY" > "$key"
           printf '%s\n' "$RELEASE_NOTES_RU" > build/release/notes-ru.md
-          python3 scripts/ci/release.py manifest --version "$RELEASE_VERSION" --repository "$GITHUB_REPOSITORY" --source build/release --private-key "$key" --notes build/release/notes.md --notes-ru build/release/notes-ru.md --output build/release/meshapp.json
+          python3 scripts/ci/release.py manifest --version "$RELEASE_VERSION" --channel "$RELEASE_CHANNEL" --repository "$GITHUB_REPOSITORY" --source build/release --private-key "$key" --notes build/release/notes.md --notes-ru build/release/notes-ru.md --output build/release/meshapp.json
       - name: Build Pages content
-        run: python3 scripts/ci/build-pages.py --manifest build/release/meshapp.json
+        env:
+          RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+        run: python3 scripts/ci/build-pages.py --manifest build/release/meshapp.json --channel "$RELEASE_CHANNEL" --feeds-dir build/update-feeds
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: build/pages

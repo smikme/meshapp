@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
+from versioning import ReleaseVersion, package_version
 
 PLATFORMS = {
     "linux-x86_64": ("deb", "AppImage", "flatpak"),
@@ -21,21 +22,14 @@ PLATFORMS = {
 
 
 def version_info(value):
-    match = re.fullmatch(r"v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-unstable\.[1-9]\d*)?", value)
-    if not match:
-        raise ValueError("Expected X.Y.Z, optionally prefixed with v and suffixed with -unstable.N")
-    major, minor, patch = map(int, match.groups()[:3])
-    suffix = match.group(4) or ""
-    if major > 255 or minor > 255 or patch > 999:
-        raise ValueError("Version limits: major/minor <= 255, patch <= 999")
-    code = major * 1_000_000 + minor * 1000 + patch
-    # Unstable builds are installed manually. A stable build of the same version
-    # must still be offered by the updater; no unstable update feed is published.
-    if suffix:
-        code -= 1
-    if code <= 0:
-        raise ValueError("Release version must be greater than 0.0.0")
-    return f"v{major}.{minor}.{patch}{suffix}", code
+    version = ReleaseVersion.parse(value)
+    return version.tag, version.code
+
+
+def version_metadata(tag):
+    version = ReleaseVersion.parse(tag)
+    return dict(releaseVersion=version.base, channel=version.channel, buildNumber=version.build,
+                packageVersion=package_version(version.build) if version.build else version.base)
 
 
 def digest(path):
@@ -60,7 +54,7 @@ def public_der(path):
     return value
 
 
-def verify_payload(path, tag, code, public_key):
+def verify_payload(path, tag, code, public_key, require_build=False):
     """Check the trust root and version actually embedded in the distributed JAR."""
     with zipfile.ZipFile(path) as payload:
         candidates = [n for n in payload.namelist() if re.fullmatch(r"lib/MeshApp-.+\.jar", n)]
@@ -70,6 +64,8 @@ def verify_payload(path, tag, code, public_key):
             props = dict(line.split("=", 1) for line in app.read("version.properties").decode().splitlines() if "=" in line)
             if props.get("version") != tag or props.get("versionCode") != str(code):
                 raise ValueError(f"{path.name}: embedded version does not match the release")
+            if require_build and any(props.get(k) != str(v) for k, v in version_metadata(tag).items()):
+                raise ValueError(f"{path.name}: embedded build metadata does not match the release")
             key = app.read("update/ed25519-public-key.txt").decode()
             key = re.sub(r"-----[^\n]+-----|\s", "", key)
             if base64.b64decode(key, validate=True) != public_der(public_key):
@@ -96,7 +92,7 @@ def collect(args):
         if len(files) != 1:
             raise ValueError(f"Expected exactly one {pattern}, found {len(files)}")
         if extension == "selfupdate.zip":
-            verify_payload(files[0], tag, code, args.public_key)
+            verify_payload(files[0], tag, code, args.public_key, require_build=ReleaseVersion.parse(tag).build > 0)
         shutil.copyfile(files[0], args.output / artifact_name(tag, args.platform, extension))
 
 
@@ -114,12 +110,12 @@ def finalize(args):
     for name, (platform, extension) in sorted(expected.items()):
         path = args.source / name
         if extension == "selfupdate.zip":
-            verify_payload(path, tag, code, args.public_key)
+            verify_payload(path, tag, code, args.public_key, require_build=ReleaseVersion.parse(tag).build > 0)
         if path.stat().st_size == 0:
             raise ValueError(f"Empty artifact: {name}")
         artifacts.append(dict(name=name, platform=platform, format=extension,
                               size=path.stat().st_size, sha256=digest(path)))
-    write_json(args.source / "release.json", dict(schema=1, version=tag, versionCode=code,
+    write_json(args.source / "release.json", dict(schema=2, version=tag, versionCode=code, **version_metadata(tag),
                commit=args.commit, repository=args.repository,
                publicKeySha256=hashlib.sha256(public_der(args.public_key)).hexdigest(), artifacts=artifacts))
     files = sorted([args.source / n for n in expected] + [args.source / "release.json"])
@@ -129,8 +125,10 @@ def finalize(args):
 def verify_release(directory, public_key):
     metadata = json.loads((directory / "release.json").read_text(encoding="utf-8"))
     tag, code = version_info(metadata["version"])
-    if metadata.get("schema") != 1 or metadata["versionCode"] != code:
+    if metadata.get("schema") not in (1, 2) or metadata["versionCode"] != code:
         raise ValueError("Invalid release metadata/version code")
+    if metadata["schema"] == 2 and any(metadata.get(k) != v for k, v in version_metadata(tag).items()):
+        raise ValueError("Invalid release build metadata")
     if metadata["publicKeySha256"] != hashlib.sha256(public_der(public_key)).hexdigest():
         raise ValueError("Release was built with a different update key")
     expected = inventory(tag)
@@ -144,13 +142,14 @@ def verify_release(directory, public_key):
         if path.is_symlink() or path.stat().st_size != a["size"] or digest(path) != a["sha256"]:
             raise ValueError(f"Artifact changed after build: {a['name']}")
         if a["format"] == "selfupdate.zip":
-            verify_payload(path, tag, code, public_key)
+            verify_payload(path, tag, code, public_key, require_build=metadata["schema"] == 2 and ReleaseVersion.parse(tag).build > 0)
     return metadata
 
 
 def manifest(args):
-    if "-unstable." in version_info(args.version)[0]:
-        raise ValueError("Unstable releases cannot be published to the stable update feed")
+    channel = getattr(args, "channel", "stable")
+    if ReleaseVersion.parse(args.version).channel != channel:
+        raise ValueError(f"Release does not belong to the {channel} update feed")
     metadata = verify_release(args.source, args.public_key)
     if metadata["version"] != version_info(args.version)[0] or metadata["repository"] != args.repository:
         raise ValueError("Release tag/repository does not match the requested publication")
@@ -160,6 +159,7 @@ def manifest(args):
     tag = metadata["version"]
     base = f"https://github.com/{args.repository}/releases/download/{tag}"
     result = dict(version=tag, versionCode=metadata["versionCode"],
+                  **(version_metadata(tag) if metadata["schema"] == 2 else {}),
                   releaseNotes=args.notes.read_text(encoding="utf-8"),
                   releaseNotes_ru=args.notes_ru.read_text(encoding="utf-8") if args.notes_ru else "",
                   downloads={}, selfUpdate={})
@@ -203,6 +203,7 @@ def main():
         if name == "finalize":
             p.add_argument("--commit", required=True)
         if name == "manifest":
+            p.add_argument("--channel", choices=("stable", "unstable"), default="stable")
             p.add_argument("--private-key", type=Path, required=True)
             p.add_argument("--notes", type=Path, required=True)
             p.add_argument("--notes-ru", type=Path)

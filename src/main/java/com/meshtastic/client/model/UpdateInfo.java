@@ -4,6 +4,7 @@ import com.google.gson.annotations.SerializedName;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.platform.OsDetect.OsType;
 import com.meshtastic.client.platform.OsDetect.PackageFormat;
+import com.meshtastic.client.update.ReleaseVersion;
 
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -20,6 +21,9 @@ public class UpdateInfo {
 
     private String version;
     private int versionCode;
+    private Long buildNumber;
+    private String channel;
+    private String releaseVersion;
     private String releaseNotes;
     @SerializedName("releaseNotes_ru")
     private String releaseNotesRu;
@@ -28,6 +32,22 @@ public class UpdateInfo {
 
     public String getVersion() { return version; }
     public int getVersionCode() { return versionCode; }
+    public long getBuildNumber() {
+        return ReleaseVersion.parse(version).map(ReleaseVersion::buildNumber).orElse(0L);
+    }
+    public String getChannel() {
+        return ReleaseVersion.parse(version).map(ReleaseVersion::channel).orElse("stable");
+    }
+
+    /** The signed version string is authoritative; duplicated metadata must agree with it. */
+    public boolean hasConsistentVersionMetadata() {
+        if (buildNumber == null && channel == null && releaseVersion == null) return true;
+        return ReleaseVersion.parse(version).map(v ->
+                (buildNumber == null || buildNumber == v.buildNumber())
+                        && (channel == null || channel.equals(v.channel()))
+                        && (releaseVersion == null || releaseVersion.equals(v.baseVersion()))
+                        && versionCode == v.legacyCode()).orElse(false);
+    }
     public String getReleaseNotes() { return releaseNotes; }
     public String getReleaseNotesRu() { return releaseNotesRu; }
     public Map<String, String> getDownloads() { return downloads; }

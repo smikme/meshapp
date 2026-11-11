@@ -51,7 +51,7 @@ public final class UpdateSignatureVerifier {
     }
 
     public boolean isTrusted(UpdateInfo info, SelfUpdateArtifact artifact) {
-        if (info == null || artifact == null) {
+        if (info == null || artifact == null || !info.hasConsistentVersionMetadata()) {
             return false;
         }
         if (publicKey == null) {

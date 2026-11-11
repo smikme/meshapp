@@ -109,7 +109,8 @@ public class About extends VBox {
         sysTitle.getStyleClass().add("section-title");
 
         String version = MeshApp.APPLICATION_VERSION;
-        String build = MeshApp.VERSION_CODE > 0 ? Integer.toString(MeshApp.VERSION_CODE) : "dev";
+        String build = MeshApp.BUILD_NUMBER > 0 ? Long.toString(MeshApp.BUILD_NUMBER)
+                : MeshApp.VERSION_CODE > 0 ? Integer.toString(MeshApp.VERSION_CODE) : "dev";
         String java = System.getProperty("java.vendor") + " - v" + System.getProperty("java.version");
         String system = System.getProperty("os.name") + " " + System.getProperty("os.arch")
                 + " - v" + System.getProperty("os.version");

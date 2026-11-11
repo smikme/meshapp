@@ -164,6 +164,26 @@ class SelfUpdateLauncherTest {
         assertEquals("v2.1.22", Files.readString(plan.currentFile()).trim());
     }
 
+    @Test
+    void launcherSelectsNewerBuildEvenWhenLegacyCodesAreEqual() throws Exception {
+        Path packaged = tempDir.resolve("packaged");
+        Files.createDirectories(packaged);
+        Files.writeString(packaged.resolve("MeshApp.jar"), "bundled build 126");
+        var plan = new SelfUpdateLauncher.PayloadPlan(tempDir.resolve("root"), tempDir.resolve("staging"),
+                packaged, "v2.4.0+build.126", 2004000, "MeshApp");
+        Path previous = plan.versionDir("v2.4.0+build.125").resolve("lib");
+        Files.createDirectories(previous);
+        writeVersionJar(previous.resolve("MeshApp.jar"), "v2.4.0+build.125", 2004000);
+        SelfUpdateInstaller.writeCurrent(plan.currentFile(), "v2.4.0+build.125");
+        assertEquals("v2.4.0+build.126", SelfUpdateLauncher.ensurePayload(plan));
+
+        Path newer = plan.versionDir("v2.4.0+build.127").resolve("lib");
+        Files.createDirectories(newer);
+        writeVersionJar(newer.resolve("MeshApp.jar"), "v2.4.0+build.127", 2004000);
+        SelfUpdateInstaller.writeCurrent(plan.currentFile(), "v2.4.0+build.127");
+        assertEquals("v2.4.0+build.127", SelfUpdateLauncher.ensurePayload(plan));
+    }
+
     private static void writeVersionJar(Path jar, String version, int versionCode) throws Exception {
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(jar))) {
             zip.putNextEntry(new ZipEntry("version.properties"));

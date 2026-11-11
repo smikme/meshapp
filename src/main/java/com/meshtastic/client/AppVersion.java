@@ -1,6 +1,7 @@
 package com.meshtastic.client;
 
 import com.meshtastic.client.update.SelfUpdateEnvironment;
+import com.meshtastic.client.update.ReleaseVersion;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -69,7 +70,7 @@ final class AppVersion {
                 String version = props.getProperty("version", "").trim();
                 int versionCode = parseVersionCode(props.getProperty("versionCode"));
                 if (!version.isBlank()) {
-                    return new Info(version, versionCode);
+                    return new Info(version, versionCode, parseBuildNumber(props));
                 }
             }
         } catch (Exception ignored) {}
@@ -95,7 +96,7 @@ final class AppVersion {
             if (version.isBlank()) {
                 return Optional.empty();
             }
-            return Optional.of(new Info(version, parseVersionCode(props.getProperty("versionCode"))));
+            return Optional.of(new Info(version, parseVersionCode(props.getProperty("versionCode")), parseBuildNumber(props)));
         } catch (Exception ignored) {
             return Optional.empty();
         }
@@ -119,5 +120,17 @@ final class AppVersion {
         }
     }
 
-    record Info(String version, int versionCode) {}
+    private static long parseBuildNumber(Properties props) {
+        try {
+            return Math.max(0, Long.parseLong(props.getProperty("buildNumber")));
+        } catch (NumberFormatException ignored) {
+            return ReleaseVersion.parse(props.getProperty("version")).map(ReleaseVersion::buildNumber).orElse(0L);
+        }
+    }
+
+    record Info(String version, int versionCode, long buildNumber) {
+        Info(String version, int versionCode) {
+            this(version, versionCode, ReleaseVersion.parse(version).map(ReleaseVersion::buildNumber).orElse(0L));
+        }
+    }
 }
