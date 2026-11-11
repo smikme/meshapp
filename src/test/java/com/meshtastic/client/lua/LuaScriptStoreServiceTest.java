@@ -12,8 +12,10 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -21,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class LuaScriptStoreServiceTest {
 
     private HttpServer server;
+    private final List<String> authenticatedRequests = new CopyOnWriteArrayList<>();
 
     @AfterEach
     void tearDown() {
@@ -30,29 +33,32 @@ class LuaScriptStoreServiceTest {
     }
 
     @Test
-    void directoryApiUriUsesRussianBranchForRussianLocale() {
+    void directoryApiUriUsesRussianDirectoryOnMainForRussianLocale() {
         URI uri = LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("ru-RU"));
 
         assertEquals(
-                "https://smikme.github.io/meshapp/store/ru/catalog.json",
+                "https://api.github.com/repos/smikme/meshapp/contents/meshappstore/ru?ref=main",
                 uri.toString());
     }
 
     @Test
-    void directoryApiUriUsesEnglishBranchForEnglishAndFallbackLocales() {
+    void directoryApiUriUsesEnglishDirectoryOnMainForEnglishAndFallbackLocales() {
         assertEquals(
-                "https://smikme.github.io/meshapp/store/en/catalog.json",
+                "https://api.github.com/repos/smikme/meshapp/contents/meshappstore/en?ref=main",
                 LuaScriptStoreService.directoryApiUri(Locale.ENGLISH).toString());
         assertEquals(
-                "https://smikme.github.io/meshapp/store/en/catalog.json",
+                "https://api.github.com/repos/smikme/meshapp/contents/meshappstore/en?ref=main",
                 LuaScriptStoreService.directoryApiUri(Locale.forLanguageTag("de-DE")).toString());
         assertEquals(
-                "https://smikme.github.io/meshapp/store/en/catalog.json",
+                "https://api.github.com/repos/smikme/meshapp/contents/meshappstore/en?ref=main",
+                LuaScriptStoreService.directoryApiUri(Locale.ROOT).toString());
+        assertEquals(
+                "https://api.github.com/repos/smikme/meshapp/contents/meshappstore/en?ref=main",
                 LuaScriptStoreService.directoryApiUri(null).toString());
     }
 
     @Test
-    void fetchScriptsLoadsDirectoryAndScriptExportsFromStaticCatalog() throws Exception {
+    void fetchScriptsLoadsDirectoryAndRawScriptExportsWithoutAuthentication() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
         server.createContext("/api/scripts", exchange -> sendJson(exchange, """
@@ -163,9 +169,15 @@ class LuaScriptStoreServiceTest {
         assertEquals("Replies to ping", script.description());
         assertEquals("Packet Lab", script.author());
         assertEquals("mesh.log('ping')", String.join("\n", script.exportFile().codeLines()));
+        assertEquals(baseUrl + "/raw/Ping-Bot.meshapp-script.json", script.downloadUrl());
+        assertTrue(authenticatedRequests.isEmpty(), "Store requests must not send credentials");
     }
 
-    private static void sendJson(HttpExchange exchange, String body) throws IOException {
+    private void sendJson(HttpExchange exchange, String body) throws IOException {
+        if (exchange.getRequestHeaders().containsKey("Authorization")
+                || exchange.getRequestHeaders().containsKey("Cookie")) {
+            authenticatedRequests.add(exchange.getRequestURI().toString());
+        }
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
         exchange.sendResponseHeaders(200, bytes.length);

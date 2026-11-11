@@ -24,7 +24,8 @@ import java.util.Locale;
 import java.util.UUID;
 
 /**
- * Loads the static Lua script catalog published on GitHub Pages.
+ * Loads Lua scripts from the public meshappstore directory in the main repository.
+ * Catalog and raw file requests do not require a GitHub account or token.
  */
 public final class LuaScriptStoreService {
 
@@ -32,9 +33,9 @@ public final class LuaScriptStoreService {
     private static final Gson JSON = new Gson();
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
     private static final String DIRECTORY_API_URL_TEMPLATE =
-            "https://smikme.github.io/meshapp/store/%s/catalog.json";
-    private static final String STORE_BRANCH_RU = "ru";
-    private static final String STORE_BRANCH_EN = "en";
+            "https://api.github.com/repos/smikme/meshapp/contents/meshappstore/%s?ref=main";
+    private static final String STORE_DIRECTORY_RU = "ru";
+    private static final String STORE_DIRECTORY_EN = "en";
 
     private final HttpClient httpClient;
     private final URI directoryApiUri;
@@ -52,14 +53,14 @@ public final class LuaScriptStoreService {
     }
 
     static URI directoryApiUri(Locale locale) {
-        return URI.create(DIRECTORY_API_URL_TEMPLATE.formatted(storeBranch(locale)));
+        return URI.create(DIRECTORY_API_URL_TEMPLATE.formatted(storeDirectory(locale)));
     }
 
-    static String storeBranch(Locale locale) {
+    static String storeDirectory(Locale locale) {
         if (locale != null && I18n.LANGUAGE_RU.equals(locale.getLanguage())) {
-            return STORE_BRANCH_RU;
+            return STORE_DIRECTORY_RU;
         }
-        return STORE_BRANCH_EN;
+        return STORE_DIRECTORY_EN;
     }
 
     public List<StoreScript> fetchScripts() throws IOException, InterruptedException {
