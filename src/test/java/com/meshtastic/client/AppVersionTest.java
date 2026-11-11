@@ -57,6 +57,20 @@ class AppVersionTest {
         assertEquals(0, info.versionCode());
     }
 
+    @Test
+    void resolvesBuildIdentityFromManagedPayload() throws Exception {
+        String version = "v2.4.0+build.126";
+        Path root = tempDir.resolve("MeshApp");
+        Path lib = root.resolve("versions").resolve(version).resolve("lib");
+        Files.createDirectories(lib);
+        writeVersionJar(lib.resolve("MeshApp.jar"), version, 2004000);
+        var info = AppVersion.resolve(Map.of(SelfUpdateEnvironment.ENV_ROOT, root.toString(),
+                SelfUpdateEnvironment.ENV_VERSION, version), new Properties(), AppVersionTest.class);
+        assertEquals(version, info.version());
+        assertEquals(126, info.buildNumber());
+        assertEquals(2004000, info.versionCode());
+    }
+
     private static void writeVersionJar(Path jar, String version, int versionCode) throws Exception {
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(jar))) {
             zip.putNextEntry(new ZipEntry("version.properties"));

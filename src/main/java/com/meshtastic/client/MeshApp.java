@@ -59,18 +59,20 @@ import org.slf4j.LoggerFactory;
 public class MeshApp extends Application {
 
     private static final Logger log = LoggerFactory.getLogger(MeshApp.class);
-    private static final AppVersion.Info APPLICATION_INFO = AppVersion.resolve(MeshApp.class);
+    private static final AppVersion.Info APPLICATION_INFO = AppVersion.resolve();
 
     public static final String APPLICATION_VERSION = APPLICATION_INFO.version();
     public static final int VERSION_CODE = APPLICATION_INFO.versionCode();
+    public static final long BUILD_NUMBER = APPLICATION_INFO.buildNumber();
     public static final String ARG_NO_SINGLE_INSTANCE = "--no-single-instance";
     public static final String ARG_ALLOW_MULTIPLE_INSTANCES = "--allow-multiple-instances";
     public static final String PROP_DISABLE_SINGLE_INSTANCE = "meshapp.singleInstance.disabled";
 
     private static void logStartupContext() {
         log.info(
-            "Starting MeshApp version {} (build {}) on {} {} ({})",
+            "Starting MeshApp version {} (build {}, update code {}) on {} {} ({})",
             APPLICATION_VERSION,
+            BUILD_NUMBER,
             VERSION_CODE,
             System.getProperty("os.name", "unknown").trim(),
             System.getProperty("os.version", "unknown").trim(),

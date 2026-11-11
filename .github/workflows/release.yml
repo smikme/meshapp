@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '2.4.0 (stable draft from main) or 2.4.0-unstable.1 (prerelease from a branch)'
+        description: '2.4.0 (stable from main) or 2.4.0-unstable. CI assigns the build number.'
         required: true
         type: string
 permissions:
@@ -20,6 +20,7 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       commit: ${{ steps.release.outputs.commit }}
+      build_number: ${{ steps.release.outputs.build_number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -145,7 +146,7 @@ jobs:
           pattern: packages-*
           merge-multiple: true
           path: build/release
-      - name: Verify complete release and create stable draft or unstable prerelease
+      - name: Verify complete release and create draft for signed publication
         run: |
           python3 scripts/ci/release.py finalize --version "$MESHAPP_VERSION" --commit "$RELEASE_COMMIT" --repository "$GITHUB_REPOSITORY" --source build/release
           python3 scripts/ci/github-release.py draft --version "$MESHAPP_VERSION" --commit "$RELEASE_COMMIT" --repository "$GITHUB_REPOSITORY"

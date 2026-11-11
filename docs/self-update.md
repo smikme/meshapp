@@ -23,7 +23,13 @@ executable `bin/java`. `verifySelfUpdatePackage` checks packages before release.
 and `SHA256SUMS`. `Publish release` validates these files, signs update entries,
 uploads `meshapp.json`, publishes the release and deploys GitHub Pages.
 
-Feed: `https://smikme.github.io/meshapp/updates/stable/meshapp.json`.
+Feeds: `https://smikme.github.io/meshapp/updates/stable/meshapp.json` and
+`https://smikme.github.io/meshapp/updates/unstable/meshapp.json`.
+Stable installations read only stable; unstable installations read both. Versions
+are ordered by major/minor/patch, stable after unstable, then numeric build number.
+Legacy names without a build suffix have build 0. Development builds (code 0)
+do not request public updates. A missing channel (404) means no published update;
+other HTTP failures remain errors.
 Artifact URLs use `https://github.com/smikme/meshapp/releases/download/<tag>/…`.
 
 The new trust root is `config/update-public-key.pem`. The private key is stored
@@ -34,26 +40,41 @@ The first GitHub-only release requires manual installation.
 Versions use `vX.Y.Z`; `versionCode = X * 1000000 + Y * 1000 + Z`.
 Limits: X/Y <= 255 and Z <= 999. Development builds have code 0. The manifest and
 every embedded `version.properties` must agree. A release cannot be promoted
-over a newer stable release.
+over a newer release in its channel or a newer native build in either channel.
+`Build release` assigns its run number once. Retries keep it; stable tags use
+`vX.Y.Z+build.N`, unstable tags use `vX.Y.Z-unstable.N`. The legacy integer
+`versionCode` remains unchanged for backward compatibility. First deploy this
+updater using a higher base stable version so old clients notice the transition.
+
+The full version string binds the build and channel in the existing v1 signature
+format; no trust-key or signature-format migration is needed. Optional duplicated
+`buildNumber`, `channel`, and `releaseVersion` fields must match that string.
+Native installer versions use a separate monotonic epoch (build 126 = 3.0.126).
+The launcher also compares full build identities, so a newly installed native
+package can replace an older managed payload with the same legacy code.
 
 ## Manifest contract
 
 ```json
 {
-  "version": "v2.4.0",
+  "version": "v2.4.0+build.126",
   "versionCode": 2004000,
+  "buildNumber": 126,
+  "channel": "stable",
+  "releaseVersion": "2.4.0",
+  "packageVersion": "3.0.126",
   "releaseNotes": "Release notes",
   "releaseNotes_ru": "Описание выпуска",
   "downloads": {
-    "macos-dmg-aarch64": "https://github.com/smikme/meshapp/releases/download/v2.4.0/MeshApp-v2.4.0-macos-aarch64.dmg",
-    "macos": "https://github.com/smikme/meshapp/releases/tag/v2.4.0"
+    "macos-dmg-aarch64": "https://github.com/smikme/meshapp/releases/download/v2.4.0+build.126/MeshApp-v2.4.0+build.126-macos-aarch64.dmg",
+    "macos": "https://github.com/smikme/meshapp/releases/tag/v2.4.0+build.126"
   },
   "selfUpdate": {
     "macos-aarch64": {
       "type": "full-archive",
       "format": "zip",
-      "version": "v2.4.0",
-      "url": "https://github.com/smikme/meshapp/releases/download/v2.4.0/MeshApp-v2.4.0-macos-aarch64-selfupdate.zip",
+      "version": "v2.4.0+build.126",
+      "url": "https://github.com/smikme/meshapp/releases/download/v2.4.0+build.126/MeshApp-v2.4.0+build.126-macos-aarch64-selfupdate.zip",
       "sha256": "<64 hexadecimal characters>",
       "size": 123456789,
       "signature": "<base64 Ed25519 signature>"
