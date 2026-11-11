@@ -1174,6 +1174,9 @@ public class EmojiTextField extends StackPane {
         else if (caretY - verticalOffset < 0) {
             verticalOffset = Math.max(0, caretY);
         }
+        // Fallback font metrics can be shorter than scaledLineHeight(). Never scroll
+        // beyond the actual content, especially when the whole draft already fits.
+        verticalOffset = Math.clamp(verticalOffset, 0, maxOffset);
     }
 
     private void resetBlink() {

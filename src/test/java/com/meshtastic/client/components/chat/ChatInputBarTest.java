@@ -16,6 +16,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -93,8 +94,7 @@ class ChatInputBarTest {
                 var clipboard = new javafx.scene.input.ClipboardContent();
                 clipboard.putString("аа😀а");
                 javafx.scene.input.Clipboard.getSystemClipboard().setContent(clipboard);
-                Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.V,
-                        false, true, false, false));
+                paste(input);
                 assertEquals("аа😀", input.getText());
                 assertFalse(input.replaceRange(0, 2, "ааа"), "spelling replacements use the same limit");
                 input.undo();
@@ -109,8 +109,7 @@ class ChatInputBarTest {
                 assertEquals("", input.getText());
                 clipboard.putString("/аааааааааа");
                 javafx.scene.input.Clipboard.getSystemClipboard().setContent(clipboard);
-                Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.V,
-                        false, true, false, false));
+                paste(input);
                 assertEquals("/аа", input.getText(), "command prefixes must be measured with their arguments");
             } finally { AppPreferences.setCyrillicCompactionEnabled(false); }
             return null;
@@ -120,6 +119,12 @@ class ChatInputBarTest {
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();
+    }
+
+    private static void paste(EmojiTextField input) {
+        boolean mac = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac");
+        Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.V,
+                false, !mac, false, mac));
     }
 
     @Test
