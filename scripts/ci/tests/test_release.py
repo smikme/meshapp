@@ -176,13 +176,41 @@ class ReleaseTest(unittest.TestCase):
         payload.write_bytes(body.replace(b"2004000", b"2004001"))
         self.assertNotEqual(0, subprocess.run(command, capture_output=True).returncode)
 
+    def test_catalog_build_publishes_repository_scripts_for_both_languages(self):
+        spec = importlib.util.spec_from_file_location("pages", Path(__file__).resolve().parents[1] / "build-pages.py")
+        pages = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pages)
+        source, output = self.root / "site", self.root / "pages"
+        source.mkdir()
+        (source / "index.html").write_text("MeshApp")
+        for language, name in (("ru", "Пинг-бот"), ("en", "Ping Bot")):
+            directory = self.root / "meshappstore" / language
+            directory.mkdir(parents=True)
+            script = directory / "PingBot.meshapp-script.json"
+            script.write_text(json.dumps(dict(
+                format="meshapp-lua-script", version=1,
+                guid="96c3f915-87c6-435e-a6c5-c7ffe6f94d1b", name=name,
+                codeLines=["mesh.log('ping')"],
+            ), ensure_ascii=False), encoding="utf-8")
+        pages.build(source, output, "https://smikme.github.io/meshapp/")
+
+        for language in ("ru", "en"):
+            script = self.root / "meshappstore" / language / "PingBot.meshapp-script.json"
+            target = output / "store" / language
+            self.assertEqual(script.read_bytes(), (target / script.name).read_bytes())
+            self.assertEqual([dict(
+                name=script.name, type="file",
+                download_url=f"https://smikme.github.io/meshapp/store/{language}/{script.name}",
+            )], json.loads((target / "catalog.json").read_text()))
+
     def test_catalog_build_keeps_signed_feed_and_does_not_invent_scripts(self):
         spec = importlib.util.spec_from_file_location("pages", Path(__file__).resolve().parents[1] / "build-pages.py")
         pages = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(pages)
         source, output = self.root / "site", self.root / "pages"
         for language in ("ru", "en"):
-            (source / "store" / language).mkdir(parents=True)
+            (self.root / "meshappstore" / language).mkdir(parents=True)
+        source.mkdir()
         (source / "index.html").write_text("MeshApp")
         manifest = self.root / "feed.json"
         manifest.write_text('{"signed": "unchanged"}')
