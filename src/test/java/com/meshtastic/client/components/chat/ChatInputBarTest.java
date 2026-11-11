@@ -44,10 +44,10 @@ class ChatInputBarTest {
     void restoresProtectedUploadedImageUrlWhenTextEditRemovesIt() {
         onFxThread(() -> {
             ChatInputBar bar = new ChatInputBar(
-                    request -> {},
-                    command -> false,
-                    query -> List.of(),
-                    query -> List.of());
+                    _ -> {},
+                    _ -> false,
+                    _ -> List.of(),
+                    _ -> List.of());
             EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
 
             String block = "https://d.privatepractice.app/abCD_123 ";
@@ -67,10 +67,10 @@ class ChatInputBarTest {
     void explicitImageRemovalRemovesProtectedUrlFromInput() {
         onFxThread(() -> {
             ChatInputBar bar = new ChatInputBar(
-                    request -> {},
-                    command -> false,
-                    query -> List.of(),
-                    query -> List.of());
+                    _ -> {},
+                    _ -> false,
+                    _ -> List.of(),
+                    _ -> List.of());
             EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
 
             String url = "https://d.privatepractice.app/abCD_123";
@@ -80,7 +80,7 @@ class ChatInputBarTest {
             setField(bar, "protectedImageCaretPosition", block.length());
             input.setText(block + "caption");
 
-            invoke(bar, "clearAttachedImage", true);
+            removeAttachedImage(bar);
 
             assertEquals("caption", input.getText());
             assertEquals(0, input.getCaretPosition());
@@ -92,10 +92,10 @@ class ChatInputBarTest {
     void explicitImageRemovalKeepsSurroundingTextSeparated() {
         onFxThread(() -> {
             ChatInputBar bar = new ChatInputBar(
-                    request -> {},
-                    command -> false,
-                    query -> List.of(),
-                    query -> List.of());
+                    _ -> {},
+                    _ -> false,
+                    _ -> List.of(),
+                    _ -> List.of());
             EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
 
             String url = "https://d.privatepractice.app/abCD_123";
@@ -105,7 +105,7 @@ class ChatInputBarTest {
             setField(bar, "protectedImageCaretPosition", ("hello" + block).length());
             input.setText("hello" + block + "caption");
 
-            invoke(bar, "clearAttachedImage", true);
+            removeAttachedImage(bar);
 
             assertEquals("hello caption", input.getText());
             return null;
@@ -252,10 +252,10 @@ class ChatInputBarTest {
     void emojiSenderReplyPreviewStaysSingleLineWhenParentHasSurplusHeight() {
         onFxThread(() -> {
             ChatInputBar bar = new ChatInputBar(
-                    request -> {},
-                    command -> false,
-                    query -> List.of(),
-                    query -> List.of());
+                    _ -> {},
+                    _ -> false,
+                    _ -> List.of(),
+                    _ -> List.of());
             VBox root = new VBox(bar);
             VBox.setVgrow(bar, Priority.ALWAYS);
             Scene scene = new Scene(root, 1100, 1200);
@@ -294,10 +294,10 @@ class ChatInputBarTest {
         field.set(target, value);
     }
 
-    private static void invoke(Object target, String name, boolean argument) throws Exception {
-        Method method = ChatInputBar.class.getDeclaredMethod(name, boolean.class);
+    private static void removeAttachedImage(ChatInputBar bar) throws Exception {
+        Method method = ChatInputBar.class.getDeclaredMethod("clearAttachedImage", boolean.class);
         method.setAccessible(true);
-        method.invoke(target, argument);
+        method.invoke(bar, true);
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {

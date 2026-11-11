@@ -97,7 +97,7 @@ class MeshpicUploadServiceTest {
         String wire = new String(uploadBody, StandardCharsets.ISO_8859_1);
         assertTrue(wire.startsWith("--" + boundary + "\r\n"));
         assertTrue(wire.contains("name=\"file\"; filename=\"image.png\"\r\nContent-Type: image/png\r\n\r\n"));
-        assertTrue(wire.contains(new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1)));
+        assertTrue(wire.contains(Files.readString(file, StandardCharsets.ISO_8859_1)));
         assertTrue(wire.endsWith("\r\n--" + boundary + "--\r\n"));
     }
 
@@ -123,7 +123,11 @@ class MeshpicUploadServiceTest {
         Path file = png();
         try (var data = new RandomAccessFile(file.toFile(), "rw")) { data.setLength(MeshpicUploadService.MAX_IMAGE_BYTES); }
         assertNotNull(service.upload(file).join());
-        Path webp = Files.write(directory.resolve("misnamed.png"), getClass().getResourceAsStream("/images/meshpic-input.webp").readAllBytes());
+        Path webp;
+        try (var resource = getClass().getResourceAsStream("/images/meshpic-input.webp")) {
+            assertNotNull(resource, "WebP test fixture must be available");
+            webp = Files.write(directory.resolve("misnamed.png"), resource.readAllBytes());
+        }
         assertNotNull(service.upload(webp).join());
         assertTrue(new String(uploadBody, StandardCharsets.ISO_8859_1).contains("Content-Type: image/webp"));
     }

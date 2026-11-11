@@ -120,10 +120,10 @@ public final class MeshpicUploadService {
         checkStatus(response.statusCode());
         try {
             UploadResponse result = JSON.fromJson(response.body(), UploadResponse.class);
-            if (result == null || !validId(result.short_id()) || result.images() == null
+            if (result == null || invalidId(result.short_id()) || result.images() == null
                     || result.images().size() != 1) throw new IllegalArgumentException();
             UploadedImage image = result.images().getFirst();
-            if (image == null || !validId(image.id())
+            if (image == null || invalidId(image.id())
                     || !("/image/" + result.short_id() + "/" + image.id()).equals(image.url())) {
                 throw new IllegalArgumentException();
             }
@@ -136,7 +136,7 @@ public final class MeshpicUploadService {
         }
     }
 
-    private static boolean validId(String value) { return value != null && ID.matcher(value).matches(); }
+    private static boolean invalidId(String value) { return value == null || !ID.matcher(value).matches(); }
 
     private static void checkStatus(int status) {
         if (status >= 200 && status < 300) return;
