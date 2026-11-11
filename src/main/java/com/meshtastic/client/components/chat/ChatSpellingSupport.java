@@ -162,7 +162,7 @@ final class ChatSpellingSupport {
                             menu.getItems().add(position++, item);
                         }
                     }
-                })).exceptionally(error -> {
+                })).exceptionally(_ -> {
                     Platform.runLater(() -> pending.setText(I18n.t("chat.spelling.noSuggestions")));
                     return null;
                 });
@@ -177,8 +177,8 @@ final class ChatSpellingSupport {
     void layout(double x, double y) {
         clearUnderlines();
         for (ChatSpellChecker.Word word : mistakes) {
-            PathElement[] range = flow.rangeShape(toFlowIndex.applyAsInt(word.start()), toFlowIndex.applyAsInt(word.end()));
-            // Each wrapped fragment of rangeShape is a separate closed rectangle.
+            PathElement[] range = flow.getRangeShape(toFlowIndex.applyAsInt(word.start()), toFlowIndex.applyAsInt(word.end()), false);
+            // Each wrapped fragment of getRangeShape is a separate closed rectangle.
             double left = Double.POSITIVE_INFINITY, right = 0, bottom = 0;
             for (int i = 0; i <= range.length; i++) {
                 PathElement element = i == range.length ? null : range[i];

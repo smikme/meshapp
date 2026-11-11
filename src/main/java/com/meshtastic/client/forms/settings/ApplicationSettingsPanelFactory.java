@@ -66,7 +66,7 @@ public final class ApplicationSettingsPanelFactory {
         }
         enableEffectsCb
             .selectedProperty()
-            .addListener((obs, old, val) ->
+            .addListener((_, _, val) ->
                 AppPreferences.setVisualEffectsEnabled(val)
             );
 
@@ -76,7 +76,7 @@ public final class ApplicationSettingsPanelFactory {
         softwareRenderingCb.setSelected(AppPreferences.isSoftwareRendering());
         softwareRenderingCb
             .selectedProperty()
-            .addListener((obs, old, val) ->
+            .addListener((_, _, val) ->
                 AppPreferences.setSoftwareRendering(val)
             );
 
@@ -86,7 +86,7 @@ public final class ApplicationSettingsPanelFactory {
         minimizeToTrayCb.setSelected(AppPreferences.isMinimizeToTray());
         minimizeToTrayCb
             .selectedProperty()
-            .addListener((obs, old, val) ->
+            .addListener((_, _, val) ->
                 AppPreferences.setMinimizeToTray(val)
             );
 
@@ -151,7 +151,7 @@ public final class ApplicationSettingsPanelFactory {
         checkUpdatesCb.setSelected(AppPreferences.isCheckUpdates());
         checkUpdatesCb
             .selectedProperty()
-            .addListener((obs, old, val) ->
+            .addListener((_, _, val) ->
                 AppPreferences.setCheckUpdates(val)
             );
 
@@ -161,7 +161,7 @@ public final class ApplicationSettingsPanelFactory {
         jfrDiagnosticsCb.setSelected(AppPreferences.isJfrDiagnosticsEnabled());
         jfrDiagnosticsCb
             .selectedProperty()
-            .addListener((obs, old, val) ->
+            .addListener((_, _, val) ->
                 AppPreferences.setJfrDiagnosticsEnabled(val)
             );
 
@@ -233,13 +233,13 @@ public final class ApplicationSettingsPanelFactory {
         routerServerLabel.getStyleClass().add("muted-note-label");
 
         Button generateButton = new Button(I18n.t("settings.remoteRpc.generateKey"));
-        generateButton.setOnAction(event -> keyField.setText(RpcAccessKey.generate().value()));
+        generateButton.setOnAction(_ -> keyField.setText(RpcAccessKey.generate().value()));
 
         Label statusLabel = new Label();
         statusLabel.getStyleClass().add("remote-rpc-status-text");
         statusLabel.setWrapText(true);
 
-        Label statusIndicator = new Label("\u25CF");
+        Label statusIndicator = new Label("●");
         statusIndicator.getStyleClass().add("remote-rpc-status-dot");
         RemoteRpcStatusControls statusControls = new RemoteRpcStatusControls(
                 statusIndicator,
@@ -249,7 +249,7 @@ public final class ApplicationSettingsPanelFactory {
         installRemoteRpcStatusListener(statusControls);
 
         Button applyButton = new Button(I18n.t("settings.remoteRpc.apply"));
-        applyButton.setOnAction(event -> {
+        applyButton.setOnAction(_ -> {
             int port = parsePortOrDefault(portField.getText());
             portField.setText(Integer.toString(port));
             applyButton.setDisable(true);
@@ -388,7 +388,7 @@ public final class ApplicationSettingsPanelFactory {
             }
         });
         service.addStatusListener(listener);
-        controls.statusLabel().sceneProperty().addListener((obs, oldScene, newScene) -> {
+        controls.statusLabel().sceneProperty().addListener((_, oldScene, newScene) -> {
             if (oldScene != null && newScene == null) {
                 service.removeStatusListener(listener);
             }
@@ -426,13 +426,13 @@ public final class ApplicationSettingsPanelFactory {
         }));
         valueField
             .textProperty()
-            .addListener((obs, oldValue, newValue) ->
+            .addListener((_, _, newValue) ->
                 saveMemoryLimitIfComplete(newValue)
             );
-        valueField.setOnAction(event -> normalizeMemoryLimitField(valueField));
+        valueField.setOnAction(_ -> normalizeMemoryLimitField(valueField));
         valueField
             .focusedProperty()
-            .addListener((obs, oldValue, focused) -> {
+            .addListener((_, _, focused) -> {
                 if (!focused) {
                     normalizeMemoryLimitField(valueField);
                 }
@@ -441,7 +441,7 @@ public final class ApplicationSettingsPanelFactory {
         Label unitLabel = new Label(I18n.t("settings.memoryLimit.unit"));
 
         Button resetButton = new Button(I18n.t("common.reset"));
-        resetButton.setOnAction(event ->
+        resetButton.setOnAction(_ ->
             valueField.setText(
                 Integer.toString(AppPreferences.DEFAULT_MEMORY_LIMIT_MB)
             )
@@ -501,11 +501,11 @@ public final class ApplicationSettingsPanelFactory {
             FXCollections.observableArrayList(I18n.supportedLanguages())
         );
         languageBox.setButtonCell(createLanguageCell());
-        languageBox.setCellFactory(ignored -> createLanguageCell());
+        languageBox.setCellFactory(_ -> createLanguageCell());
         languageBox
             .getSelectionModel()
             .select(I18n.languageOption(AppPreferences.getLanguageTag()));
-        languageBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+        languageBox.valueProperty().addListener((_, _, newValue) -> {
             if (
                 newValue != null &&
                 !newValue.tag().equals(I18n.getLanguageTag())
@@ -546,13 +546,13 @@ public final class ApplicationSettingsPanelFactory {
                 )
             );
         filterBox.setButtonCell(createMqttDownlinkFilterModeCell());
-        filterBox.setCellFactory(ignored -> createMqttDownlinkFilterModeCell());
+        filterBox.setCellFactory(_ -> createMqttDownlinkFilterModeCell());
         filterBox.setMinWidth(MQTT_DOWNLINK_FILTER_COMBO_WIDTH);
         filterBox.setPrefWidth(MQTT_DOWNLINK_FILTER_COMBO_WIDTH);
         filterBox
             .getSelectionModel()
             .select(AppPreferences.getMqttDownlinkFilterMode());
-        filterBox.valueProperty().addListener((obs, oldValue, newValue) -> {
+        filterBox.valueProperty().addListener((_, _, newValue) -> {
             if (newValue != null) {
                 AppPreferences.setMqttDownlinkFilterMode(newValue);
             }
@@ -585,7 +585,7 @@ public final class ApplicationSettingsPanelFactory {
         );
         disabledBox
             .selectedProperty()
-            .addListener((obs, old, val) ->
+            .addListener((_, _, val) ->
                 AppPreferences.setLuaCurlSecurityRestrictionsDisabled(val)
             );
 
@@ -655,7 +655,7 @@ public final class ApplicationSettingsPanelFactory {
         slider.setMinWidth(0);
 
         Button resetButton = new Button(I18n.t("common.reset"));
-        resetButton.setOnAction(event -> slider.setValue(defaultValue));
+        resetButton.setOnAction(_ -> slider.setValue(defaultValue));
 
         HBox sliderRow = new HBox(10, slider, resetButton);
         sliderRow.setAlignment(Pos.CENTER_LEFT);
@@ -665,7 +665,7 @@ public final class ApplicationSettingsPanelFactory {
             .bind(sliderRow.widthProperty().multiply(0.5));
         slider.maxWidthProperty().bind(sliderRow.widthProperty().multiply(0.5));
 
-        slider.valueProperty().addListener((obs, oldValue, newValue) -> {
+        slider.valueProperty().addListener((_, oldValue, newValue) -> {
             int rounded = (int) Math.round(newValue.doubleValue());
             if (rounded == (int) Math.round(oldValue.doubleValue())) {
                 return;

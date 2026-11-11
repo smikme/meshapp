@@ -41,7 +41,6 @@ class EmojiTextFieldTest {
 
             field.insertText(2, "X");
             assertEquals("AX😀B", field.getText());
-            return null;
         });
     }
 
@@ -51,7 +50,6 @@ class EmojiTextFieldTest {
             EmojiTextField field = new EmojiTextField();
             field.setText("A\uD83DB\uDC00C");
             assertEquals("ABC", field.getText());
-            return null;
         });
     }
 
@@ -79,7 +77,6 @@ class EmojiTextFieldTest {
             Event.fireEvent(field, typed);
             assertNull(bubbledKeyTyped.get());
             assertEquals("a", field.getText());
-            return null;
         });
     }
 
@@ -89,9 +86,9 @@ class EmojiTextFieldTest {
             EmojiTextField field = new EmojiTextField();
             field.setText("Привет hello Welt");
             field.positionCaret(field.getText().length());
-            wordKey(field, KeyCode.LEFT, false);
+            wordLeft(field, false);
             assertEquals(13, field.getCaretPosition());
-            wordKey(field, KeyCode.LEFT, true);
+            wordLeft(field, true);
             assertEquals("hello ", field.getSelectedText());
             key(field, KeyCode.BACK_SPACE, false, false, false);
             assertEquals("Привет Welt", field.getText());
@@ -100,7 +97,6 @@ class EmojiTextFieldTest {
             assertEquals("hello ", field.getSelectedText());
             shortcut(field, KeyCode.Z, true);
             assertEquals("Привет Welt", field.getText());
-            return null;
         });
     }
 
@@ -128,7 +124,6 @@ class EmojiTextFieldTest {
             field.clear();
             field.undo();
             assertEquals("", field.getText());
-            return null;
         });
     }
 
@@ -152,7 +147,6 @@ class EmojiTextFieldTest {
             assertTrue(field.getCaretPosition() <= lineStart);
             shortcut(field, KeyCode.HOME, false);
             assertEquals(0, field.getCaretPosition());
-            return null;
         });
     }
 
@@ -161,23 +155,22 @@ class EmojiTextFieldTest {
         key(field, code, shift, !mac, mac);
     }
 
-    private static void wordKey(EmojiTextField field, KeyCode code, boolean shift) {
+    private static void wordLeft(EmojiTextField field, boolean shift) {
         boolean mac = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac");
-        Event.fireEvent(field, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, shift, !mac, mac, false));
+        Event.fireEvent(field, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.LEFT, shift, !mac, mac, false));
     }
 
     private static void key(EmojiTextField field, KeyCode code, boolean shift, boolean control, boolean meta) {
         Event.fireEvent(field, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, shift, control, false, meta));
     }
 
-    private static <T> T onFxThread(FxSupplier<T> supplier) {
+    private static void onFxThread(FxAction action) {
         CountDownLatch latch = new CountDownLatch(1);
-        AtomicReference<T> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
 
         Platform.runLater(() -> {
             try {
-                result.set(supplier.get());
+                action.run();
             } catch (Throwable t) {
                 failure.set(t);
             } finally {
@@ -189,7 +182,6 @@ class EmojiTextFieldTest {
         if (failure.get() != null) {
             throw new AssertionError("JavaFX task failed", failure.get());
         }
-        return result.get();
     }
 
     private static void await(CountDownLatch latch) {
@@ -204,7 +196,7 @@ class EmojiTextFieldTest {
     }
 
     @FunctionalInterface
-    private interface FxSupplier<T> {
-        T get() throws Exception;
+    private interface FxAction {
+        void run() throws Exception;
     }
 }

@@ -246,7 +246,7 @@ public final class I18n {
         Locale locale = Locale.forLanguageTag(
                 tag.trim().replace('_', '-'));
         String language = locale.getLanguage();
-        if (language == null || language.isBlank()) {
+        if (language.isBlank()) {
             return null;
         }
         return locale.toLanguageTag();

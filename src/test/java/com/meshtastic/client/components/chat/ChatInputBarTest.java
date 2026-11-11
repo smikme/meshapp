@@ -398,7 +398,7 @@ class ChatInputBarTest {
             Scene scene = new Scene(root, 840, 400);
             ThemeManager.applyTheme(scene, false);
             try {
-                layoutChat(root, 840, 400);
+                layoutChat(root, 840);
                 double emptyHeight = bar.getHeight();
                 double bottom = bar.getLayoutY() + bar.getHeight();
                 List<Node> controls = List.of(bar.lookup(".chat-emoji-btn"),
@@ -414,7 +414,7 @@ class ChatInputBarTest {
 
                 input.setText("word ".repeat(45));
                 input.positionCaret(input.getText().length());
-                layoutChat(root, 840, 400);
+                layoutChat(root, 840);
                 double wrappedHeight = bar.getHeight();
                 assertTrue(wrappedHeight > emptyHeight, "wrapped draft must grow the whole input bar");
                 assertEquals(bottom, bar.getLayoutY() + bar.getHeight(), 1,
@@ -423,7 +423,7 @@ class ChatInputBarTest {
                 assertInputContentVisible(input);
                 assertControlPositions(controls, controlPositions);
 
-                layoutChat(root, 420, 400);
+                layoutChat(root, 420);
                 assertTrue(bar.getHeight() > wrappedHeight, "narrower windows must reserve room for more lines");
                 assertEquals(bottom, bar.getLayoutY() + bar.getHeight(), 1);
                 assertInputFitsBar(input, bar);
@@ -431,18 +431,18 @@ class ChatInputBarTest {
                 assertControlPositions(controls, controlPositions);
 
                 input.positionCaret(0);
-                layoutChat(root, 420, 400);
+                layoutChat(root, 420);
                 assertCaretVisible(input);
                 input.positionCaret(input.getText().length());
-                layoutChat(root, 420, 400);
+                layoutChat(root, 420);
                 assertCaretVisible(input);
 
-                layoutChat(root, 840, 400);
+                layoutChat(root, 840);
                 assertEquals(wrappedHeight, bar.getHeight(), 1);
                 assertInputContentVisible(input);
 
                 input.clear();
-                layoutChat(root, 420, 400);
+                layoutChat(root, 420);
                 assertEquals(emptyHeight, bar.getHeight(), 1, "clearing the draft must restore a single line");
                 assertEquals(bottom, bar.getLayoutY() + bar.getHeight(), 1);
                 assertControlPositions(controls, controlPositions);
@@ -454,8 +454,8 @@ class ChatInputBarTest {
         });
     }
 
-    private static void layoutChat(VBox root, double width, double height) {
-        root.resize(width, height);
+    private static void layoutChat(VBox root, double width) {
+        root.resize(width, 400);
         root.applyCss();
         root.layout();
     }

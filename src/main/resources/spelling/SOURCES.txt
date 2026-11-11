@@ -15,4 +15,5 @@ de/COPYING_GPLv2 -> COPYING_GPLv2
 de/COPYING_GPLv3 -> COPYING_GPLv3
 
 Dictionary and affix files are gzip-compressed without content changes.
+LICENSE-de.txt is transcoded from ISO-8859-1 to UTF-8 without textual changes.
 See the bundled LICENSE files for authors and distribution terms.

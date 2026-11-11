@@ -61,6 +61,8 @@ import java.util.function.Predicate;
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public class ChatInputBar extends VBox {
+    // Keep a strong reference: the preference property stores only a WeakChangeListener.
+    @SuppressWarnings("FieldCanBeLocal")
     private final ChangeListener<Boolean> compactionListener = (_, _, _) -> {
         if (Platform.isFxApplicationThread()) { updateCharCount(); }
         else { Platform.runLater(this::updateCharCount); }
@@ -234,7 +236,7 @@ public class ChatInputBar extends VBox {
 
         messageInput.textProperty().addListener((_, oldVal, newVal) -> {
             if (restoringProtectedImageText) {
-                refreshInputState(newVal);
+                refreshInputState();
                 return;
             }
             if (newVal != null && textByteLength(newVal) > getMaxTextBytes()
@@ -251,7 +253,7 @@ public class ChatInputBar extends VBox {
                 restoreProtectedImageText(oldVal);
                 return;
             }
-            refreshInputState(newVal);
+            refreshInputState();
         });
         messageInput.caretPositionProperty().addListener((_, _, _) ->
                 Platform.runLater(this::refreshCommandSuggestions));
@@ -747,7 +749,7 @@ public class ChatInputBar extends VBox {
         } finally {
             restoringProtectedImageText = false;
         }
-        refreshInputState(restored);
+        refreshInputState();
     }
 
     private void clearAttachedImage(boolean removeUrl) {
@@ -992,7 +994,7 @@ public class ChatInputBar extends VBox {
                 ? I18n.t("chat.messageTooLong", maxBytes) : I18n.t("chat.send"));
     }
 
-    private void refreshInputState(String text) {
+    private void refreshInputState() {
         updateCharCount();
         Platform.runLater(this::refreshCommandSuggestions);
     }

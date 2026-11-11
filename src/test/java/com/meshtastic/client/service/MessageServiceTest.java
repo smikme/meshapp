@@ -96,6 +96,7 @@ class MessageServiceTest {
         String text = "Всему свое время";
         state.getOrCreateNode(state.getMyNodeNum()).setNodeId("!12345678");
         var message = MessageService.sendDirectMessage(handler, state, peer.getNodeId(), text, 0, true);
+        assertNotNull(message);
         assertEquals(text, message.getText());
         assertEquals(21, connection.nextPacket().getPacket().getDecoded().getPayload().size());
         message.setStatus(MeshMessage.DeliveryStatus.FAILED);

@@ -71,7 +71,6 @@ public class EmojiTextField extends StackPane {
     private final TextFlow contentFlow;
     private final Rectangle caret;
     private final Timeline blinkTimeline;
-    private final Rectangle clipRect;
     private final Text promptNode;
 
     private final StringProperty text = new SimpleStringProperty("");
@@ -109,7 +108,7 @@ public class EmojiTextField extends StackPane {
     private final List<Path> selectionRects = new ArrayList<>();
 
     // Segments map the backing text to visual nodes.
-    private List<VisualSegment> segments = new ArrayList<>();
+    private final List<VisualSegment> segments = new ArrayList<>();
 
     // Vertical scrolling, implemented through translateY when content overflows.
     private double verticalOffset = 0;
@@ -148,7 +147,7 @@ public class EmojiTextField extends StackPane {
         caret.setVisible(false);
         caret.setMouseTransparent(true);
 
-        clipRect = new Rectangle();
+        Rectangle clipRect = new Rectangle();
         clipRect.widthProperty().bind(widthProperty());
         clipRect.heightProperty().bind(heightProperty());
         setClip(clipRect);
@@ -157,14 +156,14 @@ public class EmojiTextField extends StackPane {
 
         // Caret blinking.
         blinkTimeline = new Timeline(
-                new KeyFrame(Duration.ZERO, e -> caret.setVisible(true)),
-                new KeyFrame(Duration.millis(530), e -> caret.setVisible(false)),
+                new KeyFrame(Duration.ZERO, _ -> caret.setVisible(true)),
+                new KeyFrame(Duration.millis(530), _ -> caret.setVisible(false)),
                 new KeyFrame(Duration.millis(1060))
         );
         blinkTimeline.setCycleCount(Timeline.INDEFINITE);
 
         // Focus handling.
-        focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+        focusedProperty().addListener((_, _, isFocused) -> {
             if (isFocused) {
                 blinkTimeline.playFromStart();
                 caret.setVisible(true);
@@ -192,7 +191,7 @@ public class EmojiTextField extends StackPane {
         // of the drag target chosen by JavaFX. Installing it on the component is
         // unsafe because consume() in the MOUSE_PRESSED filter may prevent JavaFX
         // from establishing the drag target.
-        sceneProperty().addListener((obs, oldScene, newScene) -> {
+        sceneProperty().addListener((_, oldScene, newScene) -> {
             if (oldScene != null) {
                 oldScene.removeEventFilter(MouseEvent.MOUSE_DRAGGED, sceneDragHandler);
                 oldScene.removeEventFilter(MouseEvent.MOUSE_RELEASED, sceneReleaseHandler);
@@ -204,20 +203,20 @@ public class EmojiTextField extends StackPane {
         });
 
         // Refresh visuals when text changes.
-        text.addListener((obs, oldVal, newVal) -> {
+        text.addListener((_, _, _) -> {
             rebuild();
             updatePromptVisibility();
             spelling.textChanged();
         });
 
         // Refresh the caret when it moves.
-        caretPosition.addListener((obs, oldVal, newVal) -> {
+        caretPosition.addListener((_, _, _) -> {
             updateCaretVisual();
             requestLayout();
             resetBlink();
         });
 
-        TypographyManager.chatFontSizeProperty().addListener((obs, oldValue, newValue) ->
+        TypographyManager.chatFontSizeProperty().addListener((_, _, _) ->
                 applyTypography());
 
         setMinHeight(USE_PREF_SIZE);
@@ -474,16 +473,16 @@ public class EmojiTextField extends StackPane {
     }
 
     /**
-     * Checks the current byte budget and additional draft validator.
+     * Determines whether the current byte budget or draft validator rejects an edit.
      * A draft already over budget may shrink even if it still exceeds the limit.
      *
      * @param candidate complete proposed draft
-     * @return whether the edit may be applied
+     * @return whether the edit must be rejected
      */
-    private boolean acceptsEdit(String candidate) {
-        return (maxBytesSupplier == null || byteCounter.applyAsInt(candidate) <= maxBytesSupplier.getAsInt()
-                || byteCounter.applyAsInt(candidate) < byteCounter.applyAsInt(text.get()))
-                && editValidator.test(candidate);
+    private boolean rejectsEdit(String candidate) {
+        return (maxBytesSupplier != null && byteCounter.applyAsInt(candidate) > maxBytesSupplier.getAsInt()
+                && byteCounter.applyAsInt(candidate) >= byteCounter.applyAsInt(text.get()))
+                || !editValidator.test(candidate);
     }
 
     /**
@@ -501,7 +500,7 @@ public class EmojiTextField extends StackPane {
         end = clampCaret(end);
         String safe = UnicodeTextUtils.sanitize(insertion == null ? "" : insertion);
         String candidate = text.get().substring(0, start) + safe + text.get().substring(end);
-        if (!acceptsEdit(candidate) || candidate.equals(text.get())) { return false; }
+        if (rejectsEdit(candidate) || candidate.equals(text.get())) { return false; }
         EditState before = captureEditState();
         applyingEdit = true;
         try {
@@ -536,9 +535,9 @@ public class EmojiTextField extends StackPane {
      * @param target history receiving the current state
      */
     private void restoreHistory(Deque<EditState> source, Deque<EditState> target) {
-        if (disabled || source.isEmpty() || !acceptsEdit(source.peek().text())) { return; }
-        EditState current = captureEditState();
         EditState previous = source.peek();
+        if (disabled || previous == null || rejectsEdit(previous.text())) { return; }
+        EditState current = captureEditState();
         applyingEdit = true;
         try {
             text.set(previous.text());
@@ -796,7 +795,7 @@ public class EmojiTextField extends StackPane {
     private void moveToLineBoundary(boolean end, boolean extend) {
         layoutContent();
         CaretPos pos = computeCaretPos(getCaretPosition());
-        var hit = contentFlow.hitTest(new Point2D(end ? contentFlow.getWidth() : 0,
+        var hit = contentFlow.getHitInfo(new Point2D(end ? contentFlow.getWidth() : 0,
                 pos.y + caret.getHeight() / 2));
         moveTo(fromFlowIndex(hit.getInsertionIndex()), extend);
         caretLeading = hit.isLeading();
@@ -808,7 +807,7 @@ public class EmojiTextField extends StackPane {
         double desiredX = Double.isNaN(preferredCaretX) ? pos.x : preferredCaretX;
         Bounds shape = caretBounds(getCaretPosition());
         double lineHeight = Math.max(1, shape.getHeight());
-        var hit = contentFlow.hitTest(new Point2D(desiredX,
+        var hit = contentFlow.getHitInfo(new Point2D(desiredX,
                 pos.y + lineHeight / 2 + lines * lineHeight));
         moveTo(fromFlowIndex(hit.getInsertionIndex()), extend);
         caretLeading = hit.isLeading();
@@ -922,26 +921,26 @@ public class EmojiTextField extends StackPane {
         MenuItem redoItem = new MenuItem(I18n.t("common.redo"));
         redoItem.setOnAction(_ -> redo());
         MenuItem cutItem = new MenuItem(I18n.t("common.cut"));
-        cutItem.setOnAction(e -> cutSelection());
+        cutItem.setOnAction(_ -> cutSelection());
 
         MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
-        copyItem.setOnAction(e -> copySelection());
+        copyItem.setOnAction(_ -> copySelection());
 
         MenuItem pasteItem = new MenuItem(I18n.t("common.paste"));
-        pasteItem.setOnAction(e -> paste());
+        pasteItem.setOnAction(_ -> paste());
 
         MenuItem selectAllItem = new MenuItem(I18n.t("common.selectAll"));
-        selectAllItem.setOnAction(e -> selectAll());
+        selectAllItem.setOnAction(_ -> selectAll());
 
         List<MenuItem> baseItems = List.of(undoItem, redoItem, new SeparatorMenuItem(), cutItem, copyItem, pasteItem,
                 new SeparatorMenuItem(), selectAllItem);
         contextMenu = new ContextMenu();
 
-        contextMenu.setOnShowing(e -> {
+        contextMenu.setOnShowing(_ -> {
             boolean hasSel = hasSelection();
             boolean hasClip = Clipboard.getSystemClipboard().hasString();
-            undoItem.setDisable(disabled || undoHistory.isEmpty() || !acceptsEdit(undoHistory.peek().text()));
-            redoItem.setDisable(disabled || redoHistory.isEmpty() || !acceptsEdit(redoHistory.peek().text()));
+            undoItem.setDisable(disabled || undoHistory.isEmpty() || rejectsEdit(undoHistory.peek().text()));
+            redoItem.setDisable(disabled || redoHistory.isEmpty() || rejectsEdit(redoHistory.peek().text()));
             cutItem.setDisable(!hasSel);
             copyItem.setDisable(!hasSel);
             pasteItem.setDisable(!hasClip);
@@ -972,7 +971,7 @@ public class EmojiTextField extends StackPane {
             text.set(t);
             return;
         }
-        if (t == null || t.isEmpty()) {
+        if (t.isEmpty()) {
             requestLayout();
             updateCaretVisual();
             return;
@@ -1071,8 +1070,7 @@ public class EmojiTextField extends StackPane {
         if (flowWidth <= 0) { return scaledMinHeight(); }
         // Report the wrapped height before parents allocate space, including emoji images.
         double contentH = Math.max(scaledLineHeight(), contentFlow.prefHeight(flowWidth));
-        return Math.max(scaledMinHeight(),
-                Math.min(contentH + scaledPadTop() * 2, scaledMaxHeight()));
+        return Math.clamp(contentH + scaledPadTop() * 2, scaledMinHeight(), scaledMaxHeight());
     }
 
     private void layoutContent() {
@@ -1121,7 +1119,7 @@ public class EmojiTextField extends StackPane {
     private Bounds caretBounds(int pos) {
         int index = toFlowIndex(pos);
         boolean leading = pos != getCaretPosition() || caretLeading || index == 0;
-        return new Path(contentFlow.caretShape(leading ? index : index - 1, leading)).getLayoutBounds();
+        return new Path(contentFlow.getCaretShape(leading ? index : index - 1, leading)).getLayoutBounds();
     }
 
     private CaretPos computeCaretPos(int pos) {
@@ -1190,7 +1188,7 @@ public class EmojiTextField extends StackPane {
     /** Resolves the caret using JavaFX's shaped text, including wrapped words. */
     private int hitTestCaret(double clickX, double clickY) {
         layoutContent();
-        return fromFlowIndex(contentFlow.hitTest(new Point2D(clickX - scaledPadLeft(),
+        return fromFlowIndex(contentFlow.getHitInfo(new Point2D(clickX - scaledPadLeft(),
                 clickY - scaledPadTop() + verticalOffset)).getInsertionIndex());
     }
 
@@ -1199,7 +1197,7 @@ public class EmojiTextField extends StackPane {
     private void updateSelectionVisual() {
         clearSelectionRects();
         if (!hasSelection()) { return; }
-        Path selection = new Path(contentFlow.rangeShape(toFlowIndex(selectionStart), toFlowIndex(selectionEnd)));
+        Path selection = new Path(contentFlow.getRangeShape(toFlowIndex(selectionStart), toFlowIndex(selectionEnd), false));
         selection.getStyleClass().add("emoji-text-field-selection");
         selection.setStroke(null);
         selection.setManaged(false);
