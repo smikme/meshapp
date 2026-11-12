@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         # JavaFX's Linux ARM64 GTK library requires glibc >= 2.38.
-        os: [ubuntu-22.04, ubuntu-24.04-arm, windows-2022, macos-15]
+        os: [ubuntu-22.04, ubuntu-24.04-arm, windows-2022, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
