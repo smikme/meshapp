@@ -546,6 +546,8 @@ meshapp/
 
 MeshApp wird mit `jpackage` gebaut. Für Linux werden zusätzlich AppImage und Flatpak unterstützt.
 
+Linux-Pakete werden für x86_64 und ARM64 (`aarch64`) gebaut. Für einen lokalen Build gelten dieselben Befehle auf der Zielarchitektur mit passendem JDK 25 und appimagetool.
+
 | Plattform | Format | Befehl |
 |----------|--------|---------|
 | Windows | `.msi` | `./gradlew jpackage` |
