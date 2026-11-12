@@ -137,6 +137,35 @@ class ReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Incomplete release"):
             release.finalize(self.args)
 
+    def test_collects_linux_arm64_packages(self):
+        source, output = self.root / "jpackage", self.root / "collected"
+        source.mkdir()
+        files = {
+            "meshapp_2.4.0_arm64.deb": "MeshApp-v2.4.0-linux-aarch64.deb",
+            "MeshApp-v2.4.0-aarch64.AppImage": "MeshApp-v2.4.0-linux-aarch64.AppImage",
+            "MeshApp-v2.4.0-aarch64.flatpak": "MeshApp-v2.4.0-linux-aarch64.flatpak",
+            "MeshApp-v2.4.0-linux-aarch64-selfupdate.zip": "MeshApp-v2.4.0-linux-aarch64-selfupdate.zip",
+        }
+        for original, published in files.items():
+            (source / original).write_bytes((self.assets / published).read_bytes())
+        release.collect(argparse.Namespace(version=self.args.version, platform="linux-aarch64",
+                                           source=source, output=output, public_key=self.public))
+        self.assertEqual(set(files.values()), {p.name for p in output.iterdir()})
+        for original, published in files.items():
+            self.assertEqual((source / original).read_bytes(), (output / published).read_bytes())
+
+    def test_requires_every_linux_arm64_package(self):
+        for suffix in (".deb", ".AppImage", ".flatpak", "-selfupdate.zip"):
+            with self.subTest(suffix=suffix):
+                path = self.assets / f"MeshApp-v2.4.0-linux-aarch64{suffix}"
+                content = path.read_bytes()
+                path.unlink()
+                try:
+                    with self.assertRaisesRegex(ValueError, "Incomplete release"):
+                        release.finalize(self.args)
+                finally:
+                    path.write_bytes(content)
+
     def test_rejects_modified_packages_after_build(self):
         release.finalize(self.args)
         (self.assets / "MeshApp-v2.4.0-windows-x86_64.msi").write_bytes(b"changed")
@@ -150,7 +179,7 @@ class ReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "embedded update key"):
             release.finalize(self.args)
 
-    def test_signed_manifest_matches_java_wire_format_and_routes_both_macs(self):
+    def test_signed_manifest_matches_java_wire_format_and_routes_architectures(self):
         release.finalize(self.args)
         self.args.private_key = self.private
         self.args.output = self.root / "meshapp.json"
@@ -159,22 +188,30 @@ class ReleaseTest(unittest.TestCase):
         self.args.notes_ru = None
         release.manifest(self.args)
         manifest = json.loads(self.args.output.read_text())
-        self.assertEqual(4, len(manifest["selfUpdate"]))
+        self.assertEqual({"linux-x86_64", "linux-aarch64", "windows-x86_64", "macos-aarch64", "macos-x86_64"},
+                         set(manifest["selfUpdate"]))
         self.assertIn("macos-dmg-aarch64", manifest["downloads"])
         self.assertIn("macos-dmg-x86_64", manifest["downloads"])
         self.assertNotEqual(manifest["downloads"]["macos-dmg-aarch64"], manifest["downloads"]["macos-dmg-x86_64"])
-        artifact = manifest["selfUpdate"]["linux-x86_64"]
-        body = ("meshapp-self-update-v1\nv2.4.0\n2004000\nfull-archive\nzip\nv2.4.0\n"
-                f"{artifact['url']}\n{artifact['sha256']}\n{artifact['size']}\n").encode()
-        payload = self.root / "payload"
-        signature = self.root / "signature"
-        payload.write_bytes(body)
-        signature.write_bytes(base64.b64decode(artifact["signature"]))
-        command = ["openssl", "pkeyutl", "-verify", "-rawin", "-pubin", "-inkey", str(self.public),
-                   "-in", str(payload), "-sigfile", str(signature)]
-        self.assertEqual(0, subprocess.run(command, capture_output=True).returncode)
-        payload.write_bytes(body.replace(b"2004000", b"2004001"))
-        self.assertNotEqual(0, subprocess.run(command, capture_output=True).returncode)
+        for arch in ("x86_64", "aarch64"):
+            with self.subTest(arch=arch):
+                base = "https://github.com/smikme/meshapp/releases/download/v2.4.0"
+                for extension in ("deb", "AppImage", "flatpak"):
+                    self.assertEqual(f"{base}/MeshApp-v2.4.0-linux-{arch}.{extension}",
+                                     manifest["downloads"][f"linux-{extension.lower()}-{arch}"])
+                artifact = manifest["selfUpdate"][f"linux-{arch}"]
+                self.assertEqual(f"{base}/MeshApp-v2.4.0-linux-{arch}-selfupdate.zip", artifact["url"])
+                body = ("meshapp-self-update-v1\nv2.4.0\n2004000\nfull-archive\nzip\nv2.4.0\n"
+                        f"{artifact['url']}\n{artifact['sha256']}\n{artifact['size']}\n").encode()
+                payload = self.root / "payload"
+                signature = self.root / "signature"
+                payload.write_bytes(body)
+                signature.write_bytes(base64.b64decode(artifact["signature"]))
+                command = ["openssl", "pkeyutl", "-verify", "-rawin", "-pubin", "-inkey", str(self.public),
+                           "-in", str(payload), "-sigfile", str(signature)]
+                self.assertEqual(0, subprocess.run(command, capture_output=True).returncode)
+                payload.write_bytes(body.replace(b"2004000", b"2004001"))
+                self.assertNotEqual(0, subprocess.run(command, capture_output=True).returncode)
 
     def test_catalog_build_publishes_repository_scripts_for_both_languages(self):
         spec = importlib.util.spec_from_file_location("pages", Path(__file__).resolve().parents[1] / "build-pages.py")
