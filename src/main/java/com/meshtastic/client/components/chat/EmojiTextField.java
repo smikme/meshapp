@@ -17,6 +17,7 @@ import javafx.geometry.Orientation;
 import javafx.geometry.Point2D;
 import javafx.scene.Cursor;
 import javafx.scene.Node;
+import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.MenuItem;
@@ -78,6 +79,7 @@ public class EmojiTextField extends StackPane {
 
     private String promptText = "";
     private Consumer<Void> onAction;
+    private Consumer<Image> onPasteImage;
     private Predicate<KeyEvent> keyPressedInterceptor;
     private boolean disabled = false;
     private IntSupplier maxBytesSupplier;
@@ -389,6 +391,19 @@ public class EmojiTextField extends StackPane {
      */
     public void setOnAction(Consumer<Void> handler) {
         this.onAction = handler;
+    }
+
+    /**
+     * Sets the callback for pasting images with a keyboard shortcut or context menu.
+     *
+     * <p>When a readable image is present, it takes priority over clipboard text.
+     * The callback runs on the FX thread and owns attachment processing; the
+     * editor does not alter its text or selection for an image paste.
+     *
+     * @param handler image paste callback, or null to retain text-only paste behavior
+     */
+    public void setOnPasteImage(Consumer<Image> handler) {
+        this.onPasteImage = handler;
     }
 
     /**
@@ -888,8 +903,24 @@ public class EmojiTextField extends StackPane {
         deleteSelection();
     }
 
+    /**
+     * Pastes clipboard content unless editing is disabled.
+     *
+     * <p>Images are delegated to the configured callback. Otherwise, clipboard
+     * text replaces the selection using the editor's byte limit and validator.
+     * Keyboard shortcuts and the context menu share this path.
+     */
     private void paste() {
-        String clip = Clipboard.getSystemClipboard().getString();
+        if (disabled) { return; }
+        Clipboard clipboard = Clipboard.getSystemClipboard();
+        if (onPasteImage != null && clipboard.hasImage()) {
+            Image image = clipboard.getImage();
+            if (image != null) {
+                onPasteImage.accept(image);
+                return;
+            }
+        }
+        String clip = clipboard.getString();
         if (clip == null || clip.isEmpty()) { return; }
         clip = UnicodeTextUtils.sanitize(clip.replace("\n", " ").replace("\r", ""));
         if (clip == null || clip.isEmpty()) { return; }
@@ -915,6 +946,10 @@ public class EmojiTextField extends StackPane {
     }
 
 
+    /**
+     * Builds editing and spelling actions, refreshing their availability when
+     * the menu opens. Paste accepts images only when an image callback is set.
+     */
     private void buildContextMenu() {
         MenuItem undoItem = new MenuItem(I18n.t("common.undo"));
         undoItem.setOnAction(_ -> undo());
@@ -938,12 +973,13 @@ public class EmojiTextField extends StackPane {
 
         contextMenu.setOnShowing(_ -> {
             boolean hasSel = hasSelection();
-            boolean hasClip = Clipboard.getSystemClipboard().hasString();
+            Clipboard clipboard = Clipboard.getSystemClipboard();
+            boolean hasClip = clipboard.hasString() || (onPasteImage != null && clipboard.hasImage());
             undoItem.setDisable(disabled || undoHistory.isEmpty() || rejectsEdit(undoHistory.peek().text()));
             redoItem.setDisable(disabled || redoHistory.isEmpty() || rejectsEdit(redoHistory.peek().text()));
             cutItem.setDisable(!hasSel);
             copyItem.setDisable(!hasSel);
-            pasteItem.setDisable(!hasClip);
+            pasteItem.setDisable(disabled || !hasClip);
             selectAllItem.setDisable(text.get() == null || text.get().isEmpty());
         });
 

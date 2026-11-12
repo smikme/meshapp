@@ -27,6 +27,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Tooltip;
@@ -1734,7 +1735,8 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Attaches the incoming-message context menu with reply/delete actions.
+     * Attaches incoming-message actions, including copying links from the
+     * message text and its quote, replying, selecting, and deleting.
      *
      * @param content bubble content
      * @param msg message
@@ -1743,6 +1745,7 @@ public class MessageBubbleFactory {
     private void attachIncomingContextMenu(VBox content, MeshMessage msg, HBox row) {
         installContextMenu(content, () -> createContextMenu(
                 createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
+                createCopyLinkMenuItem(msg),
                 createSelectionMenuItem(msg, row),
                 createMenuItem(I18n.t("chat.bubble.reply"), () -> actions.startReply(msg)),
                 new SeparatorMenuItem(),
@@ -1751,7 +1754,8 @@ public class MessageBubbleFactory {
     }
 
     /**
-     * Attaches a simplified context menu without reply/trace actions.
+     * Attaches copy, link-copy, selection, and deletion actions to outgoing or
+     * system messages. Links are collected from message text and quote text.
      *
      * @param content bubble content
      * @param msg message
@@ -1760,16 +1764,57 @@ public class MessageBubbleFactory {
     private void attachCopyDeleteMenu(VBox content, MeshMessage msg, HBox row) {
         installContextMenu(content, () -> createContextMenu(
                 createMenuItem(I18n.t("common.copy"), () -> copyText(msg.getText())),
+                createCopyLinkMenuItem(msg),
                 createSelectionMenuItem(msg, row),
                 new SeparatorMenuItem(),
                 createMenuItem(I18n.t("common.delete"), () -> actions.confirmDeleteMessage(msg, row))
         ));
     }
 
+    /**
+     * Creates a menu, omitting optional actions that are not available.
+     *
+     * @param items actions in display order; null entries are omitted
+     * @return context menu containing the available actions
+     */
     private ContextMenu createContextMenu(MenuItem... items) {
         return new ContextMenu(Arrays.stream(items)
                 .filter(Objects::nonNull)
                 .toArray(MenuItem[]::new));
+    }
+
+    /**
+     * Creates an action for copying HTTP/HTTPS links from a message and its quote.
+     *
+     * <p>Uses the same URL parsing as message rendering. Links from the main text
+     * precede quote links, preserving occurrence order and removing exact
+     * duplicates. A single link is copied directly; multiple links form a submenu.
+     * The clipboard receives only the selected URL, without surrounding prose.
+     *
+     * @param msg non-null message; its main text and reply text may be null
+     * @return copy action, a link-selection submenu, or null when no link is found
+     */
+    private static MenuItem createCopyLinkMenuItem(MeshMessage msg) {
+        List<String> urls = Stream.of(msg.getText(), msg.getReplyText())
+                .flatMap(text -> ChatUrlParser.split(text).stream())
+                .filter(ChatUrlParser.Segment::url)
+                .map(ChatUrlParser.Segment::text)
+                .distinct()
+                .toList();
+        if (urls.isEmpty()) {
+            return null;
+        }
+        String title = I18n.t("chat.bubble.copyLink");
+        if (urls.size() == 1) {
+            return createMenuItem(title, () -> copyToClipboard(urls.getFirst()));
+        }
+        Menu menu = new Menu(title);
+        for (String url : urls) {
+            MenuItem item = createMenuItem(url, () -> copyToClipboard(url));
+            item.setMnemonicParsing(false);
+            menu.getItems().add(item);
+        }
+        return menu;
     }
 
     private MenuItem createSelectionMenuItem(MeshMessage msg, HBox row) {
