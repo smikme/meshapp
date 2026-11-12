@@ -24,6 +24,7 @@ import javafx.scene.control.Separator;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelFormat;
 import javafx.scene.input.DragEvent;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
@@ -41,7 +42,13 @@ import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.FileChooser;
 
+import javax.imageio.ImageIO;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
+import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferInt;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -52,6 +59,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Chat input panel: emoji button, text field, byte counter, send button, and reply bar.
@@ -106,6 +114,7 @@ public class ChatInputBar extends VBox {
     private final Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider;
     private final Consumer<ChatImage> onOpenImage;
     private final Function<Path, CompletableFuture<ChatImage>> imageUploader;
+    private final Function<byte[], CompletableFuture<ChatImage>> imageBytesUploader;
     private final Function<String, Image> previewLoader;
     private final EmojiTextField messageInput;
     private final SendButtonWithRing sendRing;
@@ -163,6 +172,18 @@ public class ChatInputBar extends VBox {
                 MeshpicUploadService.getInstance()::upload, url -> new Image(url, true));
     }
 
+    /**
+     * Creates an input bar with custom file upload and preview loading, while
+     * clipboard images use the shared {@link MeshpicUploadService}.
+     *
+     * @param onSend message-send callback carrying text and replyId
+     * @param onBotCommand callback returning whether a parsed bot command was handled
+     * @param botSuggestionProvider bot suggestions, or null to use the default provider
+     * @param nodeSuggestionProvider node suggestions for bot command arguments
+     * @param onOpenImage preview click callback, or null to open the public URL externally
+     * @param imageUploader asynchronous upload of a selected or dropped image file
+     * @param previewLoader loader for the uploaded image's thumbnail URL
+     */
     ChatInputBar(Consumer<SendRequest> onSend,
                  Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
                  Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider,
@@ -170,8 +191,36 @@ public class ChatInputBar extends VBox {
                  Consumer<ChatImage> onOpenImage,
                  Function<Path, CompletableFuture<ChatImage>> imageUploader,
                  Function<String, Image> previewLoader) {
+        this(onSend, onBotCommand, botSuggestionProvider, nodeSuggestionProvider, onOpenImage,
+                imageUploader, previewLoader, MeshpicUploadService.getInstance()::uploadBytes);
+    }
+
+    /**
+     * Creates an input bar with custom attachment upload and preview loading.
+     *
+     * <p>Successful uploads insert a protected public link into the draft and
+     * display its preview. Uploading an attachment does not send the message.
+     *
+     * @param onSend message-send callback carrying text and replyId
+     * @param onBotCommand callback returning whether a parsed bot command was handled
+     * @param botSuggestionProvider bot suggestions, or null to use the default provider
+     * @param nodeSuggestionProvider node suggestions for bot command arguments
+     * @param onOpenImage preview click callback, or null to open the public URL externally
+     * @param imageUploader asynchronous upload of a selected or dropped image file
+     * @param previewLoader loader for the uploaded image's thumbnail URL
+     * @param imageBytesUploader asynchronous upload of PNG clipboard data; invoked off the FX thread
+     */
+    ChatInputBar(Consumer<SendRequest> onSend,
+                 Predicate<ChatBotCommandHelper.ParsedBotCommand> onBotCommand,
+                 Function<String, List<ChatBotCommandHelper.BotDefinition>> botSuggestionProvider,
+                 Function<String, List<ChatBotCommandHelper.NodeSuggestion>> nodeSuggestionProvider,
+                 Consumer<ChatImage> onOpenImage,
+                 Function<Path, CompletableFuture<ChatImage>> imageUploader,
+                 Function<String, Image> previewLoader,
+                 Function<byte[], CompletableFuture<ChatImage>> imageBytesUploader) {
         this.onSend = onSend;
         this.imageUploader = imageUploader;
+        this.imageBytesUploader = imageBytesUploader;
         this.previewLoader = previewLoader;
         this.onBotCommand = onBotCommand;
         this.onOpenImage = onOpenImage;
@@ -216,6 +265,7 @@ public class ChatInputBar extends VBox {
         messageInput.setMaxBytesSupplier(this::getMaxTextBytes);
         messageInput.setByteCounter(OutgoingText::byteLength);
         messageInput.setEditValidator(this::isProtectedImageTextIntact);
+        messageInput.setOnPasteImage(this::uploadClipboardImage);
         HBox.setHgrow(messageInput, Priority.ALWAYS);
 
         // Send button with a circular fill indicator.
@@ -578,27 +628,104 @@ public class ChatInputBar extends VBox {
         uploadSelectedImage(selectedFile);
     }
 
+    /**
+     * Starts a file attachment upload after checking its extension and existence.
+     * The upload service validates the file contents before sending them.
+     *
+     * @param selectedFile selected or dropped file; unsupported files show a warning
+     */
     private void uploadSelectedImage(File selectedFile) {
         if (!isSupportedImageFile(selectedFile)) {
             Toast.show(Toast.Type.WARNING, I18n.t("chat.image.unsupported"));
             return;
         }
+        uploadImage(selectedFile.getName(), () -> imageUploader.apply(selectedFile.toPath()));
+    }
+
+    /**
+     * Prepares a pasted image for attachment without sending the current draft.
+     *
+     * <p>Called on the FX thread. Encoding and upload run in the background.
+     * Pasting is ignored while input is disabled, another upload is pending,
+     * or the inline node picker owns the input. Unreadable images show a warning.
+     *
+     * @param image non-null image obtained from the system clipboard
+     */
+    private void uploadClipboardImage(Image image) {
+        if (!inputEnabled || imageUploadInProgress || activeNodePick != null) {
+            return;
+        }
+        if (image.isError() || image.getPixelReader() == null) {
+            Toast.show(Toast.Type.WARNING, I18n.t("chat.image.invalidFile"));
+            return;
+        }
+        savedCaretPosition = messageInput.getCaretPosition();
+        uploadImage(I18n.t("chat.image.clipboard"), () -> CompletableFuture
+                .supplyAsync(() -> encodeClipboardImage(image))
+                .thenComposeAsync(imageBytesUploader));
+    }
+
+    /**
+     * Encodes readable clipboard pixels as PNG, preserving dimensions and alpha.
+     *
+     * <p>The caller runs this work off the FX thread. Encoding uses memory only;
+     * the upload service subsequently checks the encoded size against its limit.
+     *
+     * @param image loaded image with a pixel reader and positive dimensions
+     * @return PNG file bytes
+     * @throws IllegalStateException if no PNG writer is available or encoding fails
+     */
+    private static byte[] encodeClipboardImage(Image image) {
+        int width = (int) image.getWidth();
+        int height = (int) image.getHeight();
+        BufferedImage buffered = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        int[] pixels = ((DataBufferInt) buffered.getRaster().getDataBuffer()).getData();
+        image.getPixelReader().getPixels(0, 0, width, height,
+                PixelFormat.getIntArgbInstance(), pixels, 0, width);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (var output = new MemoryCacheImageOutputStream(bytes)) {
+            if (!ImageIO.write(buffered, "png", output)) {
+                throw new IllegalStateException("PNG encoder unavailable");
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot encode clipboard image", e);
+        }
+        return bytes.toByteArray();
+    }
+
+    /**
+     * Starts an attachment operation and applies its result on the FX thread.
+     *
+     * <p>Called on the FX thread after the caller checks whether uploading is
+     * allowed. Failures restore the previous preview. The generation check
+     * discards results after cancellation, draft clearing, or a chat switch.
+     * A successful result still has to fit the draft's text limit.
+     *
+     * @param name file name or localized source label displayed while uploading
+     * @param upload non-blocking operation returning a non-null upload future
+     */
+    private void uploadImage(String name, Supplier<CompletableFuture<ChatImage>> upload) {
         long generation = ++imageUploadGeneration;
-        showImageUploadProgress(selectedFile.getName());
-        imageUploader.apply(selectedFile.toPath())
-                .whenComplete((image, failure) -> Platform.runLater(() -> {
-                    if (generation != imageUploadGeneration) {
-                        return;
-                    }
-                    imageUploadInProgress = false;
-                    updateImageButtonState();
-                    if (failure != null) {
-                        restoreAttachedPreview();
-                        Toast.show(Toast.Type.ERROR, I18n.t(MeshpicUploadService.errorKey(failure)));
-                        return;
-                    }
-                    attachUploadedImage(image);
-                }));
+        showImageUploadProgress(name);
+        CompletableFuture<ChatImage> pending;
+        try {
+            pending = upload.get();
+        } catch (RuntimeException e) {
+            pending = CompletableFuture.failedFuture(e);
+        }
+        pending.whenComplete((image, failure) -> Platform.runLater(() -> {
+            if (generation != imageUploadGeneration) {
+                return;
+            }
+            imageUploadInProgress = false;
+            updateImageButtonState();
+            if (failure != null) {
+                restoreAttachedPreview();
+                Toast.show(Toast.Type.ERROR, I18n.t(MeshpicUploadService.errorKey(failure)));
+                return;
+            }
+            attachUploadedImage(image);
+        }));
     }
 
     private void showImageUploadProgress(String fileName) {

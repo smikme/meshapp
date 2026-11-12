@@ -102,6 +102,35 @@ class MeshpicUploadServiceTest {
     }
 
     @Test
+    void uploadsImageBytesWithoutRequiringAFileAndSnapshotsThePayload() throws Exception {
+        byte[] bytes = Files.readAllBytes(png());
+        byte[] expected = bytes.clone();
+        var pending = service.uploadBytes(bytes);
+        java.util.Arrays.fill(bytes, (byte) 0);
+
+        assertEquals(origin.resolve("feZ").toString(), pending.join().shareUrl());
+        String wire = new String(uploadBody, StandardCharsets.ISO_8859_1);
+        assertTrue(wire.contains("Content-Type: image/png\r\n\r\n"));
+        assertTrue(wire.contains(new String(expected, StandardCharsets.ISO_8859_1)));
+        assertEquals(1, gets.get());
+        assertEquals(1, posts.get());
+    }
+
+    @Test
+    void validatesImageBytesBeforeAnyNetworkRequest() {
+        byte[][] invalid = {null, new byte[0], new byte[]{1, 2, 3},
+                new byte[MeshpicUploadService.MAX_IMAGE_BYTES + 1]};
+        String[] keys = {"invalidFile", "invalidFile", "unsupported", "tooLarge"};
+        for (int i = 0; i < invalid.length; i++) {
+            byte[] bytes = invalid[i];
+            var error = assertThrows(CompletionException.class, () -> service.uploadBytes(bytes).join());
+            assertEquals("chat.image." + keys[i], MeshpicUploadService.errorKey(error));
+        }
+        assertEquals(0, gets.get());
+        assertEquals(0, posts.get());
+    }
+
+    @Test
     void validatesFilesBeforeNetworkAndBoundsReads() throws Exception {
         Path huge = directory.resolve("large.png");
         try (var file = new RandomAccessFile(huge.toFile(), "rw")) {

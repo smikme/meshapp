@@ -52,12 +52,52 @@ public final class MeshpicUploadService {
         this.timeout = timeout;
     }
 
-    /** File I/O and validation run off the FX thread, before any HTTP request. */
+    /**
+     * Uploads a local image after reading and validating it in the background.
+     *
+     * <p>Size and format checks finish before any HTTP request. The filename
+     * extension does not determine the uploaded MIME type; magic bytes do.
+     *
+     * @param path path to a non-empty regular image file
+     * @return future containing public, preview, and full image URLs, or failing
+     *         with a validation, session, network, or response error
+     */
     public CompletableFuture<ChatImage> upload(Path path) {
         return CompletableFuture.supplyAsync(() -> readImage(path))
-                .thenCompose(file -> client.sendAsync(request(origin).GET().build(),
-                                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-                        .thenCompose(response -> upload(file, session(response))));
+                .thenCompose(this::upload);
+    }
+
+    /**
+     * Uploads an image already encoded in memory, without requiring a local file.
+     *
+     * <p>The bytes must describe a supported format and fit {@link #MAX_IMAGE_BYTES}.
+     * Validation and a defensive copy happen before the first HTTP request, so
+     * later changes to the caller's array do not affect the request body. This
+     * method checks format signatures; full decoding is left to the server.
+     *
+     * @param bytes encoded JPEG, PNG, GIF, or WebP data
+     * @return future containing uploaded image URLs; null, empty, oversized, or
+     *         unsupported data produces a failed future without network traffic
+     */
+    public CompletableFuture<ChatImage> uploadBytes(byte[] bytes) {
+        try {
+            ImageFile file = imageFile(bytes);
+            return upload(new ImageFile(bytes.clone(), file.contentType(), file.extension()));
+        } catch (UploadException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /**
+     * Obtains a fresh anonymous session, then uploads the validated image once.
+     *
+     * @param file validated image data owned by this upload operation
+     * @return future containing the uploaded image descriptor
+     */
+    private CompletableFuture<ChatImage> upload(ImageFile file) {
+        return client.sendAsync(request(origin).GET().build(),
+                        HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                .thenCompose(response -> upload(file, session(response)));
     }
 
     private CompletableFuture<ChatImage> upload(ImageFile file, Session session) {
@@ -149,6 +189,14 @@ public final class MeshpicUploadService {
         });
     }
 
+    /**
+     * Reads at most one byte beyond the upload limit and identifies the format.
+     *
+     * @param path candidate image file
+     * @return validated image bytes and detected MIME type and extension
+     * @throws UploadException if reading fails, the file is invalid or too large,
+     *                         or its format is unsupported
+     */
     private static ImageFile readImage(Path path) {
         try {
             if (path == null || !Files.isRegularFile(path)) throw failure("chat.image.invalidFile");
@@ -157,17 +205,32 @@ public final class MeshpicUploadService {
             if (size == 0) throw failure("chat.image.invalidFile");
             byte[] bytes;
             try (var stream = Files.newInputStream(path)) { bytes = stream.readNBytes(MAX_IMAGE_BYTES + 1); }
-            if (bytes.length > MAX_IMAGE_BYTES) throw failure("chat.image.tooLarge");
-            if (startsWith(bytes, 0, 0xff, 0xd8, 0xff)) return new ImageFile(bytes, "image/jpeg", "jpg");
-            if (startsWith(bytes, 0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
-                return new ImageFile(bytes, "image/png", "png");
-            if (startsWith(bytes, 0, 0x47, 0x49, 0x46, 0x38, 0x37, 0x61)
-                    || startsWith(bytes, 0, 0x47, 0x49, 0x46, 0x38, 0x39, 0x61))
-                return new ImageFile(bytes, "image/gif", "gif");
-            if (startsWith(bytes, 0, 0x52, 0x49, 0x46, 0x46) && startsWith(bytes, 8, 0x57, 0x45, 0x42, 0x50))
-                return new ImageFile(bytes, "image/webp", "webp");
-            throw failure("chat.image.unsupported");
+            return imageFile(bytes);
         } catch (IOException e) { throw failure("chat.image.invalidFile"); }
+    }
+
+    /**
+     * Validates the encoded size and detects a supported format by its signature.
+     *
+     * <p>The result references the supplied array without copying or decoding it.
+     *
+     * @param bytes candidate encoded image data
+     * @return image data with the detected content type and filename extension
+     * @throws UploadException if the array is null, empty, oversized, or has no
+     *                         supported format signature
+     */
+    private static ImageFile imageFile(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) throw failure("chat.image.invalidFile");
+        if (bytes.length > MAX_IMAGE_BYTES) throw failure("chat.image.tooLarge");
+        if (startsWith(bytes, 0, 0xff, 0xd8, 0xff)) return new ImageFile(bytes, "image/jpeg", "jpg");
+        if (startsWith(bytes, 0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+            return new ImageFile(bytes, "image/png", "png");
+        if (startsWith(bytes, 0, 0x47, 0x49, 0x46, 0x38, 0x37, 0x61)
+                || startsWith(bytes, 0, 0x47, 0x49, 0x46, 0x38, 0x39, 0x61))
+            return new ImageFile(bytes, "image/gif", "gif");
+        if (startsWith(bytes, 0, 0x52, 0x49, 0x46, 0x46) && startsWith(bytes, 8, 0x57, 0x45, 0x42, 0x50))
+            return new ImageFile(bytes, "image/webp", "webp");
+        throw failure("chat.image.unsupported");
     }
 
     private static boolean startsWith(byte[] bytes, int offset, int... expected) {
