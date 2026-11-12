@@ -105,7 +105,7 @@ MeshApp includes:
 
 Chats include network channels and direct conversations. Messages are stored locally; replies, reactions, delivery status, and unread counters are supported.
 
-The input line can run `@tracebot` and `@infobot` commands. They check the route to the selected node and request information about it; while typing, the app suggests node names and addresses.
+Type `@` in the input line to search nodes by name or address and insert the selected node's full name into the message. Type `/` at the start of the line to select a bot, such as `/tracebot` or `/infobot`, to check a route or request node information.
 
 Channels can be created and edited: name, access key, position sharing settings, and position precision. Notifications can be enabled or disabled separately for each channel and direct conversation.
 

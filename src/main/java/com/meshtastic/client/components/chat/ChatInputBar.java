@@ -160,7 +160,7 @@ public class ChatInputBar extends VBox {
      * @param onSend message-send callback carrying text and replyId
      * @param onBotCommand callback for parsed bot commands; returns {@code true} when handled
      * @param botSuggestionProvider provider for bot command suggestions
-     * @param nodeSuggestionProvider provider for node suggestions in bot command arguments
+     * @param nodeSuggestionProvider provider for node name completion and Lua node selection
      * @param onOpenImage callback for opening uploaded image previews; external URL fallback is used when absent
      */
     public ChatInputBar(Consumer<SendRequest> onSend,
@@ -179,7 +179,7 @@ public class ChatInputBar extends VBox {
      * @param onSend message-send callback carrying text and replyId
      * @param onBotCommand callback returning whether a parsed bot command was handled
      * @param botSuggestionProvider bot suggestions, or null to use the default provider
-     * @param nodeSuggestionProvider node suggestions for bot command arguments
+     * @param nodeSuggestionProvider node suggestions for name completion and Lua node selection
      * @param onOpenImage preview click callback, or null to open the public URL externally
      * @param imageUploader asynchronous upload of a selected or dropped image file
      * @param previewLoader loader for the uploaded image's thumbnail URL
@@ -204,7 +204,7 @@ public class ChatInputBar extends VBox {
      * @param onSend message-send callback carrying text and replyId
      * @param onBotCommand callback returning whether a parsed bot command was handled
      * @param botSuggestionProvider bot suggestions, or null to use the default provider
-     * @param nodeSuggestionProvider node suggestions for bot command arguments
+     * @param nodeSuggestionProvider node suggestions for name completion and Lua node selection
      * @param onOpenImage preview click callback, or null to open the public URL externally
      * @param imageUploader asynchronous upload of a selected or dropped image file
      * @param previewLoader loader for the uploaded image's thumbnail URL
@@ -1179,6 +1179,12 @@ public class ChatInputBar extends VBox {
         showCommandSuggestions();
     }
 
+    /**
+     * Builds bot choices displaying slash-prefixed command names.
+     *
+     * @param context active bot query at the caret
+     * @return selectable rows, limited to {@link #MAX_COMMAND_SUGGESTIONS}
+     */
     private List<Button> buildBotSuggestionRows(ChatBotCommandHelper.SuggestionContext context) {
         List<ChatBotCommandHelper.BotDefinition> suggestions = botSuggestionProvider.apply(context.query());
         if (suggestions == null || suggestions.isEmpty()) {
@@ -1188,12 +1194,18 @@ public class ChatInputBar extends VBox {
                 .stream()
                 .limit(MAX_COMMAND_SUGGESTIONS)
                 .map(bot -> buildSuggestionButton(
-                        bot.handle(),
+                        bot.commandHandle(),
                         bot.description(),
                         () -> applyBotSuggestion(bot)))
                 .toList();
     }
 
+    /**
+     * Builds node search results whose selection inserts the displayed name into the draft.
+     *
+     * @param context active {@code @} query and the token range to replace
+     * @return selectable rows, limited to {@link #MAX_COMMAND_SUGGESTIONS}
+     */
     private List<Button> buildNodeSuggestionRows(ChatBotCommandHelper.SuggestionContext context) {
         List<ChatBotCommandHelper.NodeSuggestion> suggestions = nodeSuggestionProvider.apply(context.query());
         if (suggestions == null || suggestions.isEmpty()) {
@@ -1205,7 +1217,7 @@ public class ChatInputBar extends VBox {
                 .map(suggestion -> buildSuggestionButton(
                         suggestion.primaryText(),
                         suggestion.secondaryText(),
-                        () -> applyNodeSuggestion(context, suggestion.insertText())))
+                        () -> applyNodeSuggestion(context, suggestion.primaryText())))
                 .toList();
     }
 
@@ -1248,6 +1260,14 @@ public class ChatInputBar extends VBox {
         return button;
     }
 
+    /**
+     * Runs a selected automation using its stored handle, or inserts its slash command.
+     *
+     * <p>A handled automation clears the draft, attachment, and reply state.
+     * Otherwise its chat command is inserted for further editing.
+     *
+     * @param bot selected bot definition, or null for an empty handle
+     */
     private void applyBotSuggestion(ChatBotCommandHelper.BotDefinition bot) {
         if (bot != null && bot.action() == ChatBotCommandHelper.BotAction.AUTOMATION) {
             hideCommandSuggestions();
@@ -1268,9 +1288,14 @@ public class ChatInputBar extends VBox {
             }
         }
 
-        insertBotHandle(bot != null ? bot.handle() : "");
+        insertBotHandle(bot != null ? bot.commandHandle() : "");
     }
 
+    /**
+     * Replaces the active leading bot token and positions the caret before its arguments.
+     *
+     * @param handle slash-prefixed command spelling to insert
+     */
     private void insertBotHandle(String handle) {
         String current = messageInput.getText();
         ChatBotCommandHelper.SuggestionContext context = ChatBotCommandHelper.detectSuggestionContext(
@@ -1290,17 +1315,27 @@ public class ChatInputBar extends VBox {
         Platform.runLater(this::refreshCommandSuggestions);
     }
 
+    /**
+     * Replaces the current {@code @} token with a node display name as one undoable edit.
+     *
+     * <p>Surrounding text is preserved and a space is appended if the replacement
+     * is not followed by whitespace. The input's byte budget and protected image
+     * validation apply; a rejected edit leaves the draft and caret unchanged.
+     *
+     * @param context replacement range in the current draft
+     * @param insertText node display name to insert without an {@code @} prefix
+     */
     private void applyNodeSuggestion(ChatBotCommandHelper.SuggestionContext context, String insertText) {
         String current = messageInput.getText();
-        String prefix = current.substring(0, Math.min(context.replacementStart(), current.length())).stripTrailing();
-        String newText = prefix + " " + insertText;
-        int newCaret = newText.length();
+        int end = context.replacementEnd();
+        String separator = end == current.length() || !Character.isWhitespace(current.charAt(end)) ? " " : "";
+        if (!messageInput.replaceRange(context.replacementStart(), end, insertText + separator)) {
+            return;
+        }
 
         hideCommandSuggestions();
-        messageInput.setText(newText);
-        savedCaretPosition = newCaret;
+        savedCaretPosition = messageInput.getCaretPosition();
         messageInput.requestFocus();
-        messageInput.positionCaret(newCaret);
     }
 
     private void completeActiveNodePick(ChatBotCommandHelper.NodeSuggestion suggestion) {

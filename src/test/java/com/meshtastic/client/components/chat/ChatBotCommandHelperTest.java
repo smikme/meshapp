@@ -2,6 +2,8 @@ package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.model.NodeData;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 
@@ -16,30 +18,69 @@ class ChatBotCommandHelperTest {
 
     @Test
     void detectsBotSuggestionWhenTypingFirstToken() {
-        String input = "@tr";
+        String input = "/tr";
 
         ChatBotCommandHelper.SuggestionContext context =
                 ChatBotCommandHelper.detectSuggestionContext(input, input.length());
 
         assertEquals(ChatBotCommandHelper.SuggestionMode.BOT, context.mode());
-        assertEquals("@tr", context.query());
+        assertEquals("/tr", context.query());
         assertEquals(0, context.replacementStart());
         assertEquals(input.length(), context.replacementEnd());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"@", "Привет, @", "  @", "Первая строка\n@", "/traceauto @"})
+    void detectsNodeSearchAtTheCaret(String input) {
+        ChatBotCommandHelper.SuggestionContext context =
+                ChatBotCommandHelper.detectSuggestionContext(input, input.length());
+
+        assertEquals(ChatBotCommandHelper.SuggestionMode.NODE, context.mode());
+        assertEquals("", context.query());
+        assertEquals(input.length() - 1, context.replacementStart());
+        assertEquals(input.length(), context.replacementEnd());
+    }
+
+    @Test
+    void searchesTypedPrefixAndReplacesOnlyTheCurrentNodeToken() {
+        String input = "Привет, @alpha и @bravo";
+        int caret = input.indexOf("pha");
+
+        ChatBotCommandHelper.SuggestionContext context =
+                ChatBotCommandHelper.detectSuggestionContext(input, caret);
+
+        assertEquals(ChatBotCommandHelper.SuggestionMode.NODE, context.mode());
+        assertEquals("al", context.query());
+        assertEquals(input.indexOf('@'), context.replacementStart());
+        assertEquals(input.indexOf(" и"), context.replacementEnd());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "user@example.org", "https://example.org/@node", "hello /tr", "@alpha ", "/traceauto "})
+    void doesNotOfferSuggestionsOutsideActiveTriggers(String input) {
+        assertFalse(ChatBotCommandHelper.detectSuggestionContext(input, input.length()).isVisible());
+    }
+
+    @Test
+    void doesNotSearchBeforeTheTrigger() {
+        assertFalse(ChatBotCommandHelper.detectSuggestionContext("@alpha", 0).isVisible());
+        assertFalse(ChatBotCommandHelper.detectSuggestionContext("/traceauto", 0).isVisible());
     }
 
     @Test
     void suggestsOnlyExternalAutomationBots() {
         List<ChatBotCommandHelper.BotDefinition> suggestions = ChatBotCommandHelper.suggestBots(
-                "@tr",
+                "/tr",
                 List.of(new ChatBotCommandHelper.BotDefinition("@traceauto", "Automation script", null)));
 
         assertEquals(List.of("@traceauto"),
                 suggestions.stream().map(ChatBotCommandHelper.BotDefinition::handle).toList());
+        assertEquals("/traceauto", suggestions.getFirst().commandHandle());
     }
 
     @Test
     void externalAutomationBotIsNotParsedAsBuiltInCommandYet() {
-        ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand("@traceauto target");
+        ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand("/traceauto target");
 
         assertFalse(command.isCommand());
     }
@@ -47,7 +88,7 @@ class ChatBotCommandHelperTest {
     @Test
     void parsesExternalAutomationBotCommandWithArguments() {
         ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand(
-                "@traceauto Alpha Node",
+                "/TRACEAUTO Alpha Node",
                 List.of(new ChatBotCommandHelper.BotDefinition(
                         "@traceauto",
                         "Automation script",
@@ -57,6 +98,7 @@ class ChatBotCommandHelperTest {
         assertTrue(command.isCommand());
         assertEquals(ChatBotCommandHelper.BotAction.AUTOMATION, command.action());
         assertEquals(42L, command.scriptId());
+        assertEquals("@traceauto", command.botHandle(), "Lua scripts retain their stored handle");
         assertEquals("Alpha", command.targetToken());
         assertEquals("Alpha Node", command.arguments());
         assertEquals(List.of("Alpha", "Node"), command.argumentTokens());
@@ -66,7 +108,7 @@ class ChatBotCommandHelperTest {
     @Test
     void externalAutomationBotOverridesBuiltInHandle() {
         ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand(
-                "@tracebot Alpha",
+                "/tracebot Alpha",
                 List.of(new ChatBotCommandHelper.BotDefinition(
                         "@tracebot",
                         "Lua tracebot",
@@ -81,7 +123,7 @@ class ChatBotCommandHelperTest {
 
     @Test
     void doesNotSwitchToBuiltInNodeSuggestionAfterBotSelection() {
-        String input = "@tracebot ";
+        String input = "/tracebot ";
 
         ChatBotCommandHelper.SuggestionContext context =
                 ChatBotCommandHelper.detectSuggestionContext(input, input.length());
@@ -92,7 +134,17 @@ class ChatBotCommandHelperTest {
     @Test
     void builtInBotCommandIsNotParsed() {
         ChatBotCommandHelper.ParsedBotCommand command =
-                ChatBotCommandHelper.parseCommand("  @infobot Alpha(!0000beef)  ");
+                ChatBotCommandHelper.parseCommand("  /infobot Alpha(!0000beef)  ");
+
+        assertFalse(command.isCommand());
+    }
+
+    @Test
+    void atNodeNameDoesNotRunAnAutomationWithTheSameName() {
+        ChatBotCommandHelper.ParsedBotCommand command = ChatBotCommandHelper.parseCommand(
+                "@traceauto Alpha",
+                List.of(new ChatBotCommandHelper.BotDefinition(
+                        "@traceauto", "Automation script", ChatBotCommandHelper.BotAction.AUTOMATION, 42L)));
 
         assertFalse(command.isCommand());
     }
@@ -138,6 +190,18 @@ class ChatBotCommandHelperTest {
         NodeData spaced = node(0x0000BEEF, "Alpha Node", "AN", 100);
 
         assertEquals("AN(!0000beef)", ChatBotCommandHelper.formatNodeToken(spaced));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"альфа", "AN", "!0000beef", "beef"})
+    void searchesNodesByLongNameShortNameAndAddress(String query) {
+        NodeData alpha = node(0x0000BEEF, "Альфа Нода", "AN", 100);
+        NodeData bravo = node(0x0000CAFE, "Bravo", "BRV", 50);
+
+        var suggestions = ChatBotCommandHelper.suggestNodes(List.of(alpha, bravo), query, 8);
+
+        assertEquals(1, suggestions.size());
+        assertEquals("Альфа Нода", suggestions.getFirst().primaryText());
     }
 
     private static NodeData node(int nodeNum, String longName, String shortName, int lastHeard) {

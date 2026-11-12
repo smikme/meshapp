@@ -1,7 +1,6 @@
 package com.meshtastic.client.lua;
 
 import com.meshtastic.client.TestEnvironmentSupport;
-import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.TransportConnection;
 import com.meshtastic.client.model.DeviceState;
@@ -37,6 +36,9 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -76,6 +78,42 @@ class LuaScriptRuntimeServiceTest {
             runtimeService.stopAll();
         }
         TestEnvironmentSupport.resetSingletons();
+    }
+
+    @Test
+    void concurrentOutputSharesOneBudgetAndReportsItsLimitOnce() throws Exception {
+        LuaScript script = scriptService.createScript("concurrent-output", "");
+        LuaRuntimeSession session = new LuaRuntimeSession(
+                script,
+                LuaScriptRuntimeService.RuntimeTarget.empty(""),
+                scriptService,
+                Set.of(),
+                false,
+                null,
+                events::add,
+                null,
+                null,
+                () -> {});
+        var emitOutput = LuaRuntimeSession.class.getDeclaredMethod("emitOutput", String.class);
+        emitOutput.setAccessible(true);
+        String message = "x".repeat(1_000);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(8)) {
+            List<Future<?>> outputs = new ArrayList<>();
+            for (int i = 0; i < 128; i++) {
+                outputs.add(workers.submit(() -> {
+                    assertTrue(start.await(5, TimeUnit.SECONDS));
+                    emitOutput.invoke(session, message);
+                    return null;
+                }));
+            }
+            start.countDown();
+            for (Future<?> output : outputs) {
+                output.get(5, TimeUnit.SECONDS);
+            }
+        }
+        assertEquals(64, events.stream().filter(event -> event.type() == LuaScriptEvent.Type.OUTPUT).count());
+        assertEquals(1, events.stream().filter(event -> event.type() == LuaScriptEvent.Type.WARNING).count());
     }
 
     @Test
@@ -534,7 +572,9 @@ class LuaScriptRuntimeServiceTest {
                 "Repeating timer did not cancel itself");
         awaitCondition(() -> !runtimeService.isRunning(script.getId()), "Repeating timer script did not finish");
 
-        assertTrue(scriptService.getKv(script.getId(), "timer_id").contains(":timer:"));
+        String timerId = scriptService.getKv(script.getId(), "timer_id");
+        assertNotNull(timerId);
+        assertTrue(timerId.contains(":timer:"));
         assertEquals("repeat", scriptService.getKv(script.getId(), "timer_name"));
         assertEquals("2", scriptService.getKv(script.getId(), "timer_count"));
         assertEquals("interval", scriptService.getKv(script.getId(), "timer_align"));
@@ -567,7 +607,7 @@ class LuaScriptRuntimeServiceTest {
                 false,
                 null,
                 events::add,
-                request -> fail("Node picker must not be requested"),
+                _ -> fail("Node picker must not be requested"),
                 null,
                 () -> closed.set(true));
 
@@ -802,6 +842,43 @@ class LuaScriptRuntimeServiceTest {
     }
 
     @Test
+    void staleNodePickCancellationCannotCancelRestartedAutomation() {
+        LuaScript automation = scriptService.createScript(
+                "automation-restart-pick",
+                """
+                function on_command(command)
+                    mesh.ui.pick_node({ name = 'target', query = command.arguments })
+                end
+                function on_node_selected(event)
+                    if event.cancelled then
+                        mesh.kv.set('cancelled', 'true')
+                    else
+                        mesh.kv.set('selected', event.node.node_id)
+                    end
+                end
+                """, true, "", LuaScript.BotType.AUTOMATION_BOT, "@pick");
+        List<LuaUiNodePickRequest> requests = new CopyOnWriteArrayList<>();
+        LuaAutomationCommand command = new LuaAutomationCommand(
+                "channel", "0", "@pick", "@pick", "", List.of());
+        runtimeService.runAutomationCommand(automation, command, events::add, requests::add);
+        awaitCondition(() -> requests.size() == 1, "First picker did not open");
+        LuaUiNodePickRequest previous = requests.getFirst();
+
+        runtimeService.runAutomationCommand(automation, command, events::add, requests::add);
+        awaitCondition(() -> requests.size() == 2, "Replacement picker did not open");
+        LuaUiNodePickRequest current = requests.getLast();
+        assertNotEquals(previous.requestId(), current.requestId());
+        runtimeService.deliverNodeSelection(automation.getId(), LuaUiNodeSelection.cancelled(previous));
+        runtimeService.deliverNodeSelection(automation.getId(),
+                LuaUiNodeSelection.selected(current, new NodeData(0xBEEF)));
+
+        awaitCondition(() -> !runtimeService.isRunning(automation.getId()), "Replacement bot did not finish");
+        assertNull(scriptService.getKv(automation.getId(), "cancelled"));
+        assertEquals("!0000beef", scriptService.getKv(automation.getId(), "selected"));
+        assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @Test
     void botNoticeEmitsTransientUiEventWithoutMessageStorage() {
         LuaScript automation = scriptService.createScript(
                 "automation-bot-notice",
@@ -821,7 +898,7 @@ class LuaScriptRuntimeServiceTest {
                 automation,
                 new LuaAutomationCommand("channel", "0", "@notice", "@notice", "", List.of(), "notice-1"),
                 events::add,
-                request -> fail("Node picker must not be requested"));
+                _ -> fail("Node picker must not be requested"));
 
         awaitCondition(() -> events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.UI_BOT_NOTICE),
                 "Lua bot notice was not emitted");
@@ -894,7 +971,7 @@ class LuaScriptRuntimeServiceTest {
                 false,
                 new LuaAutomationCommand("channel", "0", "@tracebot", "@tracebot Alpha", "Alpha", List.of("Alpha"), "trace-command"),
                 events::add,
-                request -> fail("Node picker must not be requested"),
+                _ -> fail("Node picker must not be requested"),
                 null,
                 () -> closed.set(true));
 
@@ -914,18 +991,20 @@ class LuaScriptRuntimeServiceTest {
             assertEquals("traceroute_result", scriptService.getKv(automation.getId(), "trace_type"));
             assertEquals("mesh.traceroute.request", scriptService.getKv(automation.getId(), "trace_source"));
             assertEquals("trace_request", scriptService.getKv(automation.getId(), "trace_name"));
-            assertTrue(scriptService.getKv(automation.getId(), "trace_request_id").contains(":traceroute:"));
+            String requestId = scriptService.getKv(automation.getId(), "trace_request_id");
+            assertNotNull(requestId);
+            assertTrue(requestId.contains(":traceroute:"));
             assertEquals("ok", scriptService.getKv(automation.getId(), "trace_status"));
             assertEquals("true", scriptService.getKv(automation.getId(), "trace_ok"));
             assertEquals("48879", scriptService.getKv(automation.getId(), "trace_target"));
-            assertFalse(scriptService.getKv(automation.getId(), "trace_response_from").startsWith("-"));
+            assertEquals(Long.toString(0xF0000002L), scriptService.getKv(automation.getId(), "trace_response_from"));
             assertEquals("channel:0", scriptService.getKv(automation.getId(), "trace_chat"));
             assertEquals("!f0000003", scriptService.getKv(automation.getId(), "route_first_id"));
             assertEquals("3.0", scriptService.getKv(automation.getId(), "snr_first"));
             List<MessageDbService.TracerouteResultRecord> savedTraces = MessageDbService.getInstance()
                     .loadRecentTracerouteResults(10, "!12345678");
             assertEquals(1, savedTraces.size());
-            MessageDbService.TracerouteResultRecord savedTrace = savedTraces.get(0);
+            MessageDbService.TracerouteResultRecord savedTrace = savedTraces.getFirst();
             assertEquals("channel", savedTrace.chatType());
             assertEquals("0", savedTrace.chatKey());
             assertEquals("mesh.traceroute.request", savedTrace.source());
@@ -1006,7 +1085,7 @@ class LuaScriptRuntimeServiceTest {
                 false,
                 new LuaAutomationCommand("channel", "0", "@infobot", "@infobot Alpha", "Alpha", List.of("Alpha"), "info-command"),
                 events::add,
-                request -> fail("Node picker must not be requested"),
+                _ -> fail("Node picker must not be requested"),
                 null,
                 () -> closed.set(true));
 
@@ -1040,7 +1119,9 @@ class LuaScriptRuntimeServiceTest {
             assertEquals("nodeinfo_result", scriptService.getKv(automation.getId(), "info_type"));
             assertEquals("mesh.nodeinfo.request", scriptService.getKv(automation.getId(), "info_source"));
             assertEquals("nodeinfo_request", scriptService.getKv(automation.getId(), "info_name"));
-            assertTrue(scriptService.getKv(automation.getId(), "info_request_id").contains(":nodeinfo:"));
+            String requestId = scriptService.getKv(automation.getId(), "info_request_id");
+            assertNotNull(requestId);
+            assertTrue(requestId.contains(":nodeinfo:"));
             assertEquals("ok", scriptService.getKv(automation.getId(), "info_status"));
             assertEquals("true", scriptService.getKv(automation.getId(), "info_ok"));
             assertEquals("false", scriptService.getKv(automation.getId(), "info_cached"));
@@ -1111,7 +1192,7 @@ class LuaScriptRuntimeServiceTest {
                 false,
                 new LuaAutomationCommand("channel", "0", "@infobot", "@infobot Alpha", "Alpha", List.of("Alpha"), "info-command"),
                 events::add,
-                request -> fail("Node picker must not be requested"),
+                _ -> fail("Node picker must not be requested"),
                 null,
                 () -> closed.set(true));
 
@@ -1173,7 +1254,7 @@ class LuaScriptRuntimeServiceTest {
                 false,
                 new LuaAutomationCommand("channel", "0", "@adminbot", "@adminbot", "", List.of(), "admin-command"),
                 events::add,
-                request -> fail("Node picker must not be requested"),
+                _ -> fail("Node picker must not be requested"),
                 null,
                 () -> closed.set(true));
 
@@ -1190,8 +1271,6 @@ class LuaScriptRuntimeServiceTest {
             assertTrue(state.completePendingPacketAck(sent.getPacket().getId(), MeshProtos.Routing.Error.NONE));
             transport.emitFromRadio(MeshProtos.FromRadio.newBuilder()
                     .setPacket(remoteAdminResponse(
-                            0x22222222,
-                            0x11111111,
                             sent.getPacket().getId(),
                             AdminProtos.AdminMessage.newBuilder()
                                     .setSessionPasskey(ByteString.copyFromUtf8("remote-passkey"))
@@ -1265,7 +1344,7 @@ class LuaScriptRuntimeServiceTest {
                 false,
                 new LuaAutomationCommand("channel", "0", "@adminbot", "@adminbot", "", List.of(), "admin-command"),
                 events::add,
-                request -> fail("Node picker must not be requested"),
+                _ -> fail("Node picker must not be requested"),
                 null,
                 () -> closed.set(true));
 
@@ -1275,8 +1354,6 @@ class LuaScriptRuntimeServiceTest {
             assertTrue(state.completePendingPacketAck(requestConfig.getPacket().getId(), MeshProtos.Routing.Error.NONE));
             transport.emitFromRadio(MeshProtos.FromRadio.newBuilder()
                     .setPacket(remoteAdminResponse(
-                            0x22222222,
-                            0x11111111,
                             requestConfig.getPacket().getId(),
                             AdminProtos.AdminMessage.newBuilder()
                                     .setSessionPasskey(ByteString.copyFromUtf8("remote-passkey"))
@@ -1544,6 +1621,8 @@ class LuaScriptRuntimeServiceTest {
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
+    // Runtime callbacks and database updates have no common completion signal; polling is time-bounded.
+    @SuppressWarnings("BusyWait")
     private static void awaitCondition(BooleanSupplier condition, String timeoutMessage) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
         while (System.nanoTime() < deadline) {
@@ -1565,9 +1644,7 @@ class LuaScriptRuntimeServiceTest {
         assertEquals(guid, UUID.fromString(guid).toString());
     }
 
-    private static MeshProtos.MeshPacket remoteAdminResponse(int from,
-                                                             int to,
-                                                             int requestId,
+    private static MeshProtos.MeshPacket remoteAdminResponse(int requestId,
                                                              AdminProtos.AdminMessage adminMessage) {
         MeshProtos.Data data = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.ADMIN_APP)
@@ -1575,8 +1652,8 @@ class LuaScriptRuntimeServiceTest {
                 .setRequestId(requestId)
                 .build();
         return MeshProtos.MeshPacket.newBuilder()
-                .setFrom(from)
-                .setTo(to)
+                .setFrom(0x22222222)
+                .setTo(0x11111111)
                 .setDecoded(data)
                 .build();
     }
@@ -1633,8 +1710,7 @@ class LuaScriptRuntimeServiceTest {
 
         @Override
         public void updateFormComponent(String id, LuaFormComponentSpec spec) {
-            FakeComponent existing = components.get(id);
-            components.put(id, new FakeComponent(
+            components.compute(id, (_, existing) -> new FakeComponent(
                     spec.type() != null ? spec.type() : existing != null ? existing.type() : "",
                     spec.text() != null ? spec.text() : existing != null ? existing.text() : "",
                     spec.value() != null ? spec.value() : existing != null ? existing.value() : null,
@@ -1662,7 +1738,7 @@ class LuaScriptRuntimeServiceTest {
         private volatile boolean connected = true;
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             connected = true;
             if (connectionListener != null) {
                 connectionListener.onConnected();
@@ -1684,7 +1760,7 @@ class LuaScriptRuntimeServiceTest {
 
         @Override
         public void sendBytes(byte[] data) {
-            writes.offer(data);
+            writes.add(data);
         }
 
         @Override
