@@ -69,7 +69,7 @@ final class LuaEditorActions {
 
         ContextMenu menu = new ContextMenu(undo, redo, new SeparatorMenuItem(),
                 cut, copy, paste, delete, new SeparatorMenuItem(), selectAll);
-        menu.setOnShowing(event -> {
+        menu.setOnShowing(_ -> {
             hideCompletion.run();
             refreshAvailability();
         });
@@ -93,7 +93,7 @@ final class LuaEditorActions {
     private MenuItem item(String key, KeyCombination accelerator, Runnable action) {
         MenuItem item = new MenuItem(I18n.t(key));
         item.setAccelerator(accelerator);
-        item.setOnAction(event -> {
+        item.setOnAction(_ -> {
             refreshAvailability();
             if (item.isDisable()) {
                 return;

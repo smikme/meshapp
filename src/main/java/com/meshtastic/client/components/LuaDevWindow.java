@@ -83,6 +83,7 @@ import org.fxmisc.richtext.LineNumberFactory;
 import org.fxmisc.richtext.model.StyleSpans;
 import org.fxmisc.richtext.model.StyleSpansBuilder;
 
+import java.net.URL;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -122,14 +123,13 @@ public final class LuaDevWindow {
     private static final double COMPLETION_SCROLL_EDGE_PADDING = 4.0;
     private static final double COMPLETION_SCROLL_GUARD_ROWS = 1.0;
     private static final double FUNCTION_OUTLINE_MIN_WIDTH = 170.0;
-    private static final double FUNCTION_OUTLINE_DEFAULT_WIDTH = 230.0;
     private static final double FUNCTION_OUTLINE_MAX_WIDTH = 520.0;
     private static final double FUNCTION_OUTLINE_RAIL_WIDTH = 34.0;
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
     private static final Pattern LUA_HIGHLIGHT_PATTERN = Pattern.compile(
-            "(?<COMMENT>--\\[\\[[\\s\\S]*?\\]\\]|--[^\\n]*)"
+            "(?<COMMENT>--\\[\\[[\\s\\S]*?]]|--[^\\n]*)"
                     + "|(?<STRING>\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*')"
                     + "|(?<NUMBER>\\b\\d+(?:\\.\\d+)?\\b)"
                     + "|(?<API>\\bmesh(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)"
@@ -174,15 +174,12 @@ public final class LuaDevWindow {
     private TextField replaceField;
     private Label findStatusLabel;
     private TextArea consoleArea;
-    private TableView<KvRow> kvTable;
-    private TableView<DebugVarRow> debugTable;
     private TreeView<LuaFunctionIndex.FunctionNode> functionTree;
     private Label scriptNameLabel;
     private Label statusLabel;
     private Button kvButton;
     private Button kvRefreshButton;
     private Button functionOutlineButton;
-    private Button searchButton;
     private Button replaceCurrentButton;
     private Button replaceAllButton;
     private Button runButton;
@@ -200,7 +197,6 @@ public final class LuaDevWindow {
     private boolean nativeEffectsApplied;
     private boolean closingWindow;
     private boolean restoreMaximizedOnShow;
-    private boolean restoringDividerPositions;
     private boolean functionOutlineVisible = AppPreferences.isLuaDevFunctionOutlineVisible();
     private boolean editorEmojiOverlayUpdateQueued;
     private int functionOutlineRestorePasses;
@@ -326,7 +322,7 @@ public final class LuaDevWindow {
         stage.setScene(scene);
         restoreWindowState();
         trackWindowBounds();
-        stage.setOnHiding(event -> saveWindowState());
+        stage.setOnHiding(_ -> saveWindowState());
     }
 
     private boolean useCustomFrame() {
@@ -341,13 +337,13 @@ public final class LuaDevWindow {
         bar.setPickOnBounds(true);
 
         Button closeButton = createWindowButton("window-btn-close");
-        closeButton.setOnAction(event -> closeWindow());
+        closeButton.setOnAction(_ -> closeWindow());
 
         Button minimizeButton = createWindowButton("window-btn-minimize");
-        minimizeButton.setOnAction(event -> stage.setIconified(true));
+        minimizeButton.setOnAction(_ -> stage.setIconified(true));
 
         Button maximizeButton = createWindowButton("window-btn-maximize");
-        maximizeButton.setOnAction(event -> toggleWindowMaximized());
+        maximizeButton.setOnAction(_ -> toggleWindowMaximized());
 
         HBox buttons = new HBox(8, closeButton, minimizeButton, maximizeButton);
         buttons.setAlignment(Pos.CENTER_LEFT);
@@ -388,7 +384,7 @@ public final class LuaDevWindow {
             stage.setX(event.getScreenX() - dragOffsetX);
             stage.setY(event.getScreenY() - dragOffsetY);
         });
-        bar.setOnMouseReleased(event -> draggingWindow = false);
+        bar.setOnMouseReleased(_ -> draggingWindow = false);
         return bar;
     }
 
@@ -423,11 +419,11 @@ public final class LuaDevWindow {
 
     private void trackWindowBounds() {
         rememberNormalWindowBounds();
-        stage.xProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
-        stage.yProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
-        stage.widthProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
-        stage.heightProperty().addListener((obs, oldValue, newValue) -> rememberNormalWindowBounds());
-        stage.maximizedProperty().addListener((obs, oldValue, maximized) -> {
+        stage.xProperty().addListener((_, _, _) -> rememberNormalWindowBounds());
+        stage.yProperty().addListener((_, _, _) -> rememberNormalWindowBounds());
+        stage.widthProperty().addListener((_, _, _) -> rememberNormalWindowBounds());
+        stage.heightProperty().addListener((_, _, _) -> rememberNormalWindowBounds());
+        stage.maximizedProperty().addListener((_, _, maximized) -> {
             if (!maximized) {
                 Platform.runLater(this::rememberNormalWindowBounds);
             }
@@ -504,16 +500,11 @@ public final class LuaDevWindow {
      * Restores saved divider positions for the main IDE panes.
      */
     private void restoreDividerPositions() {
-        restoringDividerPositions = true;
-        try {
-            applyDividerPosition(mainSplit, AppPreferences.getLuaDevMainDividerPos());
-            applyDividerPosition(editorSplit, AppPreferences.getLuaDevEditorDividerPos());
-            applyDividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos());
-            if (functionOutlineVisible) {
-                restoreFunctionOutlineWidthAfterLayout();
-            }
-        } finally {
-            restoringDividerPositions = false;
+        applyDividerPosition(mainSplit, AppPreferences.getLuaDevMainDividerPos());
+        applyDividerPosition(editorSplit, AppPreferences.getLuaDevEditorDividerPos());
+        applyDividerPosition(infoSplit, AppPreferences.getLuaDevInfoDividerPos());
+        if (functionOutlineVisible) {
+            restoreFunctionOutlineWidthAfterLayout();
         }
     }
 
@@ -646,9 +637,7 @@ public final class LuaDevWindow {
         if (visible) {
             items.setAll(functionOutlineSlot, codeEditorSlot);
             SplitPane.setResizableWithParent(functionOutlineSlot, false);
-            Platform.runLater(() -> {
-                restoreFunctionOutlineWidthAfterLayout();
-            });
+            Platform.runLater(this::restoreFunctionOutlineWidthAfterLayout);
         } else {
             items.setAll(collapsedFunctionOutlineSlot, codeEditorSlot);
             SplitPane.setResizableWithParent(collapsedFunctionOutlineSlot, false);
@@ -753,11 +742,25 @@ public final class LuaDevWindow {
                 && height >= MIN_WINDOW_HEIGHT;
     }
 
+    /**
+     * Clamps a layout value while retaining the fallback for inverted bounds.
+     * <p>
+     * Inverted bounds return the minimum; otherwise NaN propagates. Signed-zero
+     * bounds are normalized before delegating to {@link Math#clamp(double, double, double)}.
+     *
+     * @param value layout coordinate or size to constrain
+     * @param min lower bound and fallback for inverted bounds
+     * @param max upper bound
+     * @return constrained value, the fallback minimum, or NaN
+     */
     private static double clamp(double value, double min, double max) {
         if (max < min) {
             return min;
         }
-        return Math.max(min, Math.min(max, value));
+        if (Double.isNaN(value) || Double.isNaN(min) || Double.isNaN(max)) {
+            return Double.NaN;
+        }
+        return Math.clamp(value, min, Math.max(min, max));
     }
 
     private record WindowBounds(double x, double y, double width, double height) {}
@@ -832,11 +835,9 @@ public final class LuaDevWindow {
         completionScrollPane.setPannable(true);
         completionScrollTail.setMouseTransparent(true);
         completionBox.getChildren().setAll(completionScrollPane);
-        String appCss = LuaDevWindow.class.getResource("/css/app.css") != null
-                ? LuaDevWindow.class.getResource("/css/app.css").toExternalForm()
-                : null;
+        URL appCss = LuaDevWindow.class.getResource("/css/app.css");
         if (appCss != null) {
-            completionBox.getStylesheets().add(appCss);
+            completionBox.getStylesheets().add(appCss.toExternalForm());
         }
     }
 
@@ -863,7 +864,7 @@ public final class LuaDevWindow {
                 I18n.t("meshIde.dev.tooltip.saveCode"), "/icons/ide-file-code.svg", this::saveCurrentScriptSafely);
         functionOutlineButton = createSideMenuButton(
                 I18n.t("meshIde.dev.tooltip.functionOutline"), "/icons/menu.svg", this::toggleFunctionOutline);
-        searchButton = createSideMenuButton(
+        Button searchButton = createSideMenuButton(
                 I18n.t("meshIde.dev.tooltip.searchCode"), "/icons/search.svg", () -> openFindReplaceBar(true));
         kvButton = createSideMenuButton(
                 I18n.t("meshIde.dev.tooltip.kvEditor"), "/icons/database.svg", this::openCurrentScriptKvEditor);
@@ -925,7 +926,7 @@ public final class LuaDevWindow {
                     refreshFunctionTree();
                     scheduleEditorEmojiOverlayUpdate();
                 });
-        codeArea.textProperty().addListener((obs, oldValue, newValue) -> {
+        codeArea.textProperty().addListener((_, _, _) -> {
             markDirty();
             showCompletion(false);
             updateFindStatus();
@@ -933,7 +934,7 @@ public final class LuaDevWindow {
         });
         codeArea.addEventFilter(KeyEvent.KEY_PRESSED, this::handleEditorKeyPressed);
         codeArea.viewportDirtyEvents().subscribe(ignore -> scheduleEditorEmojiOverlayUpdate());
-        codeArea.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> scheduleEditorEmojiOverlayUpdate());
+        codeArea.layoutBoundsProperty().addListener((_, _, _) -> scheduleEditorEmojiOverlayUpdate());
 
         consoleArea = new TextArea();
         consoleArea.getStyleClass().add("lua-console");
@@ -945,7 +946,7 @@ public final class LuaDevWindow {
         editorEmojiLayer.setMouseTransparent(true);
         editorStack = new StackPane(codeScrollPane, editorEmojiLayer, completionBox);
         editorStack.setPickOnBounds(false);
-        editorStack.layoutBoundsProperty().addListener((obs, oldBounds, newBounds) -> scheduleEditorEmojiOverlayUpdate());
+        editorStack.layoutBoundsProperty().addListener((_, _, _) -> scheduleEditorEmojiOverlayUpdate());
         StackPane.setAlignment(completionBox, Pos.TOP_LEFT);
 
         findReplaceBar = createFindReplaceBar();
@@ -989,7 +990,7 @@ public final class LuaDevWindow {
     }
 
     private SplitPane createInfoPane() {
-        kvTable = new TableView<>(kvRows);
+        TableView<KvRow> kvTable = new TableView<>(kvRows);
         kvTable.getStyleClass().add("lua-dev-table");
         kvTable.setPlaceholder(new Region());
         kvTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -998,19 +999,18 @@ public final class LuaDevWindow {
         keyColumn.setPrefWidth(110);
         TableColumn<KvRow, String> valueColumn = new TableColumn<>(I18n.t("meshIde.column.value"));
         valueColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().value()));
-        valueColumn.setCellFactory(column -> createValueCell());
+        valueColumn.setCellFactory(_ -> createValueCell());
         kvTable.getColumns().add(keyColumn);
         kvTable.getColumns().add(valueColumn);
 
-        kvRefreshButton = createPanelIconButton(
+        kvRefreshButton = createPanelRefreshButton(
                 I18n.t("meshIde.action.refresh"),
                 I18n.t("meshIde.dev.tooltip.refreshKv"),
-                "/icons/refresh.svg",
                 this::refreshCurrentScriptKvRows);
         VBox kvBox = createPanel(I18n.t("meshIde.dev.panel.kv"), kvTable, kvRefreshButton);
         VBox.setVgrow(kvTable, Priority.ALWAYS);
 
-        debugTable = createDebugTable();
+        TableView<DebugVarRow> debugTable = createDebugTable();
         VBox debugBox = createPanel(I18n.t("meshIde.dev.panel.variables"), debugTable);
         VBox.setVgrow(debugTable, Priority.ALWAYS);
 
@@ -1033,7 +1033,7 @@ public final class LuaDevWindow {
         findField = new TextField();
         findField.getStyleClass().add("lua-find-field");
         findField.setPromptText(I18n.t("meshIde.dev.search.findPlaceholder"));
-        findField.textProperty().addListener((obs, oldValue, newValue) -> updateFindStatus());
+        findField.textProperty().addListener((_, _, _) -> updateFindStatus());
 
         replaceField = new TextField();
         replaceField.getStyleClass().add("lua-find-field");
@@ -1111,7 +1111,7 @@ public final class LuaDevWindow {
     }
 
     private VBox createFunctionOutlinePanel() {
-        Button collapseButton = createPanelTextButton("<", I18n.t("meshIde.dev.tooltip.hideFunctionOutline"),
+        Button collapseButton = createPanelCollapseButton(I18n.t("meshIde.dev.tooltip.hideFunctionOutline"),
                 this::toggleFunctionOutline);
         return createPanel(I18n.t("meshIde.dev.panel.functions"), functionTree, collapseButton);
     }
@@ -1141,7 +1141,7 @@ public final class LuaDevWindow {
         button.setAccessibleText(I18n.t("meshIde.dev.tooltip.showFunctionOutline"));
         button.setGraphic(letters);
         button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-        button.setOnAction(event -> setFunctionOutlineVisible(true, true));
+        button.setOnAction(_ -> setFunctionOutlineVisible(true, true));
 
         VBox rail = new VBox(button);
         rail.getStyleClass().add("lua-function-outline-rail");
@@ -1163,7 +1163,7 @@ public final class LuaDevWindow {
         nameColumn.setPrefWidth(92);
         TableColumn<DebugVarRow, String> valueColumn = new TableColumn<>(I18n.t("meshIde.column.value"));
         valueColumn.setCellValueFactory(data -> new ReadOnlyStringWrapper(data.getValue().value()));
-        valueColumn.setCellFactory(column -> createValueCell());
+        valueColumn.setCellFactory(_ -> createValueCell());
         table.getColumns().add(scopeColumn);
         table.getColumns().add(nameColumn);
         table.getColumns().add(valueColumn);
@@ -1189,10 +1189,10 @@ public final class LuaDevWindow {
                 detailsButton.setFocusTraversable(false);
                 detailsButton.setVisible(false);
                 detailsButton.setManaged(false);
-                detailsButton.setOnAction(event -> showValueToolWindow(getItem()));
+                detailsButton.setOnAction(_ -> showValueToolWindow(getItem()));
 
                 content.setAlignment(Pos.CENTER_LEFT);
-                hoverProperty().addListener((obs, wasHover, isHover) -> updateButtonVisibility());
+                hoverProperty().addListener((_, _, _) -> updateButtonVisibility());
             }
 
             @Override
@@ -1244,7 +1244,7 @@ public final class LuaDevWindow {
         }
         valueStage.setTitle(I18n.t("meshIde.dev.valueWindow.title"));
         valueStage.setScene(scene);
-        valueStage.setOnHidden(event -> ThemeManager.unregisterScene(scene));
+        valueStage.setOnHidden(_ -> ThemeManager.unregisterScene(scene));
         valueStage.show();
         if (OsDetect.isMacOs()) {
             new NativeMacOsWindowControl(valueStage).hideMiniaturizeAndZoomButtons();
@@ -1275,9 +1275,9 @@ public final class LuaDevWindow {
 
     private void installJsonCopyActions(CodeArea jsonArea) {
         MenuItem copyItem = new MenuItem(I18n.t("common.copy"));
-        copyItem.setOnAction(event -> copySelectedJsonText(jsonArea));
+        copyItem.setOnAction(_ -> copySelectedJsonText(jsonArea));
         MenuItem selectAllItem = new MenuItem(I18n.t("common.selectAll"));
-        selectAllItem.setOnAction(event -> {
+        selectAllItem.setOnAction(_ -> {
             jsonArea.requestFocus();
             jsonArea.selectAll();
         });
@@ -1300,7 +1300,7 @@ public final class LuaDevWindow {
             contextMenu.show(jsonArea, event.getScreenX(), event.getScreenY());
             event.consume();
         });
-        jsonArea.focusedProperty().addListener((obs, wasFocused, isFocused) -> {
+        jsonArea.focusedProperty().addListener((_, _, isFocused) -> {
             if (!isFocused) {
                 contextMenu.hide();
             }
@@ -1359,7 +1359,7 @@ public final class LuaDevWindow {
             breakpoint.getStyleClass().add("lua-breakpoint-marker-active");
         }
         breakpoint.setTooltip(new Tooltip(I18n.t("meshIde.dev.breakpoint")));
-        breakpoint.setOnMouseClicked(event -> toggleBreakpoint(line));
+        breakpoint.setOnMouseClicked(_ -> toggleBreakpoint(line));
 
         HBox graphic = new HBox(4, breakpoint, lineNumberFactory.apply(paragraphIndex));
         graphic.getStyleClass().add("lua-gutter-line");
@@ -1442,34 +1442,49 @@ public final class LuaDevWindow {
         } else {
             button.setText("?");
         }
-        button.setOnAction(event -> action.run());
+        button.setOnAction(_ -> action.run());
         return button;
     }
 
-    private Button createPanelIconButton(String title, String description, String iconPath, Runnable action) {
+    /**
+     * Creates the refresh button for a panel toolbar.
+     *
+     * @param title accessible button label and tooltip heading
+     * @param description detailed tooltip text
+     * @param action refresh operation to run when clicked
+     * @return configured button with the refresh icon or a text fallback
+     */
+    private Button createPanelRefreshButton(String title, String description, Runnable action) {
         Button button = new Button();
         button.getStyleClass().add("ide-toolbar-button");
         button.setFocusTraversable(false);
         button.setAccessibleText(title);
         button.setTooltip(new Tooltip(title + "\n" + description));
-        SVGPath icon = SvgIconLoader.load(iconPath, 18);
+        SVGPath icon = SvgIconLoader.load("/icons/refresh.svg", 18);
         if (icon != null) {
             button.setGraphic(icon);
             button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         } else {
             button.setText("R");
         }
-        button.setOnAction(event -> action.run());
+        button.setOnAction(_ -> action.run());
         return button;
     }
 
-    private Button createPanelTextButton(String text, String tooltip, Runnable action) {
-        Button button = new Button(text);
+    /**
+     * Creates the left-arrow button that collapses the function outline panel.
+     *
+     * @param tooltip accessible label and tooltip text
+     * @param action collapse operation to run when clicked
+     * @return configured panel toolbar button
+     */
+    private Button createPanelCollapseButton(String tooltip, Runnable action) {
+        Button button = new Button("<");
         button.getStyleClass().add("ide-toolbar-button");
         button.setFocusTraversable(false);
         button.setAccessibleText(tooltip);
         button.setTooltip(new Tooltip(tooltip));
-        button.setOnAction(event -> action.run());
+        button.setOnAction(_ -> action.run());
         return button;
     }
 
@@ -1487,7 +1502,7 @@ public final class LuaDevWindow {
         button.setFocusTraversable(false);
         button.setAccessibleText(tooltip);
         button.setTooltip(new Tooltip(tooltip));
-        button.setOnAction(event -> action.run());
+        button.setOnAction(_ -> action.run());
         return button;
     }
 
@@ -1668,8 +1683,8 @@ public final class LuaDevWindow {
      * @param end exclusive source offset
      */
     private void selectSearchRange(int start, int end) {
-        int safeStart = Math.max(0, Math.min(start, codeArea.getLength()));
-        int safeEnd = Math.max(safeStart, Math.min(end, codeArea.getLength()));
+        int safeStart = Math.clamp(start, 0, codeArea.getLength());
+        int safeEnd = Math.clamp(end, safeStart, codeArea.getLength());
         int paragraph = codeArea.offsetToPosition(safeStart, org.fxmisc.richtext.model.TwoDimensional.Bias.Forward)
                 .getMajor();
         codeArea.requestFocus();
@@ -1874,9 +1889,6 @@ public final class LuaDevWindow {
     }
 
     private void updateEditorEmojiOverlay() {
-        if (editorEmojiLayer == null) {
-            return;
-        }
         editorEmojiLayer.getChildren().clear();
         if (codeArea == null || editorStack == null || codeArea.getText().isEmpty()) {
             return;
@@ -1924,7 +1936,7 @@ public final class LuaDevWindow {
             return;
         }
 
-        double size = Math.max(12, Math.min(localHeight - 1, localHeight * 0.92));
+        double size = clamp(localHeight * 0.92, 12, localHeight - 1);
         ImageView imageView = EmojiImageCache.createImageView(emoji, size);
         if (imageView == null) {
             return;
@@ -2108,7 +2120,7 @@ public final class LuaDevWindow {
 
     private double approximateCaretColumnOffset() {
         String paragraph = codeArea.getText(codeArea.getCurrentParagraph());
-        int column = Math.max(0, Math.min(codeArea.getCaretColumn(), paragraph.length()));
+        int column = Math.clamp(codeArea.getCaretColumn(), 0, paragraph.length());
         double charWidth = 9.6;
         return paragraph.substring(0, column).length() * charWidth;
     }
@@ -2145,9 +2157,9 @@ public final class LuaDevWindow {
         row.setPrefWidth(COMPLETION_MIN_WIDTH);
         row.setUserData(index);
         addHighlightedCompletionText(row, candidate.displayText());
-        row.setOnMouseEntered(event -> selectCompletionIndex(index));
-        row.setOnMouseMoved(event -> selectCompletionIndex(index));
-        row.setOnMousePressed(event -> applyCompletion(candidate));
+        row.setOnMouseEntered(_ -> selectCompletionIndex(index));
+        row.setOnMouseMoved(_ -> selectCompletionIndex(index));
+        row.setOnMousePressed(_ -> applyCompletion(candidate));
         return row;
     }
 
@@ -2189,7 +2201,7 @@ public final class LuaDevWindow {
         if (visibleCompletions.isEmpty()) {
             return;
         }
-        int nextIndex = Math.max(0, Math.min(visibleCompletions.size() - 1, selectedCompletionIndex + offset));
+        int nextIndex = Math.clamp(selectedCompletionIndex + offset, 0, visibleCompletions.size() - 1);
         if (nextIndex == selectedCompletionIndex) {
             return;
         }
@@ -2265,8 +2277,8 @@ public final class LuaDevWindow {
     }
 
     private void applyCompletion(LuaCompletionEngine.CompletionItem candidate) {
-        int start = Math.max(0, Math.min(completionReplaceStart, codeArea.getLength()));
-        int end = Math.max(start, Math.min(completionReplaceEnd, codeArea.getLength()));
+        int start = Math.clamp(completionReplaceStart, 0, codeArea.getLength());
+        int end = Math.clamp(completionReplaceEnd, start, codeArea.getLength());
         codeArea.replaceText(start, end, candidate.insertText());
         codeArea.requestFocus();
         hideCompletion();
@@ -2500,9 +2512,9 @@ public final class LuaDevWindow {
             return;
         }
         int paragraphCount = Math.max(1, codeArea.getParagraphs().size());
-        int paragraph = Math.max(0, Math.min(paragraphCount - 1, function.line() - 1));
-        int nameStart = Math.max(0, Math.min(function.nameStartOffset(), codeArea.getLength()));
-        int nameEnd = Math.max(nameStart, Math.min(function.nameEndOffset(), codeArea.getLength()));
+        int paragraph = Math.clamp(function.line() - 1, 0, paragraphCount - 1);
+        int nameStart = Math.clamp(function.nameStartOffset(), 0, codeArea.getLength());
+        int nameEnd = Math.clamp(function.nameEndOffset(), nameStart, codeArea.getLength());
 
         stage.requestFocus();
         codeArea.requestFocus();
@@ -2510,7 +2522,7 @@ public final class LuaDevWindow {
         if (nameEnd > nameStart) {
             codeArea.selectRange(nameStart, nameEnd);
         } else {
-            codeArea.moveTo(Math.max(0, Math.min(function.offset(), codeArea.getLength())));
+            codeArea.moveTo(Math.clamp(function.offset(), 0, codeArea.getLength()));
         }
     }
 
@@ -2521,7 +2533,7 @@ public final class LuaDevWindow {
                 .toList());
         recreateLineGraphics();
         if (codeArea != null && !codeArea.getParagraphs().isEmpty()) {
-            int paragraph = Math.max(0, Math.min(codeArea.getParagraphs().size() - 1, snapshot.line() - 1));
+            int paragraph = Math.clamp(snapshot.line() - 1, 0, codeArea.getParagraphs().size() - 1);
             codeArea.showParagraphAtCenter(paragraph);
         }
     }

@@ -178,7 +178,7 @@ class LuaEditorActionsTest {
             AtomicInteger completionVisible = new AtomicInteger();
             AtomicInteger findRequests = new AtomicInteger();
             LuaEditorActions.install(area, () -> completionVisible.set(0));
-            area.textProperty().addListener((obs, oldValue, newValue) -> completionVisible.set(1));
+            area.textProperty().addListener((_, _, _) -> completionVisible.set(1));
             area.addEventHandler(KeyEvent.KEY_PRESSED, event -> {
                 if (event.isShortcutDown() && event.getCode() == KeyCode.F) {
                     findRequests.incrementAndGet();
