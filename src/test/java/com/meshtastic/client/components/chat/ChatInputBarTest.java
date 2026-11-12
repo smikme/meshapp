@@ -36,6 +36,7 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.ContextMenuEvent;
 
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.ContentDisplay;
@@ -264,6 +265,7 @@ class ChatInputBarTest {
     @ValueSource(strings = {"shortcut", "shiftInsert", "contextMenu"})
     void pastesClipboardImageAsPngAttachmentWithoutSending(String gesture) throws Exception {
         var uploaded = new CompletableFuture<byte[]>();
+        var uploaderMayReturn = new CountDownLatch(1);
         var pending = new CompletableFuture<ChatImage>();
         var uploadCount = new AtomicInteger();
         var sent = new AtomicReference<ChatInputBar.SendRequest>();
@@ -274,6 +276,7 @@ class ChatInputBarTest {
                         assertFalse(Platform.isFxApplicationThread(), "PNG encoding must not block the FX thread");
                         uploadCount.incrementAndGet();
                         uploaded.complete(bytes);
+                        await(uploaderMayReturn);
                         return pending;
                     });
             EmojiTextField input = field(inputBar, "messageInput", EmojiTextField.class);
@@ -316,23 +319,32 @@ class ChatInputBarTest {
             return inputBar;
         });
 
-        var png = ImageIO.read(new ByteArrayInputStream(uploaded.get(5, TimeUnit.SECONDS)));
-        assertEquals(3, png.getWidth());
-        assertEquals(2, png.getHeight());
-        assertEquals(0xffff0000, png.getRGB(0, 0));
-        assertEquals(0x8000ff00, png.getRGB(1, 1));
-        assertEquals(0, png.getRGB(2, 1));
-        assertEquals(1, uploadCount.get());
-        pending.complete(meshpicImage());
-        onFxThread(() -> {
-            assertEquals("до https://meshpic.org/feZ после", field(bar, "messageInput", EmojiTextField.class).getText());
-            assertEquals(meshpicImage(), field(bar, "attachedImage", ChatImage.class));
-            assertFalse(field(bar, "imageUploadInProgress", Boolean.class));
-            assertNull(sent.get(), "pasting an image must not send the draft");
-            bar.clear();
-            Clipboard.getSystemClipboard().clear();
-            return null;
-        });
+        try {
+            var png = ImageIO.read(new ByteArrayInputStream(uploaded.get(5, TimeUnit.SECONDS)));
+            assertEquals(3, png.getWidth());
+            assertEquals(2, png.getHeight());
+            assertEquals(0xffff0000, png.getRGB(0, 0));
+            assertEquals(0x8000ff00, png.getRGB(1, 1));
+            assertEquals(0, png.getRGB(2, 1));
+            assertEquals(1, uploadCount.get());
+            // Complete the upload before thenComposeAsync has received its future.
+            // This reproduces the ordering that made an immediate FX assertion race in CI.
+            pending.complete(meshpicImage());
+            assertTrue(onFxThread(() -> field(bar, "imageUploadInProgress", Boolean.class)));
+            uploaderMayReturn.countDown();
+            awaitImageUploadFinished(bar);
+            onFxThread(() -> {
+                assertEquals("до https://meshpic.org/feZ после", field(bar, "messageInput", EmojiTextField.class).getText());
+                assertEquals(meshpicImage(), field(bar, "attachedImage", ChatImage.class));
+                assertFalse(field(bar, "imageUploadInProgress", Boolean.class));
+                assertNull(sent.get(), "pasting an image must not send the draft");
+                bar.clear();
+                Clipboard.getSystemClipboard().clear();
+                return null;
+            });
+        } finally {
+            uploaderMayReturn.countDown();
+        }
     }
 
     private static void putClipboardImage() {
@@ -367,6 +379,7 @@ class ChatInputBarTest {
         started.get(5, TimeUnit.SECONDS);
         if (outcome.equals("failed")) pending.completeExceptionally(new java.io.IOException("offline"));
         else pending.complete(meshpicImage());
+        awaitImageUploadFinished(bar);
         onFxThread(() -> {
             assertEquals(outcome.equals("cancelled") ? "новый чат" : "подпись",
                     field(bar, "messageInput", EmojiTextField.class).getText());
@@ -818,6 +831,33 @@ class ChatInputBarTest {
         Method method = ChatInputBar.class.getDeclaredMethod("clearAttachedImage", boolean.class);
         method.setAccessible(true);
         method.invoke(bar, true);
+    }
+
+    private static void awaitImageUploadFinished(ChatInputBar bar) throws InterruptedException {
+        CountDownLatch finished = new CountDownLatch(1);
+        ChangeListener<Boolean> listener = (_, _, disabled) -> {
+            if (!disabled) {
+                finished.countDown();
+            }
+        };
+        Button imageButton = onFxThread(() -> {
+            Button button = field(bar, "imageBtn", Button.class);
+            // These tests keep input enabled. The upload's FX callback re-enables
+            // the attachment button; subscribe and check on FX to avoid a race.
+            button.disableProperty().addListener(listener);
+            if (!button.isDisable()) {
+                finished.countDown();
+            }
+            return button;
+        });
+        try {
+            assertTrue(finished.await(5, TimeUnit.SECONDS), "Timed out waiting for the image upload UI result");
+        } finally {
+            onFxThread(() -> {
+                imageButton.disableProperty().removeListener(listener);
+                return null;
+            });
+        }
     }
 
     private static <T> T onFxThread(FxSupplier<T> supplier) {
