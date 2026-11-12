@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2022, macos-15]
+        # JavaFX's Linux ARM64 GTK library requires glibc >= 2.38.
+        os: [ubuntu-22.04, ubuntu-24.04-arm, windows-2022, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -32,9 +33,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
       - name: Linux build dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential pkg-config libsystemd-dev libgtk-3-0 libasound2 xvfb
+        run: bash scripts/ci/install-linux-dependencies.sh
       - name: Test release tooling
         if: runner.os == 'Linux'
         run: python -m unittest discover -s scripts/ci/tests -v

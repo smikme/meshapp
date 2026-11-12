@@ -2333,6 +2333,10 @@ tasks.register('jpackage') {
 
 		if (!os.isWindows() && !macBuild) {
 			args << '--linux-shortcut'
+			if (normalizeArtifactArch() == 'aarch64') {
+				// JavaFX natives live inside JARs, beyond jpackage's ELF dependency scan.
+				args += ['--linux-package-deps', 'libc6 (>= 2.38)']
+			}
 			if (linuxResourceDir != null) {
 				args << '--resource-dir'
 				args << linuxResourceDir.absolutePath

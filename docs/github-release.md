@@ -44,8 +44,8 @@ JUnit-отчёты сохраняются как Actions artifacts, в том ч
 appimagetool 1.9.1 с проверкой SHA-256 и Freedesktop runtime/SDK 25.08 для Flatpak.
 Flatpak Builder берётся из официального `org.flatpak.Builder` с закреплённым
 коммитом для каждой архитектуры в `scripts/ci/setup-linux.sh`: системная версия Ubuntu 22.04 несовместима
-с AppStream современных SDK. Само приложение по-прежнему собирается на Ubuntu
-22.04 и упаковывается для runtime 25.08.
+с AppStream современных SDK. Linux x86_64 собирается на Ubuntu 22.04, ARM64 —
+на Ubuntu 24.04; Flatpak упаковывается для runtime 25.08.
 Обновление инструментов делается отдельным изменением с проверкой всех платформ.
 
 ## Собрать выпуск
@@ -117,15 +117,18 @@ Workflow фиксирует SHA коммита, запускает тесты и
 | Платформа | Пакеты |
 | --- | --- |
 | Linux x86_64, Ubuntu 22.04 | DEB, AppImage, Flatpak, self-update ZIP |
-| Linux aarch64 (ARM64), Ubuntu 22.04 ARM | DEB, AppImage, Flatpak, self-update ZIP |
+| Linux aarch64 (ARM64), Ubuntu 24.04 ARM | DEB, AppImage, Flatpak, self-update ZIP |
 | Windows x86_64, Windows 2022 | MSI, self-update ZIP |
 | macOS aarch64, macOS 15 | DMG, self-update ZIP |
 | macOS x86_64, macOS 15 Intel | DMG, self-update ZIP |
 
-Linux ARM64 собирается на `ubuntu-22.04-arm`. JDK, JavaFX и нативная BLE-библиотека
+Linux ARM64 собирается на `ubuntu-24.04-arm`: `libglassgtk3.so` из JavaFX 27.0.1
+требует glibc 2.38 или новее, а Ubuntu 22.04 содержит glibc 2.35.
+JDK, JavaFX и нативная BLE-библиотека
 используют архитектуру runner; `setup-linux.sh` выбирает соответствующие
 appimagetool и Flatpak Builder. ARM-пакеты получают идентификатор `linux-aarch64`
-в именах файлов и манифесте автообновления. Для локальной сборки нужны Linux ARM64,
+в именах файлов и манифесте автообновления. Для локальной сборки нужны Linux ARM64
+с glibc 2.38 или новее (например, Ubuntu 24.04),
 JDK 25 для ARM64 и appimagetool для aarch64; команды Gradle те же, что для x86_64.
 32-битный ARM в матрицу не входит.
 
