@@ -20,13 +20,8 @@
     <img src="https://img.shields.io/badge/Telegram-@MeshAppClient-blue?logo=telegram" alt="Telegram">
   </a>
 </p>
- 
-<p align="center">
-  Основная площадка разработки:
-  <a href="https://github.com/smikme/meshapp">github.com/smikme/meshapp</a>
-</p>
 
-[Установка](#установка)
+[Установка](#установка) · [Запуск из командной строки](#запуск-из-командной-строки)
 
 <div align="right">
 
@@ -62,15 +57,12 @@ MeshApp — настольное приложение для устройств 
 - Debian / Ubuntu: скачайте `.deb`-пакет и установите его через `apt` или пакетный менеджер.
 - Linux AppImage: скачайте `.AppImage`, сделайте файл исполняемым и запустите его.
 
-Скачайте пакет `.flatpak` из GitHub Releases. Установка и обновление выполняются из скачанного файла (подставьте его имя):
+Пакет `.flatpak` также скачивается из GitHub Releases. Для него нужны Flatpak и установленная среда `org.freedesktop.Platform//25.08`. Установите скачанный файл и запустите приложение (подставьте имя своего файла):
 
 ```bash
-flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub org.freedesktop.Platform//25.08
 flatpak install --user ./MeshApp-v2.4.0-linux-x86_64.flatpak
 flatpak run app.privatepractice.meshapp
 ```
-
 
 ---
 
@@ -105,7 +97,7 @@ flatpak run app.privatepractice.meshapp
 
 В чатах доступны сетевые каналы и личные диалоги. Сообщения сохраняются локально; поддерживаются ответы, реакции, статусы доставки и счётчики непрочитанных.
 
-Из строки ввода можно запускать команды `@tracebot` и `@infobot`. Они проверяют маршрут до выбранного узла и запрашивают сведения о нём; при вводе приложение подсказывает имена узлов и их адреса.
+Символ `@` в строке ввода открывает поиск узлов по имени или адресу; выбор узла вставляет его полное имя в сообщение. Символ `/` в начале строки открывает выбор ботов, например `/tracebot` и `/infobot`, для проверки маршрута и запроса сведений об узле.
 
 Каналы можно создавать и редактировать: менять имя, ключ доступа, параметры передачи позиции и её точность. Уведомления включаются и выключаются отдельно для каждого канала и личного диалога.
 
@@ -352,6 +344,9 @@ cd meshapp
 
 # Терминальный режим с временным TCP-профилем
 ./gradlew runTerminal --args="--host 192.168.1.10 --protocol meshtastic"
+
+# RPC-сервер без графического интерфейса
+./gradlew runRpcServer --args="--print-rpc-key"
 ```
 
 ### Подключение к устройству
@@ -380,6 +375,32 @@ sudo usermod -aG dialout "$USER"
 `.deb`-пакет MeshApp устанавливает udev-правила для типичных USB-UART Meshtastic-плат. Активный локальный пользователь получает `uaccess` ACL, а ModemManager не занимает порт.
 
 Если ошибка выглядит как `Device or resource busy`, порт уже открыт другим процессом: serial monitor, CLI или ModemManager.
+
+---
+
+## Запуск из командной строки
+
+MeshApp может работать в обычном окне, в терминале (TUI) или как RPC-сервер для удалённого доступа.
+
+| Что запустить | Команда из папки с исходниками |
+| --- | --- |
+| Обычное приложение | `./gradlew run` |
+| TUI | `./gradlew --console=plain runTerminal` |
+| RPC-сервер | `./gradlew --console=plain runRpcServer` |
+
+Если вы установили `.deb`, используйте такие команды:
+
+```bash
+# Открыть TUI и подключиться к устройству по TCP
+/opt/meshapp/bin/MeshApp --terminal --host 192.168.1.10
+
+# Запустить RPC-сервер и показать ключ для подключения
+/opt/meshapp/bin/MeshApp --rpc-server --print-rpc-key
+```
+
+Перед запуском сервера создайте подключение к устройству в обычном приложении и включите для него автоподключение. Затем полностью закройте приложение: одновременно работать с его базой может только один процесс.
+
+Команды для Windows, macOS, AppImage и Flatpak, а также все параметры TUI и RPC собраны в [инструкции по запуску](docs/command-line.ru.md).
 
 ---
 
@@ -525,6 +546,8 @@ meshapp/
 
 MeshApp собирается через `jpackage`. Для Linux дополнительно поддерживаются AppImage и Flatpak.
 
+Linux-пакеты собираются для x86_64 и ARM64 (`aarch64`). Для локальной сборки выполняйте те же команды на целевой архитектуре с соответствующими версиями JDK 25 и appimagetool.
+
 | Платформа | Формат | Команда |
 |-----------|--------|---------|
 | Windows | `.msi` | `./gradlew jpackage` |
@@ -538,8 +561,6 @@ MeshApp собирается через `jpackage`. Для Linux дополни�
 Для `Flatpak` нужны `flatpak`, `flatpak-builder`, среда выполнения и SDK. По умолчанию используется `org.freedesktop.Platform//25.08` и `org.freedesktop.Sdk//25.08`.
 
 ```bash
-flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 ./gradlew flatpak
 ```
 
@@ -553,13 +574,6 @@ scripts/update-flatpak-sources.sh aarch64
 ```
 
 В git должны попадать `flatpak-sources-x86_64.json`, `flatpak-sources-aarch64.json` и `flatpak-sources-foojay.json`. Каталог `offline-repository/` — только локальный кэш.
-
-Локальная проверка через Flathub Builder:
-
-```bash
-flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
-flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
-```
 
 Для `jpackage` можно явно указать JDK для встроенной среды выполнения: `-PpackagingJavaHome=/path/to/jdk` или `PACKAGING_JAVA_HOME=/path/to/jdk`. На macOS сборка проверяет `.app` через `otool -L` и завершается ошибкой, если внутри пакета остаются внешние зависимости вроде `/opt/homebrew/...` или `/usr/local/...`.
 

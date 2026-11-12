@@ -41,7 +41,7 @@ public final class RpcClient implements AutoCloseable {
     private final RpcTransport transport;
     private final ScheduledExecutorService scheduler;
     private final boolean ownsScheduler;
-    private final ConcurrentMap<String, PendingCall> pendingCalls = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CompletableFuture<JsonElement>> pendingCalls = new ConcurrentHashMap<>();
     private final List<RpcEventListener> eventListeners = new CopyOnWriteArrayList<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -77,6 +77,10 @@ public final class RpcClient implements AutoCloseable {
 
     /**
      * Calls a host method.
+     * <p>
+     * Registers the request before scheduling its deadline so an early timeout
+     * cannot be lost. Completing or cancelling the returned future removes the
+     * pending request and cancels its deadline task.
      *
      * @param method RPC method name
      * @param params request params, or {@code null}
@@ -98,26 +102,28 @@ public final class RpcClient implements AutoCloseable {
         String requestId = UUID.randomUUID().toString();
         CompletableFuture<JsonElement> future = new CompletableFuture<>();
         Duration effectiveTimeout = timeout != null ? timeout : DEFAULT_TIMEOUT;
-        ScheduledFuture<?> timeoutFuture = scheduler.schedule(
-                () -> timeoutCall(requestId),
-                Math.max(1L, effectiveTimeout.toMillis()),
-                TimeUnit.MILLISECONDS);
-        pendingCalls.put(requestId, new PendingCall(future, timeoutFuture));
 
         JsonObject envelope = new JsonObject();
         envelope.addProperty("type", RpcProtocol.TYPE_REQUEST);
         envelope.addProperty("requestId", requestId);
-        envelope.addProperty("method", requireText(method, "method"));
+        envelope.addProperty("method", requireMethod(method));
         envelope.add("params", params != null ? params : new JsonObject());
 
+        pendingCalls.put(requestId, future);
+        future.whenComplete((_, _) -> pendingCalls.remove(requestId, future));
         try {
-            transport.send(GSON.toJson(envelope));
-        } catch (RuntimeException e) {
-            PendingCall pending = pendingCalls.remove(requestId);
-            if (pending != null) {
-                pending.timeoutFuture().cancel(false);
-                pending.future().completeExceptionally(e);
+            ScheduledFuture<?> timeoutFuture = scheduler.schedule(
+                    () -> timeoutCall(requestId),
+                    Math.max(1L, effectiveTimeout.toMillis()),
+                    TimeUnit.MILLISECONDS);
+            // Also runs when the deadline or transport closure completed the call
+            // before schedule returned its task handle.
+            future.whenComplete((_, _) -> timeoutFuture.cancel(false));
+            if (!future.isDone()) {
+                transport.send(GSON.toJson(envelope));
             }
+        } catch (RuntimeException e) {
+            future.completeExceptionally(e);
         }
         return future;
     }
@@ -197,23 +203,21 @@ public final class RpcClient implements AutoCloseable {
         if (requestId == null || requestId.isBlank()) {
             return;
         }
-        PendingCall pending = pendingCalls.remove(requestId);
+        CompletableFuture<JsonElement> pending = pendingCalls.remove(requestId);
         if (pending == null) {
             return;
         }
-        pending.timeoutFuture().cancel(false);
-
-        boolean ok = booleanField(envelope, "ok");
+        boolean ok = isSuccessfulResponse(envelope);
         if (ok) {
             JsonElement result = envelope.has("result") ? envelope.get("result") : JsonNull.INSTANCE;
-            pending.future().complete(result != null ? result : JsonNull.INSTANCE);
+            pending.complete(result != null ? result : JsonNull.INSTANCE);
             return;
         }
 
-        JsonObject error = objectFieldOrEmpty(envelope, "error");
+        JsonObject error = responseError(envelope);
         String code = stringField(error, "code");
         String errorMessage = stringField(error, "message");
-        pending.future().completeExceptionally(new RpcRemoteException(
+        pending.completeExceptionally(new RpcRemoteException(
                 code,
                 errorMessage != null ? errorMessage : "Remote RPC call failed"));
     }
@@ -235,9 +239,9 @@ public final class RpcClient implements AutoCloseable {
     }
 
     private void timeoutCall(String requestId) {
-        PendingCall pending = pendingCalls.remove(requestId);
+        CompletableFuture<JsonElement> pending = pendingCalls.remove(requestId);
         if (pending != null) {
-            pending.future().completeExceptionally(new RpcRemoteException(
+            pending.completeExceptionally(new RpcRemoteException(
                     RpcProtocol.ERROR_TIMEOUT,
                     "RPC request timed out"));
         }
@@ -245,10 +249,9 @@ public final class RpcClient implements AutoCloseable {
 
     private void failAllPending(Throwable error) {
         for (String requestId : pendingCalls.keySet()) {
-            PendingCall pending = pendingCalls.remove(requestId);
+            CompletableFuture<JsonElement> pending = pendingCalls.remove(requestId);
             if (pending != null) {
-                pending.timeoutFuture().cancel(false);
-                pending.future().completeExceptionally(error);
+                pending.completeExceptionally(error);
             }
         }
     }
@@ -268,8 +271,14 @@ public final class RpcClient implements AutoCloseable {
         }
     }
 
-    private static JsonObject objectFieldOrEmpty(JsonObject object, String field) {
-        JsonElement element = object.get(field);
+    /**
+     * Extracts a response's structured error, falling back to an empty object.
+     *
+     * @param response response envelope to inspect
+     * @return error object, or an empty object if the field is missing or is not an object
+     */
+    private static JsonObject responseError(JsonObject response) {
+        JsonElement element = response.get("error");
         return element != null && element.isJsonObject() ? element.getAsJsonObject() : new JsonObject();
     }
 
@@ -281,20 +290,30 @@ public final class RpcClient implements AutoCloseable {
         return element.getAsString();
     }
 
-    private static boolean booleanField(JsonObject object, String field) {
-        JsonElement element = object.get(field);
+    /**
+     * Reads the response's success flag.
+     *
+     * @param response response envelope to inspect
+     * @return {@code true} when the primitive {@code ok} field evaluates to true
+     */
+    private static boolean isSuccessfulResponse(JsonObject response) {
+        JsonElement element = response.get("ok");
         return element != null && element.isJsonPrimitive() && element.getAsBoolean();
     }
 
-    private static String requireText(String value, String name) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(name + " is required");
+    /**
+     * Validates and trims an RPC method name.
+     *
+     * @param method requested method name
+     * @return method name without surrounding whitespace
+     * @throws IllegalArgumentException if the method name is null or blank
+     */
+    private static String requireMethod(String method) {
+        if (method == null || method.isBlank()) {
+            throw new IllegalArgumentException("method is required");
         }
-        return value.trim();
+        return method.trim();
     }
-
-    private record PendingCall(CompletableFuture<JsonElement> future,
-                               ScheduledFuture<?> timeoutFuture) {}
 
     private final class ClientTransportListener implements RpcTransportListener {
         @Override

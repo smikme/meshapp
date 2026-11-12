@@ -2,6 +2,7 @@ package com.meshtastic.client.rpc;
 
 import com.google.gson.JsonObject;
 import com.meshtastic.client.connection.ConnectionException;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,13 +17,19 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -48,48 +55,48 @@ class RpcClientServerTest {
                     result.addProperty("requestId", context.requestId());
                     return CompletableFuture.completedFuture(result);
                 });
-        RpcClient client = createClientWithServer(registry);
+        try (RpcClient client = createClientWithServer(registry)) {
+            JsonObject params = new JsonObject();
+            params.addProperty("a", 2);
+            params.addProperty("b", 5);
 
-        JsonObject params = new JsonObject();
-        params.addProperty("a", 2);
-        params.addProperty("b", 5);
+            JsonObject result = client.call("math.add", params)
+                    .get(1, TimeUnit.SECONDS)
+                    .getAsJsonObject();
 
-        JsonObject result = client.call("math.add", params)
-                .get(1, TimeUnit.SECONDS)
-                .getAsJsonObject();
-
-        assertEquals(7, result.get("sum").getAsInt());
-        assertTrue(result.get("requestId").getAsString().length() > 10);
+            assertEquals(7, result.get("sum").getAsInt());
+            assertTrue(result.get("requestId").getAsString().length() > 10);
+        }
     }
 
     @Test
     void unknownMethodReturnsStructuredError() throws Exception {
-        RpcClient client = createClientWithServer(new RpcMethodRegistry());
+        try (RpcClient client = createClientWithServer(new RpcMethodRegistry())) {
+            CompletableFuture<?> future = client.call("missing.method", new JsonObject());
 
-        CompletableFuture<?> future = client.call("missing.method", new JsonObject());
-
-        Throwable error = captureFutureError(future);
-        RpcRemoteException remoteError = assertInstanceOf(RpcRemoteException.class, error);
-        assertEquals("METHOD_NOT_FOUND", remoteError.getCode());
+            Throwable error = captureFutureError(future);
+            RpcRemoteException remoteError = assertInstanceOf(RpcRemoteException.class, error);
+            assertEquals("METHOD_NOT_FOUND", remoteError.getCode());
+        }
     }
 
     @Test
     void connectionExceptionReturnsStructuredConnectionError() throws Exception {
         RpcMethodRegistry registry = new RpcMethodRegistry()
-                .register("connection.connect", (params, context) -> {
+                .register("connection.connect", (_, _) -> {
                     throw new ConnectionException(
                             "Failed to connect to 192.168.99.35:4403",
                             new java.net.NoRouteToHostException("No route to host"));
                 });
-        RpcClient client = createClientWithServer(registry);
+        try (RpcClient client = createClientWithServer(registry)) {
+            CompletableFuture<?> future = client.call("connection.connect", new JsonObject());
 
-        CompletableFuture<?> future = client.call("connection.connect", new JsonObject());
-
-        Throwable error = captureFutureError(future);
-        RpcRemoteException remoteError = assertInstanceOf(RpcRemoteException.class, error);
-        assertEquals("CONNECTION_FAILED", remoteError.getCode());
-        assertTrue(remoteError.getMessage().contains("Failed to connect to 192.168.99.35:4403"));
-        assertTrue(remoteError.getMessage().contains("No route to host"));
+            Throwable error = captureFutureError(future);
+            RpcRemoteException remoteError = assertInstanceOf(RpcRemoteException.class, error);
+            assertEquals("CONNECTION_FAILED", remoteError.getCode());
+            assertTrue(remoteError.getMessage().contains("Failed to connect to 192.168.99.35:4403"));
+            assertTrue(remoteError.getMessage().contains("No route to host"));
+        }
     }
 
     @Test
@@ -119,7 +126,7 @@ class RpcClientServerTest {
     void directClientCallsDirectServerWithoutRouter() throws Exception {
         RpcAccessKey accessKey = RpcAccessKey.generate();
         RpcMethodRegistry registry = new RpcMethodRegistry()
-                .register("system.ping", (params, context) -> {
+                .register("system.ping", (_, _) -> {
                     JsonObject result = new JsonObject();
                     result.addProperty("pong", true);
                     return CompletableFuture.completedFuture(result);
@@ -160,7 +167,7 @@ class RpcClientServerTest {
     void directEncryptedTransportKeepsConcurrentClientFramesOrdered() throws Exception {
         RpcAccessKey accessKey = RpcAccessKey.generate();
         RpcMethodRegistry registry = new RpcMethodRegistry()
-                .register("echo.index", (params, context) -> {
+                .register("echo.index", (params, _) -> {
                     JsonObject result = new JsonObject();
                     result.addProperty("index", params.get("index").getAsInt());
                     return CompletableFuture.completedFuture(result);
@@ -219,11 +226,15 @@ class RpcClientServerTest {
                 directExecutor);
         closeables.add(server);
 
-        IOException error = assertThrows(IOException.class, () -> DirectRpcClient.connect(
-                InetAddress.getLoopbackAddress().getHostAddress(),
-                server.getPort(),
-                RpcAccessKey.generate(),
-                Duration.ofSeconds(1)));
+        IOException error = assertThrows(IOException.class, () -> {
+            try (DirectRpcClient _ = DirectRpcClient.connect(
+                    InetAddress.getLoopbackAddress().getHostAddress(),
+                    server.getPort(),
+                    RpcAccessKey.generate(),
+                    Duration.ofSeconds(1))) {
+                fail("Connection with an invalid access key must be rejected");
+            }
+        });
 
         assertTrue(error.getMessage().contains("invalid access key"));
     }
@@ -240,8 +251,8 @@ class RpcClientServerTest {
         String frame = clientCipher.encrypt(plaintext);
 
         assertTrue(frame.startsWith("enc1_"));
-        assertTrue(!frame.contains("rpc_request"));
-        assertTrue(!frame.contains("chat.messages"));
+        assertFalse(frame.contains("rpc_request"));
+        assertFalse(frame.contains("chat.messages"));
         assertEquals(plaintext, serverCipher.decrypt(frame));
 
         RpcSessionCipher wrongServerCipher = RpcSessionCipher.server(
@@ -261,7 +272,7 @@ class RpcClientServerTest {
 
     @Test
     void clientCallTimesOutWhenServerDoesNotRespond() throws Exception {
-        InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(command -> {});
+        InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(_ -> {});
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         RpcClient client = new RpcClient(pair.first(), scheduler);
         closeables.add(client);
@@ -275,18 +286,87 @@ class RpcClientServerTest {
         assertEquals("TIMEOUT", remoteError.getCode());
     }
 
+    /**
+     * Simulates a caller that resumes only after its deadline task has already run.
+     * The timeout must complete the request even before {@code schedule} returns.
+     */
+    @Test
+    void clientTimeoutCannotBeLostBeforeScheduleReturns() throws Exception {
+        InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(_ -> {});
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1) {
+            @Override
+            public @NotNull ScheduledFuture<?> schedule(@NotNull Runnable command, long delay, @NotNull TimeUnit unit) {
+                ScheduledFuture<?> task = super.schedule(command, delay, unit);
+                assertDoesNotThrow(() -> task.get(5, TimeUnit.SECONDS));
+                return task;
+            }
+        };
+        closeables.add(scheduler::shutdownNow);
+        closeables.add(pair.second());
+        RpcClient client = new RpcClient(pair.first(), scheduler);
+        closeables.add(client);
+
+        CompletableFuture<?> future = client.call("system.ping", new JsonObject(), Duration.ofMillis(25));
+
+        assertTrue(future.isCompletedExceptionally(), "A deadline that already fired must not be lost");
+        RpcRemoteException error = assertInstanceOf(RpcRemoteException.class, captureFutureError(future));
+        assertEquals("TIMEOUT", error.getCode());
+    }
+
+    /** Ensures cancellation also removes the scheduled timeout instead of leaving it queued. */
+    @Test
+    void cancellingCallCancelsItsDeadline() {
+        InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(_ -> {});
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
+        scheduler.setRemoveOnCancelPolicy(true);
+        closeables.add(scheduler::shutdownNow);
+        closeables.add(pair.second());
+        RpcClient client = new RpcClient(pair.first(), scheduler);
+        closeables.add(client);
+
+        CompletableFuture<?> future = client.call("system.ping", new JsonObject(), Duration.ofMinutes(1));
+        assertEquals(1, scheduler.getQueue().size());
+
+        assertTrue(future.cancel(false));
+
+        assertTrue(scheduler.getQueue().isEmpty());
+    }
+
+    /** Ensures a rejected deadline completes the call without sending an unbounded request. */
+    @Test
+    void rejectedDeadlineFailsCallWithoutSendingRequest() throws Exception {
+        CompletableFuture<Void> sent = new CompletableFuture<>();
+        InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(_ -> sent.complete(null));
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        scheduler.shutdownNow();
+        closeables.add(pair.second());
+        RpcClient client = new RpcClient(pair.first(), scheduler);
+        closeables.add(client);
+
+        CompletableFuture<?> future = client.call("system.ping", new JsonObject());
+
+        assertTrue(future.isCompletedExceptionally());
+        assertInstanceOf(RejectedExecutionException.class, captureFutureError(future));
+        assertFalse(sent.isDone());
+    }
+
+    /**
+     * Creates a client connected to a server managed by the test fixture.
+     *
+     * @param registry server methods available to the client
+     * @return client that the caller must close; the server is closed by {@link #tearDown()}
+     */
     private RpcClient createClientWithServer(RpcMethodRegistry registry) {
         InMemoryRpcTransport.Pair pair = InMemoryRpcTransport.createPair(directExecutor);
-        RpcClient client = new RpcClient(pair.first());
         RpcServer server = new RpcServer(pair.second(), registry, directExecutor);
-        closeables.add(client);
         closeables.add(server);
-        return client;
+        return new RpcClient(pair.first());
     }
 
     private static Throwable captureFutureError(CompletableFuture<?> future) throws Exception {
         try {
-            future.get(1, TimeUnit.SECONDS);
+            // This is a test watchdog, not the RPC deadline (25 ms in the timeout test).
+            future.get(5, TimeUnit.SECONDS);
             throw new AssertionError("Future completed successfully");
         } catch (java.util.concurrent.ExecutionException e) {
             return e.getCause();

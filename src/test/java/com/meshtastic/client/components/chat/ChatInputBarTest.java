@@ -3,37 +3,50 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
+import javax.imageio.ImageIO;
 import javafx.scene.image.WritableImage;
 import javafx.event.Event;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.ContextMenuEvent;
 
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.Button;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -93,8 +106,7 @@ class ChatInputBarTest {
                 var clipboard = new javafx.scene.input.ClipboardContent();
                 clipboard.putString("аа😀а");
                 javafx.scene.input.Clipboard.getSystemClipboard().setContent(clipboard);
-                Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.V,
-                        false, true, false, false));
+                paste(input);
                 assertEquals("аа😀", input.getText());
                 assertFalse(input.replaceRange(0, 2, "ааа"), "spelling replacements use the same limit");
                 input.undo();
@@ -109,8 +121,7 @@ class ChatInputBarTest {
                 assertEquals("", input.getText());
                 clipboard.putString("/аааааааааа");
                 javafx.scene.input.Clipboard.getSystemClipboard().setContent(clipboard);
-                Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.V,
-                        false, true, false, false));
+                paste(input);
                 assertEquals("/аа", input.getText(), "command prefixes must be measured with their arguments");
             } finally { AppPreferences.setCyrillicCompactionEnabled(false); }
             return null;
@@ -120,6 +131,275 @@ class ChatInputBarTest {
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"@al", "Привет, @al как дела?", "@bravo\n  @al рядом"})
+    void selectingNodeInsertsFullNameAndPreservesSurroundingText(String draft) {
+        onFxThread(() -> {
+            NodeData alpha = new NodeData(0xBEEF);
+            alpha.setLongName("Альфа Нода");
+            alpha.setShortName("AL");
+            NodeData bravo = new NodeData(0xCAFE);
+            bravo.setLongName("Bravo");
+            var sent = new AtomicReference<ChatInputBar.SendRequest>();
+            ChatInputBar bar = new ChatInputBar(sent::set, _ -> {
+                throw new AssertionError("node selection must not run a bot");
+            }, _ -> List.of(), query -> ChatBotCommandHelper.suggestNodes(List.of(alpha, bravo), query, 8));
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText(draft);
+            int caret = draft.indexOf("@al") + 3;
+            input.positionCaret(caret);
+            showSuggestions(bar);
+
+            Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ENTER,
+                    false, false, false, false));
+
+            String expected = draft.replace("@al", "Альфа Нода") + (caret == draft.length() ? " " : "");
+            assertEquals(expected, input.getText());
+            assertEquals(expected.indexOf("Альфа Нода") + "Альфа Нода".length()
+                    + (caret == draft.length() ? 1 : 0), input.getCaretPosition());
+            assertNull(sent.get(), "Enter selects a node without sending the draft");
+            assertFalse(field(bar, "commandSuggestionRoot", VBox.class).isVisible());
+            input.undo();
+            assertEquals(draft, input.getText());
+            assertEquals(caret, input.getCaretPosition());
+            input.redo();
+            assertEquals(expected, input.getText());
+            return null;
+        });
+    }
+
+    @Test
+    void nodeCompletionCannotExceedTheMessageBudget() {
+        onFxThread(() -> {
+            ChatInputBar bar = new ChatInputBar(_ -> {}, _ -> false, _ -> List.of(),
+                    _ -> List.of(new ChatBotCommandHelper.NodeSuggestion("AL(!0000beef)", "Альфа Нода", "!0000beef")));
+            bar.setProtocolTextLimit(() -> 10);
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("Hi @al");
+            input.positionCaret(6);
+            showSuggestions(bar);
+            ((Button) field(bar, "commandSuggestionRoot", VBox.class).getChildren().getFirst()).fire();
+
+            assertEquals("Hi @al", input.getText());
+            assertEquals(6, input.getCaretPosition());
+            return null;
+        });
+    }
+
+    @Test
+    void slashSuggestionsDisplayAndRunExistingAutomationBots() {
+        onFxThread(() -> {
+            var selected = new AtomicReference<ChatBotCommandHelper.ParsedBotCommand>();
+            var bot = new ChatBotCommandHelper.BotDefinition(
+                    "@traceauto", "Automation", ChatBotCommandHelper.BotAction.AUTOMATION, 42L);
+            ChatInputBar bar = new ChatInputBar(_ -> {
+                throw new AssertionError("bot selection must not send a message");
+            }, command -> { selected.set(command); return true; },
+                    query -> ChatBotCommandHelper.suggestBots(query, List.of(bot)), _ -> List.of());
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("/tr");
+            input.positionCaret(3);
+            showSuggestions(bar);
+            Button row = (Button) field(bar, "commandSuggestionRoot", VBox.class).getChildren().getFirst();
+            assertEquals("/traceauto", ((Label) ((VBox) row.getGraphic()).getChildren().getFirst()).getText());
+            row.fire();
+
+            assertEquals(42L, selected.get().scriptId());
+            assertEquals("@traceauto", selected.get().botHandle());
+            assertEquals("", input.getText());
+            return null;
+        });
+    }
+
+    @Test
+    void slashCommandsRunBotsWhileAtNamesAreSentAsText() {
+        onFxThread(() -> {
+            var selected = new AtomicReference<ChatBotCommandHelper.ParsedBotCommand>();
+            var sent = new AtomicReference<ChatInputBar.SendRequest>();
+            var bot = new ChatBotCommandHelper.BotDefinition(
+                    "@traceauto", "Automation", ChatBotCommandHelper.BotAction.AUTOMATION, 42L);
+            ChatInputBar bar = new ChatInputBar(sent::set,
+                    command -> { selected.set(command); return true; },
+                    query -> ChatBotCommandHelper.suggestBots(query, List.of(bot)), _ -> List.of());
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("/traceauto Alpha Node");
+            Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ENTER,
+                    false, false, false, false));
+            assertEquals("Alpha Node", selected.get().arguments());
+            assertNull(sent.get());
+
+            selected.set(null);
+            input.setText("@traceauto привет");
+            Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ENTER,
+                    false, false, false, false));
+            assertEquals("@traceauto привет", sent.get().text());
+            assertNull(selected.get());
+            return null;
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void showSuggestions(ChatInputBar bar) throws Exception {
+        EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+        var context = ChatBotCommandHelper.detectSuggestionContext(input.getText(), input.getCaretPosition());
+        String methodName = context.mode() == ChatBotCommandHelper.SuggestionMode.NODE
+                ? "buildNodeSuggestionRows" : "buildBotSuggestionRows";
+        Method method = ChatInputBar.class.getDeclaredMethod(methodName, ChatBotCommandHelper.SuggestionContext.class);
+        method.setAccessible(true);
+        VBox popup = field(bar, "commandSuggestionRoot", VBox.class);
+        popup.getChildren().setAll((List<Button>) method.invoke(bar, context));
+        setField(bar, "selectedSuggestionIndex", 0);
+        popup.setVisible(true);
+    }
+
+    private static void paste(EmojiTextField input) {
+        boolean mac = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac");
+        Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.V,
+                false, !mac, false, mac));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"shortcut", "shiftInsert", "contextMenu"})
+    void pastesClipboardImageAsPngAttachmentWithoutSending(String gesture) throws Exception {
+        var uploaded = new CompletableFuture<byte[]>();
+        var pending = new CompletableFuture<ChatImage>();
+        var uploadCount = new AtomicInteger();
+        var sent = new AtomicReference<ChatInputBar.SendRequest>();
+        ChatInputBar bar = onFxThread(() -> {
+            var inputBar = new ChatInputBar(sent::set, _ -> false, _ -> List.of(), _ -> List.of(), null,
+                    _ -> { throw new AssertionError("clipboard paste must not require a file"); },
+                    _ -> new WritableImage(2, 2), bytes -> {
+                        assertFalse(Platform.isFxApplicationThread(), "PNG encoding must not block the FX thread");
+                        uploadCount.incrementAndGet();
+                        uploaded.complete(bytes);
+                        return pending;
+                    });
+            EmojiTextField input = field(inputBar, "messageInput", EmojiTextField.class);
+            input.setText("до после");
+            input.positionCaret(3);
+            putClipboardImage();
+            if (gesture.equals("contextMenu")) {
+                Stage stage = new Stage();
+                try {
+                    stage.setScene(new Scene(new VBox(inputBar), 500, 200));
+                    stage.show();
+                    Event.fireEvent(input, new ContextMenuEvent(ContextMenuEvent.CONTEXT_MENU_REQUESTED,
+                            0, 0, 0, 0, true, null));
+                    Field contextMenuField = EmojiTextField.class.getDeclaredField("contextMenu");
+                    contextMenuField.setAccessible(true);
+                    ContextMenu menu = (ContextMenu) contextMenuField.get(input);
+                    var pasteItem = menu.getItems().stream()
+                            .filter(item -> com.meshtastic.client.i18n.I18n.t("common.paste").equals(item.getText()))
+                            .findFirst().orElseThrow();
+                    assertFalse(pasteItem.isDisable(), "image-only clipboard must enable Paste");
+                    pasteItem.fire();
+                    menu.hide();
+                } finally {
+                    stage.close();
+                }
+            } else if (gesture.equals("shiftInsert")) {
+                Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.INSERT,
+                        true, false, false, false));
+            } else {
+                // Browsers can offer both pixels and text; the image must take priority.
+                var content = new ClipboardContent();
+                content.putImage(Clipboard.getSystemClipboard().getImage());
+                content.putString("source text");
+                Clipboard.getSystemClipboard().setContent(content);
+                paste(input);
+            }
+            assertTrue(field(inputBar, "imageUploadInProgress", Boolean.class));
+            assertEquals("до после", input.getText());
+            paste(input); // A second paste must not start a parallel upload.
+            return inputBar;
+        });
+
+        var png = ImageIO.read(new ByteArrayInputStream(uploaded.get(5, TimeUnit.SECONDS)));
+        assertEquals(3, png.getWidth());
+        assertEquals(2, png.getHeight());
+        assertEquals(0xffff0000, png.getRGB(0, 0));
+        assertEquals(0x8000ff00, png.getRGB(1, 1));
+        assertEquals(0, png.getRGB(2, 1));
+        assertEquals(1, uploadCount.get());
+        pending.complete(meshpicImage());
+        onFxThread(() -> {
+            assertEquals("до https://meshpic.org/feZ после", field(bar, "messageInput", EmojiTextField.class).getText());
+            assertEquals(meshpicImage(), field(bar, "attachedImage", ChatImage.class));
+            assertFalse(field(bar, "imageUploadInProgress", Boolean.class));
+            assertNull(sent.get(), "pasting an image must not send the draft");
+            bar.clear();
+            Clipboard.getSystemClipboard().clear();
+            return null;
+        });
+    }
+
+    private static void putClipboardImage() {
+        WritableImage image = new WritableImage(3, 2);
+        image.getPixelWriter().setArgb(0, 0, 0xffff0000);
+        image.getPixelWriter().setArgb(1, 1, 0x8000ff00);
+        var clipboard = new ClipboardContent();
+        clipboard.putImage(image);
+        Clipboard.getSystemClipboard().setContent(clipboard);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"failed", "cancelled", "tooLong"})
+    void clipboardUploadKeepsDraftOnFailureOrAfterChatSwitch(String outcome) throws Exception {
+        var started = new CompletableFuture<Void>();
+        var pending = new CompletableFuture<ChatImage>();
+        ChatInputBar bar = onFxThread(() -> {
+            var inputBar = new ChatInputBar(_ -> {}, _ -> false, _ -> List.of(), _ -> List.of(), null,
+                    _ -> { throw new AssertionError("unexpected file upload"); },
+                    _ -> new WritableImage(2, 2), _ -> { started.complete(null); return pending; });
+            EmojiTextField input = field(inputBar, "messageInput", EmojiTextField.class);
+            input.setText("подпись");
+            if (outcome.equals("tooLong")) inputBar.setProtocolTextLimit(() -> 15);
+            putClipboardImage();
+            paste(input);
+            if (outcome.equals("cancelled")) {
+                inputBar.clear();
+                input.setText("новый чат");
+            }
+            return inputBar;
+        });
+        started.get(5, TimeUnit.SECONDS);
+        if (outcome.equals("failed")) pending.completeExceptionally(new java.io.IOException("offline"));
+        else pending.complete(meshpicImage());
+        onFxThread(() -> {
+            assertEquals(outcome.equals("cancelled") ? "новый чат" : "подпись",
+                    field(bar, "messageInput", EmojiTextField.class).getText());
+            assertNull(field(bar, "attachedImage", ChatImage.class));
+            assertFalse(field(bar, "imageUploadInProgress", Boolean.class));
+            bar.clear();
+            Clipboard.getSystemClipboard().clear();
+            return null;
+        });
+    }
+
+    @Test
+    void clipboardImageIsIgnoredWhenInputIsDisabledOrPickingANode() {
+        onFxThread(() -> {
+            var bar = new ChatInputBar(_ -> {}, _ -> false, _ -> List.of(), _ -> List.of(), null,
+                    _ -> { throw new AssertionError("unexpected file upload"); },
+                    _ -> new WritableImage(2, 2), _ -> { throw new AssertionError("unexpected image upload"); });
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("подпись");
+            putClipboardImage();
+            bar.setInputEnabled(false);
+            paste(input);
+            assertEquals("подпись", input.getText());
+            assertFalse(field(bar, "imageUploadInProgress", Boolean.class));
+            bar.setInputEnabled(true);
+            bar.startNodePick("нода", "Выберите ноду", _ -> {}, () -> {});
+            paste(input);
+            assertEquals("нода", input.getText());
+            assertFalse(field(bar, "imageUploadInProgress", Boolean.class));
+            bar.clear();
+            Clipboard.getSystemClipboard().clear();
+            return null;
+        });
     }
 
     @Test

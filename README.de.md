@@ -21,12 +21,7 @@
   </a>
 </p>
 
-<p align="center">
-  Primäre Entwicklungsplattform:
-  <a href="https://github.com/smikme/meshapp">github.com/smikme/meshapp</a>
-</p>
-
-[Installation](#installation)
+[Installation](#installation) · [Start über die Kommandozeile](#start-über-die-kommandozeile)
 
 <div align="right">
 
@@ -62,15 +57,12 @@ Fertige Pakete werden auf der [GitHub-Releases-Seite](https://github.com/smikme/
 - Debian / Ubuntu: `.deb`-Paket herunterladen und mit `apt` oder dem Paketmanager installieren.
 - Linux AppImage: `.AppImage` herunterladen, ausführbar machen und starten.
 
-Laden Sie das `.flatpak`-Paket von GitHub Releases herunter. Installation und Aktualisierung erfolgen aus der heruntergeladenen Datei (Dateiname entsprechend ersetzen):
+Laden Sie das `.flatpak`-Paket von GitHub Releases herunter. Dafür müssen Flatpak und die Laufzeitumgebung `org.freedesktop.Platform//25.08` installiert sein. Installieren Sie die heruntergeladene Datei und starten Sie die Anwendung; passen Sie den Dateinamen entsprechend an:
 
 ```bash
-flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub org.freedesktop.Platform//25.08
 flatpak install --user ./MeshApp-v2.4.0-linux-x86_64.flatpak
 flatpak run app.privatepractice.meshapp
 ```
-
 
 ---
 
@@ -105,7 +97,7 @@ MeshApp umfasst:
 
 Chats umfassen Netzwerkkanäle und Direktunterhaltungen. Nachrichten werden lokal gespeichert; Antworten, Reaktionen, Zustellstatus und Ungelesen-Zähler werden unterstützt.
 
-Die Eingabezeile kann `@tracebot`- und `@infobot`-Befehle ausführen. Sie prüfen die Route zum ausgewählten Knoten und fragen Informationen dazu ab; während der Eingabe schlägt die App Knotennamen und Adressen vor.
+Mit `@` in der Eingabezeile lassen sich Knoten nach Namen oder Adresse suchen und ihre vollständigen Namen in die Nachricht einfügen. Mit `/` am Zeilenanfang öffnet sich die Bot-Auswahl, etwa `/tracebot` oder `/infobot`, um eine Route zu prüfen oder Knoteninformationen abzufragen.
 
 Kanäle können erstellt und bearbeitet werden: Name, Zugriffsschlüssel, Positionsfreigabe und Positionsgenauigkeit. Benachrichtigungen lassen sich für jeden Kanal und jede Direktunterhaltung separat aktivieren oder deaktivieren.
 
@@ -352,6 +344,9 @@ cd meshapp
 
 # Terminalmodus mit temporärem TCP-Profil
 ./gradlew runTerminal --args="--host 192.168.1.10 --protocol meshtastic"
+
+# RPC-Server ohne grafische Oberfläche
+./gradlew runRpcServer --args="--print-rpc-key"
 ```
 
 ### Verbindung mit einem Gerät
@@ -380,6 +375,32 @@ Auf manchen Distributionen heißt die Gruppe `uucp` oder `lock`; verwenden Sie d
 Das MeshApp-`.deb`-Paket installiert udev-Regeln für gängige USB-UART-Meshtastic-Boards. Der aktive lokale Benutzer erhält eine `uaccess`-ACL, und ModemManager übernimmt den Port nicht.
 
 Wenn der Fehler wie `Device or resource busy` aussieht, ist der Port bereits in einem anderen Prozess geöffnet: Serial Monitor, CLI oder ModemManager.
+
+---
+
+## Start über die Kommandozeile
+
+Sie können MeshApp als Desktop-Anwendung, im Terminal (TUI) oder als RPC-Server für den Fernzugriff verwenden.
+
+| Anwendung | Start aus dem Quellcode-Ordner |
+| --- | --- |
+| Desktop-Anwendung | `./gradlew run` |
+| TUI | `./gradlew --console=plain runTerminal` |
+| RPC-Server | `./gradlew --console=plain runRpcServer` |
+
+Nach einer Installation per `.deb` verwenden Sie diese Befehle:
+
+```bash
+# TUI öffnen und über TCP mit einem Gerät verbinden
+/opt/meshapp/bin/MeshApp --terminal --host 192.168.1.10
+
+# RPC-Server starten und Zugangsschlüssel anzeigen
+/opt/meshapp/bin/MeshApp --rpc-server --print-rpc-key
+```
+
+Richten Sie vor dem Serverstart in der Desktop-Anwendung eine Geräteverbindung ein und aktivieren Sie dafür die automatische Verbindung. Beenden Sie die Anwendung danach vollständig: Nur ein Prozess kann auf die Datenbank zugreifen.
+
+Befehle für Windows, macOS, AppImage und Flatpak sowie alle Optionen für TUI und RPC finden Sie in der [Anleitung zum Start über die Kommandozeile](docs/command-line.de.md).
 
 ---
 
@@ -525,6 +546,8 @@ meshapp/
 
 MeshApp wird mit `jpackage` gebaut. Für Linux werden zusätzlich AppImage und Flatpak unterstützt.
 
+Linux-Pakete werden für x86_64 und ARM64 (`aarch64`) gebaut. Für einen lokalen Build gelten dieselben Befehle auf der Zielarchitektur mit passendem JDK 25 und appimagetool.
+
 | Plattform | Format | Befehl |
 |----------|--------|---------|
 | Windows | `.msi` | `./gradlew jpackage` |
@@ -538,14 +561,12 @@ MeshApp wird mit `jpackage` gebaut. Für Linux werden zusätzlich AppImage und F
 `Flatpak` benötigt `flatpak`, `flatpak-builder`, Runtime und SDK. Standardmäßig werden `org.freedesktop.Platform//25.08` und `org.freedesktop.Sdk//25.08` verwendet.
 
 ```bash
-flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 ./gradlew flatpak
 ```
 
 Die Runtime kann mit `-PflatpakRuntime=...`, `-PflatpakRuntimeVersion=...`, `-PflatpakSdk=...` und `-PflatpakBranch=...` überschrieben werden.
 
-Die Veröffentlichung für Flathub verwendet `app.privatepractice.meshapp.yml`. Nach Änderungen an Gradle-Abhängigkeiten muss die Maven-Quellenliste für Offline-Builds neu erstellt werden:
+Für lokale Offline-Builds wird `app.privatepractice.meshapp.yml` verwendet. Nach Änderungen an Gradle-Abhängigkeiten muss die Maven-Quellenliste für Offline-Builds neu erstellt werden:
 
 ```bash
 scripts/update-flatpak-sources.sh
@@ -553,13 +574,6 @@ scripts/update-flatpak-sources.sh aarch64
 ```
 
 `flatpak-sources-x86_64.json`, `flatpak-sources-aarch64.json` und `flatpak-sources-foojay.json` müssen in git committed werden. Das Verzeichnis `offline-repository/` ist nur ein lokaler Cache.
-
-Lokale Prüfung mit Flathub Builder:
-
-```bash
-flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
-flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
-```
 
 Für `jpackage` kann das JDK der gebündelten Runtime explizit gesetzt werden: `-PpackagingJavaHome=/path/to/jdk` oder `PACKAGING_JAVA_HOME=/path/to/jdk`. Unter macOS prüft der Build die `.app` mit `otool -L` und schlägt fehl, wenn externe Abhängigkeiten wie `/opt/homebrew/...` oder `/usr/local/...` im Bundle verbleiben.
 

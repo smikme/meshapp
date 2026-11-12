@@ -1200,6 +1200,17 @@ abstract class FormChatUi extends FormChatBase {
         showChatImage(image, url -> new Image(url, true));
     }
 
+    /**
+     * Opens an image overlay using the supplied loader for the full binary URL.
+     *
+     * <p>The image remains centered and preserves its aspect ratio as the message
+     * area grows or shrinks. Loading or failed images show a status and public
+     * link. Replacing or closing the overlay releases image listeners and size
+     * bindings. Called on the FX thread.
+     *
+     * @param image normalized image URLs, or null to leave the current viewer unchanged
+     * @param imageLoader loader returning the full image, possibly still loading
+     */
     void showChatImage(ChatImage image, java.util.function.Function<String, Image> imageLoader) {
         if (image == null || messageArea == null) {
             return;
@@ -1243,6 +1254,8 @@ abstract class FormChatUi extends FormChatBase {
         };
         StackPane imageFrame = new StackPane(imageView, fallback);
         imageFrame.getStyleClass().add("chat-image-viewer-frame");
+        // The fitted image must not become the chat area's minimum size on resize.
+        imageFrame.setMinSize(0, 0);
         imageFrame.setOnMouseClicked(javafx.event.Event::consume);
 
         Button closeButton = new Button("✕");

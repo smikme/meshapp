@@ -1,12 +1,16 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.themes.TypographyManager;
 import javafx.application.Platform;
 import javafx.event.Event;
 import javafx.scene.Scene;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.StackPane;
+import javafx.scene.text.Font;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -124,6 +128,34 @@ class EmojiTextFieldTest {
             field.clear();
             field.undo();
             assertEquals("", field.getText());
+        });
+    }
+
+    @Test
+    void compactFontMetricsDoNotScrollContentThatFitsInTheField() {
+        onFxThread(() -> {
+            int previousFontSize = TypographyManager.getChatFontSize();
+            TypographyManager.setChatFontSize(20);
+            try {
+                EmojiTextField field = new EmojiTextField();
+                field.setText("word ".repeat(20));
+                field.positionCaret(field.getText().length());
+                TextFlow content = (TextFlow) field.getChildren().getFirst();
+                // Model a fallback font with a line height below the editor's estimate.
+                content.getChildren().stream().filter(Text.class::isInstance)
+                        .map(Text.class::cast).forEach(text -> text.setFont(Font.font("Monospaced", 10)));
+                double width = 180;
+                field.resize(width, field.prefHeight(width));
+                field.layout();
+
+                assertTrue(content.getHeight() < field.getHeight(), "the complete draft fits in the field");
+                assertTrue(content.getBoundsInParent().getMinY() >= 0,
+                        () -> "first line must remain visible: " + content.getBoundsInParent());
+                assertTrue(content.getBoundsInParent().getMaxY() <= field.getHeight(),
+                        "last line must remain visible");
+            } finally {
+                TypographyManager.setChatFontSize(previousFontSize);
+            }
         });
     }
 

@@ -15,6 +15,7 @@ from versioning import ReleaseVersion, package_version
 
 PLATFORMS = {
     "linux-x86_64": ("deb", "AppImage", "flatpak"),
+    "linux-aarch64": ("deb", "AppImage", "flatpak"),
     "windows-x86_64": ("msi",),
     "macos-aarch64": ("dmg",),
     "macos-x86_64": ("dmg",),

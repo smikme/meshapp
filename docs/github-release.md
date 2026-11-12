@@ -37,13 +37,13 @@
 ## Ежедневная работа
 
 `Check` запускается для pull request, изменений `main` и вручную. Java-тесты
-выполняются на Linux, Windows и macOS; сценарии публикации — на Linux с OpenSSL 3.
+выполняются на Linux x86_64 и ARM64, Windows и macOS; сценарии публикации — на Linux с OpenSSL 3.
 JUnit-отчёты сохраняются как Actions artifacts, в том числе при ошибке тестов.
 
 Используются Temurin 25.0.5+8, Gradle Wrapper 9.8.2 с проверкой SHA-256,
 appimagetool 1.9.1 с проверкой SHA-256 и Freedesktop runtime/SDK 25.08 для Flatpak.
 Flatpak Builder берётся из официального `org.flatpak.Builder` с закреплённым
-коммитом в `scripts/ci/setup-linux.sh`: системная версия Ubuntu 22.04 несовместима
+коммитом для каждой архитектуры в `scripts/ci/setup-linux.sh`: системная версия Ubuntu 22.04 несовместима
 с AppStream современных SDK. Само приложение по-прежнему собирается на Ubuntu
 22.04 и упаковывается для runtime 25.08.
 Обновление инструментов делается отдельным изменением с проверкой всех платформ.
@@ -117,9 +117,17 @@ Workflow фиксирует SHA коммита, запускает тесты и
 | Платформа | Пакеты |
 | --- | --- |
 | Linux x86_64, Ubuntu 22.04 | DEB, AppImage, Flatpak, self-update ZIP |
+| Linux aarch64 (ARM64), Ubuntu 22.04 ARM | DEB, AppImage, Flatpak, self-update ZIP |
 | Windows x86_64, Windows 2022 | MSI, self-update ZIP |
 | macOS aarch64, macOS 15 | DMG, self-update ZIP |
 | macOS x86_64, macOS 15 Intel | DMG, self-update ZIP |
+
+Linux ARM64 собирается на `ubuntu-22.04-arm`. JDK, JavaFX и нативная BLE-библиотека
+используют архитектуру runner; `setup-linux.sh` выбирает соответствующие
+appimagetool и Flatpak Builder. ARM-пакеты получают идентификатор `linux-aarch64`
+в именах файлов и манифесте автообновления. Для локальной сборки нужны Linux ARM64,
+JDK 25 для ARM64 и appimagetool для aarch64; команды Gradle те же, что для x86_64.
+32-битный ARM в матрицу не входит.
 
 После `verifySelfUpdatePackage` файлы получают имена с версией, ОС и архитектурой.
 Проверяются версия и публичный ключ внутри каждого ZIP. Только полный комплект
@@ -177,9 +185,9 @@ Contents API и скачивает экспорты по `download_url` с `raw.
 в ограничение вложений GitHub — тогда прикрепите отдельный лог из архива.
 Токенов GitHub или Gitea в клиенте нет.
 
-Flatpak публикуется как отдельный `.flatpak` bundle. Требуется Freedesktop
-Platform 25.08 из Flathub; установка и обновление выполняются из скачанного
-bundle. Собственный OSTree-репозиторий и SSH не используются.
+Пакет `.flatpak` публикуется в GitHub Releases. Для запуска нужна установленная
+среда `org.freedesktop.Platform//25.08`. Установка и обновление выполняются из
+скачанного файла. Собственный OSTree-репозиторий и SSH не используются.
 `app.privatepractice.meshapp.yml` служит для локальной офлайн-сборки текущего
 checkout; основной CI использует `./gradlew flatpak`.
 

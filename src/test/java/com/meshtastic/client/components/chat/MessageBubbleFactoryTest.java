@@ -1,26 +1,39 @@
 package com.meshtastic.client.components.chat;
 
 import com.meshtastic.client.TestEnvironmentSupport;
+import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.service.MessageDbService;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleDoubleProperty;
+import javafx.event.Event;
 import javafx.scene.Node;
 import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Text;
+import javafx.stage.Stage;
+import javafx.stage.Window;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -188,6 +201,91 @@ class MessageBubbleFactoryTest {
             assertNotNull(link);
             assertEquals("https://meshapp.ru", link.getText());
             assertNotNull(link.getOnMouseClicked());
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"incoming", "outgoing", "system"})
+    void messageContextMenuCopiesLinksAndUpdatesWhenRowIsReused(String kind) {
+        onFxThread(() -> {
+            MessageBubbleFactory factory = new MessageBubbleFactory(null, new SimpleDoubleProperty(600),
+                    new NoOpBubbleActions(), new HashMap<>(), _ -> new javafx.scene.image.WritableImage(2, 2));
+            List<String> texts = List.of(
+                    "Фото (https://meshpic.org/feZ). Ещё https://meshpic.org/feZ!",
+                    "Ссылки https://example.com/a_b?q=1&x=2#part, http://example.org/path(a). https://example.com/a_b?q=1&x=2#part",
+                    "Ответ без ссылки",
+                    "Повтор https://example.com/shared.",
+                    "Основная https://example.com/message.",
+                    "Сообщение без ссылки, только https://.");
+            List<String> quotes = List.of("", "",
+                    "Цитата (https://example.com/quoted?q=1&x=2#fragment).",
+                    "Цитата https://example.com/shared!",
+                    "Цитата https://example.com/quoted.", "");
+            List<List<String>> expected = List.of(
+                    List.of("https://meshpic.org/feZ"),
+                    List.of("https://example.com/a_b?q=1&x=2#part", "http://example.org/path(a)"),
+                    List.of("https://example.com/quoted?q=1&x=2#fragment"),
+                    List.of("https://example.com/shared"),
+                    List.of("https://example.com/message", "https://example.com/quoted"),
+                    List.of());
+            StackPane host = new StackPane();
+            Stage stage = new Stage();
+            try {
+                stage.setScene(new Scene(host, 600, 300));
+                stage.show();
+                HBox reusableRow = null;
+                for (int i = 0; i < texts.size(); i++) {
+                    if (kind.equals("system") && !quotes.get(i).isEmpty()) continue;
+                    MeshMessage message = new MeshMessage("!2", "!ffffffff", 0, texts.get(i), 1, kind.equals("outgoing"));
+                    message.setSystemMessage(kind.equals("system"));
+                    if (!quotes.get(i).isEmpty()) message.setReplyText(quotes.get(i));
+                    var rendered = reusableRow == null ? factory.buildRendered(message)
+                            : factory.buildRendered(message, reusableRow);
+                    reusableRow = rendered.row();
+                    host.getChildren().setAll(rendered.row());
+                    host.applyCss();
+                    host.layout();
+                    VBox bubble = findNodeWithStyle(rendered.row(), "chat-bubble-" + kind, VBox.class).orElseThrow();
+                    Node clickTarget = quotes.get(i).isEmpty() ? bubble
+                            : findNodeWithStyle(bubble, "chat-bubble-quote", Parent.class).orElseThrow();
+                    Event.fireEvent(clickTarget, new ContextMenuEvent(ContextMenuEvent.CONTEXT_MENU_REQUESTED,
+                            0, 0, 0, 0, false, null));
+                    ContextMenu menu = Window.getWindows().stream()
+                            .filter(ContextMenu.class::isInstance).map(ContextMenu.class::cast)
+                            .filter(window -> window.isShowing() && window.getOwnerWindow() == stage)
+                            .findFirst().orElseThrow();
+                    try {
+                        MenuItem copyLink = menu.getItems().stream()
+                                .filter(item -> I18n.t("chat.bubble.copyLink").equals(item.getText()))
+                                .findFirst().orElse(null);
+                        if (expected.get(i).isEmpty()) {
+                            assertNull(copyLink);
+                        } else if (expected.get(i).size() == 1) {
+                            assertNotNull(copyLink);
+                            assertFalse(copyLink instanceof Menu);
+                            copyLink.fire();
+                            assertEquals(expected.get(i).getFirst(), Clipboard.getSystemClipboard().getString());
+                        } else {
+                            Menu links = assertInstanceOf(Menu.class, copyLink);
+                            assertEquals(expected.get(i), links.getItems().stream().map(MenuItem::getText).toList());
+                            for (MenuItem link : links.getItems()) {
+                                assertFalse(link.isMnemonicParsing());
+                                link.fire();
+                                assertEquals(link.getText(), Clipboard.getSystemClipboard().getString());
+                            }
+                        }
+                        menu.getItems().stream().filter(item -> I18n.t("common.copy").equals(item.getText()))
+                                .findFirst().orElseThrow().fire();
+                        assertEquals(texts.get(i), Clipboard.getSystemClipboard().getString());
+                    } finally {
+                        menu.hide();
+                        factory.disposeRendered(rendered);
+                    }
+                }
+            } finally {
+                stage.close();
+                Clipboard.getSystemClipboard().clear();
+            }
         });
     }
 

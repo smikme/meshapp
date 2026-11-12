@@ -27,6 +27,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.meshtastic.proto.ChannelProtos;
 
 import java.lang.reflect.Field;
@@ -69,6 +71,46 @@ class FormChatTest {
             assertNull(view.getImage());
             assertFalse(view.fitWidthProperty().isBound());
             assertFalse(form.messageArea.getChildren().contains(overlay));
+        });
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1600, 900", "900, 1600"})
+    void imageViewerFitsAfterGrowingAndShrinkingChatArea(int imageWidth, int imageHeight) {
+        onFxThread(() -> {
+            FormChat form = new FormChat();
+            VBox root = new VBox(form.messageArea);
+            Scene scene = new Scene(root, 1000, 800);
+            var stylesheet = getClass().getResource("/css/app.css");
+            assertNotNull(stylesheet, "Chat stylesheet /css/app.css must be available");
+            scene.getStylesheets().add(stylesheet.toExternalForm());
+            root.applyCss();
+            root.layout();
+
+            var descriptor = new com.meshtastic.client.components.chat.ChatImage("feZ",
+                    "https://meshpic.org/feZ", "https://meshpic.org/image/feZ?s=t",
+                    "https://meshpic.org/image/feZ", null);
+            form.showChatImage(descriptor, _ -> new javafx.scene.image.WritableImage(imageWidth, imageHeight));
+            StackPane overlay = readField(form, "imageViewerOverlay");
+            var view = (javafx.scene.image.ImageView) overlay.lookup(".chat-image-viewer-image");
+            try {
+                for (int[] size : new int[][]{{1000, 800}, {1300, 1000}, {400, 1000}, {400, 300}, {1000, 800}}) {
+                    root.resize(size[0], size[1]);
+                    root.applyCss();
+                    root.layout();
+
+                    assertEquals(size[0], form.messageArea.getWidth(), 0.01);
+                    assertEquals(size[1], form.messageArea.getHeight(), 0.01);
+                    double scale = Math.min((size[0] - 48.0) / imageWidth, (size[1] - 48.0) / imageHeight);
+                    assertEquals(imageWidth * scale, view.getLayoutBounds().getWidth(), 0.01);
+                    assertEquals(imageHeight * scale, view.getLayoutBounds().getHeight(), 0.01);
+                    var bounds = view.localToScene(view.getLayoutBounds());
+                    assertEquals(size[0] / 2.0, bounds.getCenterX(), 1.0);
+                    assertEquals(size[1] / 2.0, bounds.getCenterY(), 1.0);
+                }
+            } finally {
+                ((javafx.scene.control.Button) overlay.lookup(".chat-image-viewer-close")).fire();
+            }
         });
     }
 
