@@ -2,24 +2,22 @@ package com.meshtastic.client.platform;
 
 import com.meshtastic.client.connection.ble.macos.ObjCRuntime;
 import com.meshtastic.client.i18n.I18n;
-import com.sun.jna.*;
+import com.sun.jna.Function;
+import com.sun.jna.NativeLibrary;
+import com.sun.jna.Pointer;
 import javafx.stage.Window;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * macOS NSVisualEffectView integration through JNA and the Objective-C runtime
  * (libobjc.dylib). Adds a vibrancy effect, or frosted-glass blur, behind JavaFX
  * window content.
- *
- * On Apple Silicon (arm64), objc_msgSend with varargs cannot be used safely
+ * <p>On Apple Silicon (arm64), objc_msgSend with varargs cannot be used safely
  * through JNA; com.sun.jna.Function.invoke() with fixed argument types is required.
- *
- * NSVisualEffectView sizing uses Auto Layout constraints instead of initWithFrame:
+ * <p>NSVisualEffectView sizing uses Auto Layout constraints instead of initWithFrame:
  * because passing a CGRect struct through JNA on arm64 is problematic.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -27,25 +25,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class NativeMacOsWindowControl {
 
     private static final Logger log = LoggerFactory.getLogger(NativeMacOsWindowControl.class);
-    private static final String MINIATURIZE_OBSERVER_CLASS_NAME = "MeshAppTrayMiniaturizeObserver";
-    private static final String MINIATURIZE_NOTIFICATION_NAME = "NSWindowDidMiniaturizeNotification";
-
     private static final NativeLibrary OBJC = NativeLibrary.getInstance("objc");
     private static final Function OBJC_MSG_SEND = OBJC.getFunction("objc_msgSend");
     private static final Function GET_CLASS = OBJC.getFunction("objc_getClass");
     private static final Function SEL_REGISTER = OBJC.getFunction("sel_registerName");
 
-    private static final Map<Long, Runnable> MINIATURIZE_HANDLERS = new ConcurrentHashMap<>();
-
-    private static long miniaturizeObserverClass;
-    private static Callback miniaturizeCallback;
-
     private final long nsWindow;
     private final long nsView;
-
-    static {
-        initMiniaturizeObserverClass();
-    }
 
     public NativeMacOsWindowControl(Window window) {
         this.nsWindow = extractNsWindow(window);
@@ -138,7 +124,14 @@ public class NativeMacOsWindowControl {
 
         Method getPlatformWindow = tkStage.getClass().getDeclaredMethod("getPlatformWindow");
         getPlatformWindow.setAccessible(true);
-        return getPlatformWindow.invoke(tkStage);
+        Object platformWindow = getPlatformWindow.invoke(tkStage);
+        // Headless Glass returns synthetic window/view IDs, not Cocoa pointers.
+        // Passing those IDs to objc_msgSend would terminate the JVM.
+        if (platformWindow == null
+                || !platformWindow.getClass().getPackageName().equals("com.sun.glass.ui.mac")) {
+            return null;
+        }
+        return platformWindow;
     }
 
     /**
@@ -256,7 +249,7 @@ public class NativeMacOsWindowControl {
             msgSendBool(vev, "setWantsLayer:", true);
             long vevLayer = msgSend(vev, "layer");
             if (vevLayer != 0) {
-                setDoubleProperty(vevLayer, "cornerRadius", 10.0);
+                setCornerRadius(vevLayer);
                 msgSendBool(vevLayer, "setMasksToBounds:", true);
             }
 
@@ -342,19 +335,6 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Moves an already miniaturized window into tray state so it does not remain in Dock.
-     */
-    public void hideMiniaturizedToTray() {
-        if (nsWindow == 0) { return; }
-        try {
-            msgSendId(nsWindow, "deminiaturize:", 0L);
-            msgSendId(nsWindow, "orderOut:", 0L);
-        } catch (Throwable t) {
-            log.error("Не удалось перевести miniaturized NSWindow в tray-state", t);
-        }
-    }
-
-    /**
      * Restores a window previously hidden through orderOut back to the screen.
      */
     public void restoreFromTray() {
@@ -388,83 +368,16 @@ public class NativeMacOsWindowControl {
             return;
         }
         try {
-            if (msgSendBoolWithId(nsWindow, "makeFirstResponder:", nsView)) {
+            if (makeFirstResponder(nsView)) {
                 return;
             }
 
             long contentView = msgSend(nsWindow, "contentView");
             if (contentView != 0) {
-                msgSendBoolWithId(nsWindow, "makeFirstResponder:", contentView);
+                makeFirstResponder(contentView);
             }
         } catch (Throwable t) {
             log.error("Не удалось передать first responder в JavaFX view", t);
-        }
-    }
-
-    /**
-     * Native hook for macOS window minimization.
-     * Needed for DECORATED windows where the native traffic-light minimize action
-     * may not reach JavaFX iconifiedProperty.
-     */
-    public long installMiniaturizeObserver(Runnable onMiniaturize) {
-        if (nsWindow == 0 || onMiniaturize == null) {
-            return 0;
-        }
-
-        long observer = 0;
-        boolean installed = false;
-        try {
-            observer = ObjCRuntime.allocInitClass(miniaturizeObserverClass);
-            if (observer == 0) {
-                return 0;
-            }
-
-            MINIATURIZE_HANDLERS.put(observer, onMiniaturize);
-
-            long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
-            long name = createNSString(MINIATURIZE_NOTIFICATION_NAME);
-            try {
-                OBJC_MSG_SEND.invokeLong(new Object[]{
-                        center,
-                        sel("addObserver:selector:name:object:"),
-                        observer,
-                        sel("windowDidMiniaturize:"),
-                        name,
-                        nsWindow
-                });
-                installed = true;
-                return observer;
-            } finally {
-                ObjCRuntime.release(name);
-            }
-        } catch (Throwable t) {
-            log.error("Не удалось установить observer минимизации NSWindow", t);
-            return 0;
-        } finally {
-            if (!installed && observer != 0) {
-                MINIATURIZE_HANDLERS.remove(observer);
-                ObjCRuntime.release(observer);
-            }
-        }
-    }
-
-    public static void removeMiniaturizeObserver(long observer) {
-        if (observer == 0) {
-            return;
-        }
-
-        MINIATURIZE_HANDLERS.remove(observer);
-        try {
-            long center = msgSend(cls("NSNotificationCenter"), "defaultCenter");
-            OBJC_MSG_SEND.invokeLong(new Object[]{
-                    center,
-                    sel("removeObserver:"),
-                    observer
-            });
-        } catch (Throwable t) {
-            log.warn("Не удалось удалить observer минимизации NSWindow", t);
-        } finally {
-            ObjCRuntime.release(observer);
         }
     }
 
@@ -537,9 +450,9 @@ public class NativeMacOsWindowControl {
         return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg});
     }
 
-    /** objc_msgSend(receiver, selector, id) → bool */
-    private static boolean msgSendBoolWithId(long receiver, String selectorName, long arg) {
-        return OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel(selectorName), arg}) != 0;
+    /** [nsWindow makeFirstResponder:view] → bool */
+    private boolean makeFirstResponder(long view) {
+        return OBJC_MSG_SEND.invokeLong(new Object[]{nsWindow, sel("makeFirstResponder:"), view}) != 0;
     }
 
     /** objc_msgSend(receiver, selector, long), for setMaterial:, setState:, and similar calls. */
@@ -553,19 +466,19 @@ public class NativeMacOsWindowControl {
     }
 
     /**
-     * Sets a CGFloat property through KVC: [receiver setValue:@(value) forKey:key].
+     * Sets the visual effect layer's corner radius to 10 points through KVC.
      * NSNumber numberWithInteger: avoids arm64 ABI issues with float/double.
      * CALayer cornerRadius accepts NSNumber and converts it to CGFloat.
      */
-    private static void setDoubleProperty(long receiver, String key, double value) {
+    private static void setCornerRadius(long layer) {
         long pool = ObjCRuntime.createAutoreleasePool();
         long nsKey = 0;
         long nsNumberClass = cls("NSNumber");
         try {
         // numberWithInteger: accepts long, which is reliable on arm64.
-            long nsNumber = msgSendId(nsNumberClass, "numberWithInteger:", (long) value);
-            nsKey = createNSString(key);
-            OBJC_MSG_SEND.invokeLong(new Object[]{receiver, sel("setValue:forKey:"), nsNumber, nsKey});
+            long nsNumber = msgSendId(nsNumberClass, "numberWithInteger:", 10L);
+            nsKey = createNSString("cornerRadius");
+            OBJC_MSG_SEND.invokeLong(new Object[]{layer, sel("setValue:forKey:"), nsNumber, nsKey});
         } finally {
             ObjCRuntime.release(nsKey);
             ObjCRuntime.drainAutoreleasePool(pool);
@@ -588,24 +501,4 @@ public class NativeMacOsWindowControl {
         });
     }
 
-    private static synchronized void initMiniaturizeObserverClass() {
-        if (miniaturizeObserverClass != 0) {
-            return;
-        }
-
-        miniaturizeCallback = (MiniaturizeObserverCallback) (self, cmd, notification) -> {
-            Runnable handler = MINIATURIZE_HANDLERS.get(self);
-            if (handler != null) {
-                handler.run();
-            }
-        };
-
-        miniaturizeObserverClass = ObjCRuntime.createClass(MINIATURIZE_OBSERVER_CLASS_NAME, "NSObject");
-        ObjCRuntime.addMethod(miniaturizeObserverClass, "windowDidMiniaturize:", miniaturizeCallback, "v@:@");
-        ObjCRuntime.registerClass(miniaturizeObserverClass);
-    }
-
-    private interface MiniaturizeObserverCallback extends Callback {
-        void invoke(long self, long cmd, long notification);
-    }
 }
