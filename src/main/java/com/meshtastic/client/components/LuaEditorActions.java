@@ -17,6 +17,8 @@ import org.fxmisc.richtext.CodeArea;
  * Menu actions and keyboard commands share availability checks based on the editor's
  * editable state, selection, undo history, and system clipboard. Recognized shortcuts
  * are consumed before RichTextFX handles them to avoid applying an edit twice.
+ * Pasted content uses the clipboard's plain text; syntax highlighting is managed by
+ * the editor rather than imported from the source application.
  * <p>
  * Installation and command handling must run on the JavaFX Application Thread.
  *
@@ -62,7 +64,7 @@ final class LuaEditorActions {
                 KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN), area::redo);
         cut = item("common.cut", shortcut(KeyCode.X), area::cut);
         copy = item("common.copy", shortcut(KeyCode.C), area::copy);
-        paste = item("common.paste", shortcut(KeyCode.V), area::paste);
+        paste = item("common.paste", shortcut(KeyCode.V), this::pastePlainText);
         delete = item("common.delete", new KeyCodeCombination(KeyCode.DELETE),
                 () -> area.replaceSelection(""));
         selectAll = item("common.selectAll", shortcut(KeyCode.A), area::selectAll);
@@ -105,6 +107,20 @@ final class LuaEditorActions {
             hideCompletion.run();
         });
         return item;
+    }
+
+    /**
+     * Replaces the selection with the clipboard's plain text when present.
+     * <p>
+     * RichTextFX's styled paste casts clipboard data to {@code byte[]}, but JavaFX 27
+     * can return a {@link java.nio.ByteBuffer} for that serialized payload. Reading
+     * only text avoids the incompatible cast and leaves highlighting to the editor.
+     */
+    private void pastePlainText() {
+        String text = Clipboard.getSystemClipboard().getString();
+        if (text != null) {
+            area.replaceSelection(text);
+        }
     }
 
     /**

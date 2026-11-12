@@ -85,6 +85,35 @@ class LuaEditorActionsTest {
         });
     }
 
+    /**
+     * Exercises menu paste with a real RichTextFX clipboard payload, including styles.
+     * The destination must insert only source text and retain normal undo behavior.
+     */
+    @Test
+    void menuPastesPlainTextFromStyledClipboardAndCanUndo() throws Exception {
+        onFxThread(() -> {
+            String text = "local привет = '😀'\nreturn привет";
+            CodeArea source = new CodeArea(text);
+            CodeArea destination = editor("before old after");
+            try {
+                source.setStyle(0, source.getLength(), Collections.singleton("foreign-style"));
+                source.selectAll();
+                source.copy();
+                destination.selectRange(7, 10);
+
+                item(destination, "paste").fire();
+
+                assertEquals("before " + text + " after", destination.getText());
+                assertFalse(destination.getStyleOfChar(7).contains("foreign-style"));
+                shortcut(destination, KeyCode.Z, false);
+                assertEquals("before old after", destination.getText());
+            } finally {
+                source.dispose();
+                destination.dispose();
+            }
+        });
+    }
+
     @Test
     void undoAndBothRedoShortcutsIgnoreSyntaxHighlighting() throws Exception {
         onFxThread(() -> {
