@@ -2,69 +2,82 @@
 
 **Sprache:** [Русский](rpc-protocol.ru.md) | [English](rpc-protocol.md) | Deutsch
 
-Diese Seite beschreibt das JSON-RPC-Protokoll, mit dem MeshApp eine MeshApp-Instanz remote mit einer anderen MeshApp-Host-Instanz verbindet. Das Protokoll ist kein JSON-RPC 2.0 und uebertraegt keinen rohen Meshtastic/MeshCore-Byte-Stream. Remote RPC ist eine eigene Anwendungsschicht zum Aufrufen freigegebener Host-Methoden, Empfangen von Host-Events und Arbeiten mit dem Zustand der auf dem Host bereits ausgewaehlten Verbindung.
+Mit Remote RPC lässt sich eine MeshApp-Anwendung von einer anderen aus bedienen. Beispielsweise kann MeshApp auf einem entfernten Computer den Auftrag erhalten, über sein angeschlossenes Funkgerät eine Nachricht zu senden. Die Anwendung, die den Auftrag ausführt, heißt hier **Server** oder **Host**. Die Anwendung, die den Auftrag sendet, heißt **Client**.
+
+RPC steht für „Remote Procedure Call“, also den Aufruf einer Funktion auf einem anderen Rechner. Der Client nennt die gewünschte Funktion und übergibt ihre Parameter. MeshApp schreibt Anfragen und Antworten als JSON, ein Textformat mit benannten Feldern. Es handelt sich um ein eigenes Protokoll, nicht um JSON-RPC 2.0. Es überträgt Befehle und Ergebnisse der Anwendung und bietet keinen direkten Zugriff auf den Datenstrom eines Meshtastic- oder MeshCore-Funkgeräts.
+
+Zum Einrichten einer Verbindung genügt die [Anleitung zum Serverstart](command-line.de.md#rpc-server-starten). Die folgenden Abschnitte beschreiben das Protokoll für die Entwicklung eigener Clients und Integrationen.
 
 Wichtige Quelldateien:
 
-- `src/main/java/com/meshtastic/client/rpc/*` - Transport, Handshake, Envelope, Dispatcher.
-- `src/main/java/com/meshtastic/client/service/RemoteRpcHostService.java` - Registry der Host-Methoden.
-- `src/main/java/com/meshtastic/client/protocol/rpc/*` - JSON-Mapping der Domain-Objekte.
-- `src/main/java/com/meshtastic/client/connection/rpc/*` - Remote-RPC-Integration in `ConnectionManager`.
+- `src/main/java/com/meshtastic/client/rpc/*` — Verbindung, Schlüsselprüfung, Nachrichtenformate und Verarbeitung der Anfragen.
+- `src/main/java/com/meshtastic/client/service/RemoteRpcHostService.java` — verfügbare Servermethoden.
+- `src/main/java/com/meshtastic/client/protocol/rpc/*` — Umwandlung der Anwendungsdaten in JSON und zurück.
+- `src/main/java/com/meshtastic/client/connection/rpc/*` — RPC-Verbindungen in `ConnectionManager`.
 
 ## Begriffe
 
 | Begriff | Bedeutung |
 |---------|-----------|
-| Host | MeshApp-Instanz, in der der Remote-RPC-Server aktiviert ist oder die mit dem External RPC Router verbunden ist. Der Host fuehrt RPC-Methoden aus. |
-| Remote client | MeshApp-Instanz, die sich als `ConnectionType.REMOTE_RPC` / `ProtocolType.REMOTE_RPC` mit dem Host verbindet. |
-| Direct mode | Direkte TCP-Verbindung zum Host. Standardmaessig lauscht der Host auf `127.0.0.1:44030`. |
-| Router mode | Verbindung ueber den External RPC Router per WebSocket. Der Router fuehrt nur die Teilnehmer eines Raums zusammen und leitet Frames weiter. RPC-Authentifizierung und Verschluesselung bleiben Ende-zu-Ende zwischen Remote client und Host. |
-| Envelope | JSON-Objekt der obersten Ebene: Request, Response oder Event. |
-| Frame | Eine Zeile im direkten TCP-Stream oder ein `payload.frame` im Router-WebSocket. Nach der Authentifizierung enthaelt der Frame ein verschluesseltes RPC-Envelope. |
+| Server (Host) | Die MeshApp-Anwendung, die Befehle ausführt. Ihr RPC-Server ist eingeschaltet oder sie ist mit einem External RPC Router verbunden. |
+| Client | Die MeshApp-Anwendung, die Befehle an den Server sendet. Im Code heißt dieser Verbindungstyp `ConnectionType.REMOTE_RPC` / `ProtocolType.REMOTE_RPC`. |
+| Direkte Verbindung (Direct) | TCP-Verbindung vom Client zum Server. Die Standardadresse des Servers ist `127.0.0.1:44030`. |
+| Verbindung über einen Router | Client und Server verbinden sich per WebSocket mit einem External RPC Router. Dieser leitet Nachrichten weiter. Den Zugangsschlüssel prüfen Client und Server selbst; nur sie können die RPC-Daten entschlüsseln. |
+| RPC-Nachricht (Envelope) | Ein JSON-Objekt mit einer Anfrage, einer Antwort oder einem Ereignis. Ein Ereignis informiert den Client beispielsweise über eine neue Chatnachricht. |
+| Übertragungsblock (Frame) | Eine Zeile der direkten TCP-Verbindung oder der Inhalt von `payload.frame` bei einer Router-Verbindung. Nach der Schlüsselprüfung enthält der Block eine verschlüsselte RPC-Nachricht. |
+| Raum (Room) | Eine Gruppe von Verbindungen auf dem Router. Anhand der gemeinsamen Kennung `roomId` ordnet der Router Client und Server einander zu. |
 
 ## Verbindungsmodi
 
-### Direct TCP
+<a id="direct-tcp"></a>
 
-Der direkte Server wird in den Anwendungseinstellungen gestartet: "Remote RPC access" -> "Enable RPC server".
+### Direkte TCP-Verbindung
+
+Aktivieren Sie den Server in den Anwendungseinstellungen unter **RPC**.
+
+Sie können ihn auch ohne Anwendungsfenster starten: mit `--rpc-server` oder, aus dem Quellcode, mit `./gradlew runRpcServer`. Die Einrichtung und die verfügbaren Optionen sind unter [RPC-Server starten](command-line.de.md#rpc-server-starten) beschrieben.
 
 Standardparameter:
 
 | Parameter | Wert |
 |-----------|------|
-| bind address | `127.0.0.1` |
-| port | `44030` |
-| access key | Zeichenfolge `mra1_...`, vom Benutzer erzeugt |
+| Adresse für eingehende Verbindungen | `127.0.0.1` |
+| Port | `44030` |
+| Zugangsschlüssel | Zeichenfolge `mra1_...`. Sie lässt sich in den Einstellungen erzeugen. Beim Start über die Kommandozeile erzeugt MeshApp einen Schlüssel, falls noch keiner vorhanden ist. |
 
-Der direkte Server akzeptiert nur eine aktive authentifizierte Sitzung. Wenn bereits eine Sitzung offen ist, wird die neue TCP-Sitzung geschlossen.
+Der direkte Server bedient jeweils einen Client, der die Schlüsselprüfung bestanden hat. Solange dieser Client verbunden ist, werden neue TCP-Verbindungen geschlossen.
 
-Vor erfolgreicher Authentifizierung ist der Transport ein newline-delimited UTF-8-JSON-Control-Stream. Nach der Authentifizierung enthaelt jede Zeile einen verschluesselten Frame der Form `enc1_<base64url>`.
+Zu Beginn prüfen Client und Server, ob beide denselben Zugangsschlüssel kennen. Diese Prüfung heißt Authentifizierung. Dafür tauschen sie unverschlüsselte JSON-Nachrichten aus. Jede Nachricht wird in UTF-8 codiert und in einer eigenen Zeile übertragen.
 
-### External RPC Router
+Nach erfolgreicher Prüfung werden die RPC-Nachrichten verschlüsselt. Jede TCP-Zeile enthält dann einen Block der Form `enc1_<base64url>`. Das Präfix `enc1_` kennzeichnet verschlüsselte Daten; base64url stellt die Binärdaten als Text dar.
 
-Router mode wird verwendet, wenn direkter TCP-Zugriff auf den Host nicht moeglich ist. Eingebauter Cloud-Wert:
+<a id="external-rpc-router"></a>
+
+### Verbindung über einen External RPC Router
+
+Ein External RPC Router vermittelt zwischen Client und Server, wenn keine direkte TCP-Verbindung möglich ist. Standardmäßig wird der Cloud-Router verwendet:
 
 | Parameter | Wert |
 |-----------|------|
-| display host | `cloud.meshapp.privatepractice.app` |
-| server | `wss://cloud.meshapp.privatepractice.app` |
-| port | `443` |
-| default path | `/rpc` |
+| Name in der Oberfläche | `cloud.meshapp.privatepractice.app` |
+| Adresse | `wss://cloud.meshapp.privatepractice.app` |
+| Port | `443` |
+| Standardpfad | `/rpc` |
 
-Die Router-URI wird so aufgebaut:
+Die Verbindungsadresse zum Router hat folgenden Aufbau:
 
 ```text
 <ws-or-wss>://<host>:<port>/<path>?roomId=<roomId>&role=<host-or-client>
 ```
 
-Normalisierungsregeln:
+Dabei gelten folgende Regeln:
 
-- wenn kein Scheme angegeben ist, wird `ws://` verwendet;
-- nur `ws://` und `wss://` sind erlaubt;
-- Standardport: `8080` fuer `ws`, `443` fuer `wss`;
-- Standardpfad: `/rpc`;
-- `roomId` wird aus dem access key abgeleitet und legt den key selbst nicht offen;
-- `role` ist `host` fuer den Host und `client` fuer den Remote client.
+- Fehlt die Protokollangabe, wird `ws://` ergänzt.
+- Erlaubt sind `ws://` und `wss://`.
+- Der Standardport ist `8080` für `ws` und `443` für `wss`.
+- Der Standardpfad ist `/rpc`.
+- `roomId` wird aus dem Zugangsschlüssel berechnet, ohne den Schlüssel selbst offenzulegen.
+- `role` enthält `host` für den Server und `client` für den Client.
 
 Beispiel:
 
@@ -72,29 +85,31 @@ Beispiel:
 ws://router.example.org:8080/rpc?roomId=erpc1_MpmfGysDJIvccpcIQYIfh0aeET-OORKNPAXG-UoAyK0&role=client
 ```
 
-Das Router-WebSocket uebertraegt JSON-Objekte. Verwendete Router-Nachrichtentypen:
+Der Router empfängt und sendet folgende JSON-Nachrichten über WebSocket:
 
 | Richtung | JSON | Zweck |
 |----------|------|-------|
-| Host -> router | `{"type":"host_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Frame an einen bestimmten remote client senden. |
-| Client -> router | `{"payload":{"frame":"..."}}` | Frame an den aktiven Host des Raums senden. |
-| Beide Seiten -> router | `{"type":"router_ping"}` | Healthcheck. |
-| Router -> Host | `{"type":"host_ready"}` | Host ist im Raum registriert. |
-| Router -> Host | `{"type":"client_joined","clientSessionId":"..."}` | Neuer remote client ist dem Raum beigetreten. |
-| Router -> Host | `{"type":"client_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Frame von einem remote client. |
-| Router -> Host | `{"type":"client_disconnected","clientSessionId":"..."}` | Remote client wurde getrennt. |
-| Router -> client | `{"type":"client_ready"}` | Client ist im Raum registriert. |
-| Router -> client | `{"type":"host_connected"}` | Host ist verfuegbar. |
-| Router -> client | `{"type":"host_frame","payload":{"frame":"..."}}` oder `{"type":"broadcast","payload":{"frame":"..."}}` | Frame vom Host. |
-| Router -> client | `{"type":"host_disconnected"}` | Host wurde getrennt. |
-| Router -> beide Seiten | `{"type":"router_pong"}` | Antwort auf Healthcheck. |
-| Router -> beide Seiten | `{"type":"router_error","message":"..."}` | Fehler im Router-Kanal. |
+| Server → Router | `{"type":"host_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Einen Datenblock an den angegebenen Client weiterleiten. |
+| Client → Router | `{"payload":{"frame":"..."}}` | Einen Datenblock an den Server im selben Raum weiterleiten. |
+| Client oder Server → Router | `{"type":"router_ping"}` | Prüfen, ob die Verbindung noch besteht. |
+| Router → Server | `{"type":"host_ready"}` | Der Server ist im Raum registriert. |
+| Router → Server | `{"type":"client_joined","clientSessionId":"..."}` | Ein neuer Client hat sich mit dem Raum verbunden. |
+| Router → Server | `{"type":"client_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Einen Datenblock vom Client zustellen. |
+| Router → Server | `{"type":"client_disconnected","clientSessionId":"..."}` | Der Client hat die Verbindung getrennt. |
+| Router → Client | `{"type":"client_ready"}` | Der Client ist im Raum registriert. |
+| Router → Client | `{"type":"host_connected"}` | Der Server ist erreichbar. |
+| Router → Client | `{"type":"host_frame","payload":{"frame":"..."}}` oder `{"type":"broadcast","payload":{"frame":"..."}}` | Einen Datenblock vom Server zustellen. |
+| Router → Client | `{"type":"host_disconnected"}` | Der Server hat die Verbindung getrennt. |
+| Router → Client oder Server | `{"type":"router_pong"}` | Antwort auf die Verbindungsprüfung. |
+| Router → Client oder Server | `{"type":"router_error","message":"..."}` | Fehler der Router-Verbindung melden. |
 
-Host und client senden alle 15 Sekunden `router_ping`. Wenn laenger als 45 Sekunden kein `router_pong` und keine anderen Router-Nachrichten eintreffen, wird die Verbindung als fehlgeschlagen geschlossen.
+Client und Server senden alle 15 Sekunden `router_ping`. Treffen länger als 45 Sekunden weder `router_pong` noch andere Nachrichten vom Router ein, gilt die Verbindung als unterbrochen und wird geschlossen.
 
-## Access Key
+<a id="access-key"></a>
 
-Der access key ist das gemeinsame Geheimnis von Host und Remote client.
+## Zugangsschlüssel
+
+Auf Client und Server wird derselbe geheime Zugangsschlüssel hinterlegt. Beim Verbindungsaufbau weisen beide Seiten nach, dass sie ihn kennen, ohne ihn über das Netzwerk zu senden.
 
 Format:
 
@@ -104,25 +119,31 @@ mra1_<base64url-without-padding-32-random-bytes>
 
 Eigenschaften:
 
-- key material: 32 Byte;
-- nonce: 24 Zufallsbytes, base64url ohne Padding codiert;
-- der access key wird nie ueber das Netzwerk gesendet;
-- proof-Werte und verschluesselte Session-Keys werden mit HMAC-SHA256 berechnet;
-- die router room id wird als `erpc1_` + base64url ohne Padding ueber HMAC-SHA256 abgeleitet.
+- Der Schlüssel besteht aus 32 zufälligen Bytes.
+- Für jede Prüfung werden einmalige Zufallswerte (`nonce`) mit jeweils 24 Bytes erzeugt.
+- Schlüssel und Zufallswerte werden als base64url ohne abschließende `=`-Zeichen geschrieben. Der Zugangsschlüssel selbst wird nie über das Netzwerk gesendet.
+- Die Nachweise (`proof`) und die Schlüssel zur Verschlüsselung der Verbindung werden mit Berechnungen auf Basis von HMAC-SHA256 erzeugt.
+- Die Raumkennung besteht aus `erpc1_` und einem HMAC-SHA256-Ergebnis in base64url ohne abschließende `=`-Zeichen.
 
-Room id:
+Berechnung der Raumkennung:
 
 ```text
 roomId = "erpc1_" + base64url_no_padding(HMAC_SHA256(keyBytes, "ERPC-Router room id v1"))
 ```
 
-## Authentifizierung und Verschluesselung
+<a id="authentifizierung-und-verschluesselung"></a>
 
-Direct mode und Router mode verwenden dasselbe verschluesselte RPC-Session-Protokoll Version 2. Im router mode werden Control-Frames ueber `payload.frame` weitergeleitet, kryptografisch bleibt die Sitzung aber Ende-zu-Ende zwischen Host und Remote client.
+## Authentifizierung und Verschlüsselung
 
-### Schritt 1. Host challenge
+Direkte Verbindungen und Router-Verbindungen verwenden dieselbe Version 2 des gesicherten RPC-Protokolls. Bei Router-Verbindungen werden die Nachrichten zur Schlüsselprüfung in `payload.frame` übertragen. Client und Server prüfen den Schlüssel und verschlüsseln die Daten selbst; der Router erhält den Zugangsschlüssel nicht.
 
-Der Host erzeugt `serverNonce` und sendet einen Plaintext-Control-Frame:
+Die Prüfung erfolgt in drei Schritten: Der Server sendet einen Zufallswert, der Client berechnet daraus mit dem gemeinsamen Schlüssel einen Nachweis, und der Server bestätigt anschließend ebenfalls seine Kenntnis des Schlüssels. Die folgenden Abschnitte zeigen die genauen Nachrichtenformate und Berechnungen.
+
+<a id="schritt-1-host-challenge"></a>
+
+### Schritt 1: Der Server beginnt die Prüfung
+
+Der Server erzeugt den Zufallswert `serverNonce` und sendet diese unverschlüsselte Nachricht:
 
 ```json
 {
@@ -133,9 +154,11 @@ Der Host erzeugt `serverNonce` und sendet einen Plaintext-Control-Frame:
 }
 ```
 
-### Schritt 2. Client response
+<a id="schritt-2-client-response"></a>
 
-Der Client erzeugt `clientNonce` und sendet:
+### Schritt 2: Der Client weist seine Kenntnis des Schlüssels nach
+
+Der Client erzeugt einen eigenen Zufallswert `clientNonce`. Aus dem gemeinsamen Schlüssel und beiden Zufallswerten berechnet er den Nachweis `proof` und sendet:
 
 ```json
 {
@@ -146,7 +169,7 @@ Der Client erzeugt `clientNonce` und sendet:
 }
 ```
 
-Client proof:
+Berechnung des Client-Nachweises:
 
 ```text
 clientProof = base64url_no_padding(
@@ -154,9 +177,11 @@ clientProof = base64url_no_padding(
 )
 ```
 
-### Schritt 3. Host ok/error
+<a id="schritt-3-host-okerror"></a>
 
-Wenn der proof falsch ist:
+### Schritt 3: Der Server prüft die Antwort
+
+Stimmt der Nachweis nicht mit dem erwarteten Wert überein, meldet der Server einen Fehler:
 
 ```json
 {
@@ -165,7 +190,7 @@ Wenn der proof falsch ist:
 }
 ```
 
-Wenn der proof korrekt ist:
+Ist der Nachweis korrekt, antwortet der Server mit `auth_ok` und seinem eigenen Nachweis:
 
 ```json
 {
@@ -176,14 +201,14 @@ Wenn der proof korrekt ist:
 }
 ```
 
-Server proof:
+Berechnung des Server-Nachweises:
 
 ```text
 serverProof = base64url_no_padding(
   HMAC_SHA256(keyBytes, transcript("meshapp-rpc-server-auth-v2", serverNonce, clientNonce))
 )
 ```
-
+`transcript(context, serverNonce, clientNonce)` ist die Bytefolge, aus der der Nachweis berechnet wird. Sie enthält den Kontext sowie Länge und Inhalt beider Zufallswerte. `utf8` steht für die UTF-8-Codierung einer Zeichenfolge. `uint32_be` ist eine Ganzzahl aus vier Bytes, bei der das höchstwertige Byte zuerst steht:
 `transcript(context, serverNonce, clientNonce)` wird so codiert:
 
 ```text
@@ -194,11 +219,13 @@ uint32_be(len(utf8(clientNonce)))
 utf8(clientNonce)
 ```
 
-Der Client prueft `serverProof`. Danach leiten beide Seiten Session-Keys ab.
+Der Client prüft `serverProof`. Nach erfolgreicher Prüfung berechnen beide Seiten unabhängig voneinander dieselben Schlüssel für diese Verbindung.
 
-### Session-Key-Ableitung
+<a id="session-key-ableitung"></a>
 
-Salt transcript:
+### Schlüssel für die Verschlüsselung berechnen
+
+Zunächst wird aus beiden Zufallswerten ein zusätzlicher Eingabewert, das Salt (`saltTranscript`), gebildet:
 
 ```text
 utf8("meshapp-rpc-secure-v1:salt")
@@ -208,7 +235,7 @@ uint32_be(len(utf8(clientNonce)))
 utf8(clientNonce)
 ```
 
-HKDF-aehnliche Ableitung:
+Danach werden die Schlüssel nach einem HKDF-ähnlichen Verfahren abgeleitet. HKDF erzeugt Schlüssel aus einem gemeinsamen Geheimnis. Für jede Übertragungsrichtung werden ein eigener Schlüssel und ein eigenes Präfix für den einmaligen Verschlüsselungsparameter berechnet:
 
 ```text
 prk = HMAC_SHA256(saltTranscript, keyBytes)
@@ -217,8 +244,8 @@ clientToServerNoncePrefix = HKDF-Expand(prk, "meshapp-rpc-secure-v1:client-to-se
 serverToClientKey = HKDF-Expand(prk, "meshapp-rpc-secure-v1:server-to-client:key", 32)
 serverToClientNoncePrefix = HKDF-Expand(prk, "meshapp-rpc-secure-v1:server-to-client:nonce-prefix", 4)
 ```
-
-`HKDF-Expand` verwendet HMAC-SHA256-Bloecke:
+`HKDF-Expand` berechnet nacheinander HMAC-SHA256-Blöcke und fügt sie bis zur gewünschten Länge zusammen. `||` bedeutet in den Formeln das Aneinanderfügen von Bytefolgen:
+`HKDF-Expand` verwendet HMAC-SHA256-Blöcke:
 
 ```text
 T(0) = empty
@@ -226,34 +253,42 @@ T(n) = HMAC_SHA256(prk, T(n-1) || info || uint8(n))
 output = T(1) || T(2) || ...
 ```
 
-### Verschluesselte Frames
+<a id="verschluesselte-frames"></a>
 
-Jedes Plaintext-RPC-Envelope wird separat verschluesselt:
+### Verschlüsselte Nachrichten übertragen
+
+Jede RPC-Nachricht wird einzeln verschlüsselt. Dafür gelten folgende Parameter:
 
 | Parameter | Wert |
 |-----------|------|
-| Cipher | `AES/GCM/NoPadding` |
-| Key | richtungsspezifischer 32-Byte-Key |
-| Nonce | 4-Byte-Richtungs-Nonce-Prefix + 8-Byte-Big-Endian-Sequence |
-| Sequence | eigener Zaehler pro Richtung, beginnt bei `0` |
-| AAD | `meshapp-rpc-secure-v1:frame` |
-| Tag | 128 bit |
-| Frame prefix | `enc1_` |
-| Encoding | base64url ohne Padding |
+| Algorithmus | `AES/GCM/NoPadding` |
+| Schlüssel | 32 Bytes, ein eigener Schlüssel je Übertragungsrichtung |
+| Einmaliger Verschlüsselungsparameter (`nonce`) | 4 Bytes Richtungspräfix und 8 Bytes Nachrichtenzähler, höchstwertiges Byte zuerst |
+| Nachrichtenzähler (`sequence`) | Getrennt für jede Richtung, beginnt bei `0` |
+| Zusätzlich geprüfte Daten (AAD) | `meshapp-rpc-secure-v1:frame` |
+| Prüfwert für die Integrität (GCM-Tag) | 128 Bit |
+| Blockpräfix | `enc1_` |
+| Darstellung der Binärdaten | base64url ohne abschließende `=`-Zeichen |
 
-Frame:
+Der übertragene Block enthält die verschlüsselten Daten und den Prüfwert:
 
 ```text
 enc1_<base64url_no_padding(ciphertext_plus_gcm_tag)>
 ```
 
-Wenn ein Frame nicht mit `enc1_` beginnt, die Sequence ausgeschoepft ist oder die GCM-Authentifizierung fehlschlaegt, wird der Transport mit Fehler geschlossen.
+Beginnt ein Block nicht mit `enc1_`, ist der Zähler erschöpft oder schlägt die GCM-Integritätsprüfung fehl, wird die Verbindung mit einem Fehler geschlossen.
 
-## RPC Envelope
+<a id="rpc-envelope"></a>
 
-Alle RPC-Envelopes werden als kompaktes JSON ueber Gson mit `serializeNulls` serialisiert. Felder mit `null` koennen explizit vorhanden sein. Der direkte Transport sendet nach dem verschluesselten Framing ein Envelope pro Zeile. Der Router-Transport legt den verschluesselten Frame in `payload.frame`.
+## Aufbau der RPC-Nachrichten
 
-### Request
+Eine RPC-Nachricht ist eine Anfrage, eine Antwort oder ein Ereignis in Form eines JSON-Objekts. MeshApp verwendet Gson mit der Einstellung `serializeNulls`; deshalb können Felder ausdrücklich den Wert `null` enthalten. Vor der Verschlüsselung wird das JSON ohne Einrückungen und Zeilenumbrüche geschrieben.
+
+Bei einer direkten Verbindung wird jeder verschlüsselte Block in einer eigenen Zeile gesendet. Bei einer Router-Verbindung steht derselbe Block im Feld `payload.frame`. Die JSON-Beispiele unten zeigen den Inhalt vor der Verschlüsselung. Einrückungen und Zeilenumbrüche dienen dort nur der Lesbarkeit.
+
+<a id="request"></a>
+
+### Anfrage
 
 ```json
 {
@@ -270,14 +305,16 @@ Alle RPC-Envelopes werden als kompaktes JSON ueber Gson mit `serializeNulls` ser
 
 Regeln:
 
-- `type` muss `rpc_request` sein;
-- `requestId` ist erforderlich und darf nicht blank sein;
-- `method` ist clientseitig erforderlich und wird vor dem Senden getrimmt;
-- `params` muss ein JSON object sein; fehlt das Feld oder ist es kein object, verwendet der Host `{}`;
-- der Host verarbeitet nur Methoden, die explizit in `RpcMethodRegistry` registriert sind;
-- malformed JSON, non-object envelope, nicht unterstuetzter `type` und Request ohne `requestId` werden ohne Response ignoriert.
+- `type` muss `rpc_request` enthalten.
+- `requestId` ist erforderlich und darf weder leer sein noch nur aus Leerzeichen bestehen.
+- Der Client muss `method` angeben. Leerzeichen am Anfang und Ende werden vor dem Senden entfernt.
+- `params` muss ein JSON-Objekt sein. Fehlt das Feld oder enthält es einen anderen Typ, verwendet der Server `{}`.
+- Der Server führt nur Methoden aus, die ausdrücklich in `RpcMethodRegistry` registriert sind.
+- Ungültiges JSON, Nachrichten ohne JSON-Objekt, unbekannte Werte für `type` und Anfragen ohne `requestId` werden ohne Antwort verworfen.
 
-### Erfolgreiche Response
+<a id="erfolgreiche-response"></a>
+
+### Erfolgreiche Antwort
 
 ```json
 {
@@ -290,9 +327,11 @@ Regeln:
 }
 ```
 
-`result` kann object, array, primitive oder `null` sein. Die meisten aktuellen Methoden geben ein object zurueck.
+`result` kann ein Objekt, ein Array, eine Zeichenfolge, eine Zahl, einen Wahrheitswert oder `null` enthalten. Die meisten Methoden geben ein Objekt zurück. Über `requestId` wird die Antwort der ursprünglichen Anfrage zugeordnet.
 
-### Error response
+<a id="error-response"></a>
+
+### Fehlerantwort
 
 ```json
 {
@@ -306,20 +345,22 @@ Regeln:
 }
 ```
 
-Error codes:
+Fehlercodes:
 
-| Code | Wann es auftritt |
+| Code | Bedeutung |
 |------|------------------|
-| `BAD_REQUEST` | Handler hat `IllegalArgumentException` geworfen, meist wegen eines fehlenden oder ungueltigen Parameters. |
-| `METHOD_NOT_FOUND` | Methode ist auf dem Host nicht registriert. |
-| `CONNECTION_FAILED` | Handler hat `ConnectionException` geworfen; die root cause wird zur message ergaenzt, wenn vorhanden. |
-| `INTERNAL_ERROR` | Unerwarteter Handler-Fehler oder custom `RpcException` ohne code. |
-| `TIMEOUT` | Clientseitiger Timeout beim Warten auf die Response. |
-| `TRANSPORT_CLOSED` | RPC client/transport wurde vor oder waehrend des Aufrufs geschlossen. |
+| `BAD_REQUEST` | Bei der Verarbeitung wurde `IllegalArgumentException` ausgelöst. Meist fehlt ein Parameter oder enthält einen ungültigen Wert. |
+| `METHOD_NOT_FOUND` | Die angefragte Methode ist auf dem Server nicht registriert. |
+| `CONNECTION_FAILED` | Bei der Verarbeitung wurde `ConnectionException` ausgelöst. Die ursprüngliche Fehlerursache wird, sofern bekannt, in `message` ergänzt. |
+| `INTERNAL_ERROR` | Unerwarteter Verarbeitungsfehler oder `RpcException` ohne eigenen Fehlercode. |
+| `TIMEOUT` | Der Client hat innerhalb der vorgesehenen Zeit keine Antwort erhalten. |
+| `TRANSPORT_CLOSED` | Der RPC-Client oder die Verbindung wurde vor oder während des Aufrufs geschlossen. |
 
-`RpcException` innerhalb eines Host-Handlers kann einen custom code zurueckgeben; der code wird getrimmt, blank wird zu `INTERNAL_ERROR`.
+Eine Servermethode kann über `RpcException` einen eigenen Fehlercode zurückgeben. Leerzeichen am Anfang und Ende werden entfernt. Ein leerer Code wird durch `INTERNAL_ERROR` ersetzt.
 
-### Event
+<a id="event"></a>
+
+### Ereignis
 
 ```json
 {
@@ -332,142 +373,154 @@ Error codes:
 }
 ```
 
-Events sind Push-Nachrichten Host -> Remote client und haben kein `requestId`/response. Wenn `payload` fehlt, uebergibt der client den listenern einen `null` JSON value. Ein Event ohne nicht-leeres `event` wird ignoriert.
+Der Server sendet Ereignisse von sich aus, etwa wenn eine Chatnachricht eintrifft. Ereignisse haben keine `requestId` und erwarten keine Antwort. Fehlt `payload`, erhalten die Ereignisempfänger auf dem Client den JSON-Wert `null`. Ein Ereignis ohne nichtleeren Namen im Feld `event` wird ignoriert.
 
-## Timeouts
+<a id="timeouts"></a>
 
-| Bereich | Wert |
+## Wartezeiten
+
+| Vorgang | Zeit |
 |---------|------|
-| Default RPC call timeout | 30 Sekunden |
-| Remote protocol startup `system.ping` | 5 Sekunden |
-| UI remote RPC calls in forms | normalerweise 15 Sekunden |
-| Direct TCP connect | 5 Sekunden |
-| Router connect/auth | 8 Sekunden |
-| Router ping interval | 15 Sekunden |
-| Router ping timeout | 45 Sekunden |
-| Lua remote form value wait | 2 Sekunden |
-| Traceroute pending cleanup | 365 Sekunden |
+| Standardwartezeit auf eine RPC-Antwort | 30 Sekunden |
+| Prüfung mit `system.ping` beim Verbindungsaufbau | 5 Sekunden |
+| RPC-Aufrufe aus Formularen der Anwendung | Meist 15 Sekunden |
+| Aufbau einer direkten TCP-Verbindung | 5 Sekunden |
+| Verbindung und Schlüsselprüfung über den Router | 8 Sekunden |
+| Abstand zwischen Verbindungsprüfungen zum Router | 15 Sekunden |
+| Zulässige Zeit ohne Nachrichten vom Router | 45 Sekunden |
+| Warten auf einen Feldwert aus einem entfernten Lua-Formular | 2 Sekunden |
+| Aufbewahrung einer noch unbeantworteten Routenabfrage | 365 Sekunden |
 
 ## Allgemeine JSON-Regeln
 
-- Erforderliche String-Felder muessen JSON primitive strings sein und duerfen nach trim nicht blank sein.
-- Numeric-Felder werden als Java `int`, `long`, `double` oder `float` gelesen; Bereichspruefungen erfolgen nur dort, wo es explizit angegeben ist.
-- Boolean-Felder werden nur aus JSON primitive boolean gelesen.
-- Fehlende optionale string-Felder werden meist als `""` behandelt.
-- Fehlende optionale number-Felder werden meist als `0` behandelt.
-- Fehlende optionale boolean-Felder werden meist als `false` behandelt.
-- `nodeId` hat meist die Form `!` + 8 Hex-Zeichen.
-- `nodeNum` wird als Java signed `int` uebergeben; fuer unsigned-Anzeige wird `nodeId` verwendet.
-- Chat timestamp und telemetry timestamp sind Unix epoch seconds.
-- Packet monitor `capturedAt` ist Unix epoch milliseconds.
-- Protobuf payloads, `publicKey`, `routeData` und `adminMessage` werden als normales Base64 codiert, nicht base64url.
+- Erforderliche Textfelder müssen JSON-Zeichenfolgen enthalten. Nach dem Entfernen äußerer Leerzeichen dürfen sie nicht leer sein.
+- Zahlen werden als Java-Typ `int`, `long`, `double` oder `float` gelesen. Bereichsprüfungen erfolgen nur dort, wo sie ausdrücklich angegeben sind.
+- Logische Felder akzeptieren nur die JSON-Werte `true` oder `false`.
+- Fehlt ein optionales Textfeld, wird meist `""` verwendet.
+- Fehlt ein optionales Zahlenfeld, wird meist `0` verwendet.
+- Fehlt ein optionales logisches Feld, wird meist `false` verwendet.
+- Eine Knotenkennung `nodeId` besteht normalerweise aus `!` und 8 Hexadezimalzeichen.
+- `nodeNum` wird als vorzeichenbehaftete Java-Zahl vom Typ `int` übertragen. Für die Darstellung ohne Vorzeichen wird `nodeId` verwendet.
+- Zeitangaben in Chatnachrichten und Telemetrie zählen Sekunden seit dem 1. Januar 1970, 00:00:00 UTC (Unix-Zeit).
+- `capturedAt` im Paketprotokoll zählt Millisekunden seit demselben Zeitpunkt.
+- Binäre Protobuf-Daten sowie `publicKey`, `routeData` und `adminMessage` werden als normales Base64 übertragen, nicht als base64url.
 
-## Host State Model
+<a id="host-state-model"></a>
 
-Der Remote-RPC-Client ruft Host-Methoden auf, und der Host wendet sie auf seinen lokalen Zustand an:
+## Daten und Verbindungen des Servers
 
-- `connection.*` verwaltet die Verbindungsliste des Hosts.
-- Die meisten `chat.*`-, `node.*`-, `telemetry.*`-, `settings.*`- und `admin.*`-Methoden benoetigen eine ausgewaehlte und verbundene Host-Verbindung.
-- Eine clientseitige Remote-RPC-Verbindung fuehrt `system.ping` aus; danach speichert `RemoteRpcState` den `RpcClient` und das ping-result.
-- Der Remote-RPC-Transport akzeptiert keine raw radio bytes ueber `TransportConnection.sendBytes`.
+Der Client ruft Methoden auf dem Server auf. Diese arbeiten mit den Daten und Verbindungen des Servers:
+
+- `connection.*` verwaltet die auf dem Server gespeicherten Verbindungen.
+- Die meisten Methoden unter `chat.*`, `node.*`, `telemetry.*`, `settings.*` und `admin.*` benötigen eine ausgewählte, aktive Geräteverbindung auf dem Server.
+- Beim Aufbau der RPC-Verbindung ruft der Client `system.ping` auf. Danach speichert `RemoteRpcState` den `RpcClient` und das Ergebnis dieser Prüfung.
+- Beliebige Funkdaten lassen sich nicht über `TransportConnection.sendBytes` versenden. RPC unterstützt nur die dafür vorgesehenen Methoden.
 
 ## Methoden
 
+**Parameter** bezeichnet im Folgenden den Inhalt von `params` in einer Anfrage, **Ergebnis** den Inhalt von `result` in der Antwort. Werden keine Parameter benötigt, wird `{}` übergeben.
+
+Verweist das Ergebnis auf eine andere Methode, statt Felder aufzulisten, geben beide Methoden Daten mit demselben Aufbau zurück.
+
+In den Tabellen bedeutet `string` Zeichenfolge, `number` Zahl, `boolean` den Wert `true` oder `false`, `object` JSON-Objekt und `null` einen fehlenden Wert. `string[]` oder `Node[]` bezeichnet ein Array des jeweiligen Typs. Feldnamen und Werte in Backticks müssen genau wie angegeben übertragen werden.
+
 ### `system.ping`
 
-Prueft die Verfuegbarkeit des Host RPC.
+Prüft, ob der RPC-Server antwortet.
 
-Params:
+Parameter:
 
 ```json
 {}
 ```
 
-Result:
+Ergebnis:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
 | `app` | string | Immer `MeshApp`. |
 | `version` | string | Anwendungsversion. |
-| `versionCode` | number | Numeric version code. |
+| `versionCode` | number | Numerischer Versionscode der Anwendung. |
 | `remoteRpc` | boolean | Immer `true`. |
-| `activeConnections` | number | Anzahl aktiver Verbindungen auf dem Host. |
+| `activeConnections` | number | Anzahl der aktiven Verbindungen auf dem Server. |
 
 ### `connection.list`
 
-Gibt gespeicherte Host-Verbindungen zurueck.
+Gibt die auf dem Server gespeicherten Verbindungen zurück.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result:
+Ergebnis:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `selectedConnectionId` | string/null | ID der ausgewaehlten Host-Verbindung. |
-| `items` | `Connection[]` | Host-Verbindungen. |
+| `selectedConnectionId` | string/null | Kennung der auf dem Server ausgewählten Verbindung. |
+| `items` | `Connection[]` | Gespeicherte Verbindungen. |
 
 `Connection`:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `id` | string | Stable connection profile id. |
+| `id` | string | Dauerhafte Kennung des Verbindungsprofils. |
 | `name` | string | Profilname. |
 | `type` | string | `TCP`, `SERIAL`, `BLE`, `REMOTE_RPC`. |
 | `protocol` | string | `MESHTASTIC`, `MESHCORE_KISS`, `MESHCORE_COMPANION`, `REMOTE_RPC`. |
 | `connected` | boolean | Ob aktuell verbunden. |
-| `reconnecting` | boolean | Ob reconnect laeuft. |
-| `selected` | boolean | Ob auf dem Host ausgewaehlt. |
-| `nodeId` | string/null | Node id, falls bekannt. |
-| `address` | string | Menschenlesbare Adresse. |
+| `reconnecting` | boolean | Wird die Verbindung gerade erneut aufgebaut? |
+| `selected` | boolean | Ist diese Verbindung auf dem Server ausgewählt? |
+| `nodeId` | string/null | Knotenkennung, soweit bekannt. |
+| `address` | string | Verbindungsadresse als Text für die Anzeige. |
 
 ### `connection.connect`
 
-Verbindet das Host-Profil und waehlt es aus.
+Stellt die Verbindung mit dem gespeicherten Profil her und wählt sie auf dem Server aus.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
-| `id` | string | ja | Connection id. |
+| `id` | string | ja | Kennung des Verbindungsprofils. |
 
-Result: dieselbe shape wie `connection.list`, plus `connection`, wenn das Profil gefunden wurde.
+Ergebnis: dieselben Felder wie bei `connection.list`, zusätzlich `connection`, sofern das Profil gefunden wurde.
 
 ### `connection.disconnect`
 
-Trennt ein Host-Profil.
+Trennt die Verbindung des angegebenen Profils auf dem Server.
 
-Params: `{"id":"..."}`.
+Parameter: `{"id":"..."}`.
 
-Result: dieselbe shape wie `connection.connect`.
+Ergebnis: gleicher Aufbau wie bei `connection.connect`.
 
 ### `connection.select`
 
-Waehlt ein Host-Profil aus, ohne eine Verbindung herzustellen.
+Wählt ein Profil auf dem Server aus, ohne die Verbindung herzustellen.
 
-Params: `{"id":"..."}`.
+Parameter: `{"id":"..."}`.
 
-Result: dieselbe shape wie `connection.connect`.
+Ergebnis: gleicher Aufbau wie bei `connection.connect`.
 
-## Chat-Methoden
+<a id="chat-methoden"></a>
 
-Die Chat-API verwendet:
+## Chats und Nachrichten
+
+Für die Chatmethoden gelten folgende Bezeichnungen:
 
 - `chatType`: `channel` oder `dm`;
-- `chatKey`: fuer `channel` der Kanalindex als Zeichenfolge, z. B. `"0"`; fuer `dm` die peer `nodeId`, z. B. `"!12345678"`;
-- `ownerNodeId`: lokale node id der ausgewaehlten Host-Verbindung.
+- `chatKey`: bei `channel` der Kanalindex als Text, etwa `"0"`; bei `dm` die `nodeId` des Gesprächspartners, etwa `"!12345678"`;
+- `ownerNodeId`: Kennung des Funkgeräts, mit dem der Server über das ausgewählte Profil verbunden ist.
 
 ### `chat.list`
 
-Gibt die Liste der Kanaele und direkten Dialoge zurueck.
+Gibt die Liste der Kanäle und direkten Dialoge zurück.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result:
+Ergebnis:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `ownerNodeId` | string | Lokale node id der Host-Verbindung. |
-| `connectionId` | string | ID der ausgewaehlten Host-Verbindung. |
+| `ownerNodeId` | string | Kennung des Funkgeräts in der ausgewählten Serververbindung. |
+| `connectionId` | string | Kennung der ausgewählten Serververbindung. |
 | `items` | `ChatItem[]` | Chats. |
 
 `ChatItem`:
@@ -478,92 +531,92 @@ Result:
 | `displayName` | string | Chatname. |
 | `avatarText` | string | Avatartext. |
 | `avatarColor` | string | Avatarfarbe, z. B. `#5B8DEF`. |
-| `lastMessageText` | string | Letzter Text. |
-| `lastMessageTime` | number | Unix epoch seconds. |
-| `unreadCount` | number | Ungelesene. |
+| `lastMessageText` | string | Text der letzten Nachricht. |
+| `lastMessageTime` | number | Zeitpunkt der letzten Nachricht in Unix-Sekunden. |
+| `unreadCount` | number | Anzahl ungelesener Nachrichten. |
 | `channelIndex` | number | Kanalindex oder `0`. |
-| `peerNodeId` | string | Peer node id fuer DM oder `""`. |
-| `muted` | boolean | Muted flag. |
+| `peerNodeId` | string | Knotenkennung des Gesprächspartners bei Direktnachrichten, sonst `""`. |
+| `muted` | boolean | Sind Benachrichtigungen für diesen Chat ausgeschaltet? |
 
 ### `chat.messages`
 
-Laedt Chat-Nachrichten.
+Lädt Chat-Nachrichten.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
 | `chatType` | string | ja | `channel` oder `dm`. |
-| `chatKey` | string | ja | Channel index string oder peer node id. |
-| `limit` | number | nein | 1..200, default `50`. |
-| `beforeDbId` | number | nein | Wenn > 0, Nachrichten vor dieser DB id laden. |
-| `afterDbId` | number | nein | Wenn > 0 und `beforeDbId == 0`, Nachrichten nach dieser DB id laden. |
+| `chatKey` | string | ja | Kanalindex als Text oder Knotenkennung des Gesprächspartners. |
+| `limit` | number | nein | Anzahl der Nachrichten von 1 bis 200, Standard `50`. |
+| `beforeDbId` | number | nein | Bei einem Wert größer als 0 werden Nachrichten mit kleinerer Datenbank-ID geladen. |
+| `afterDbId` | number | nein | Bei einem Wert größer als 0 und `beforeDbId == 0` werden Nachrichten mit größerer Datenbank-ID geladen. |
 
-Result:
+Ergebnis:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `ownerNodeId` | string | Lokale node id. |
+| `ownerNodeId` | string | Kennung des am Server angeschlossenen Funkgeräts. |
 | `items` | `Message[]` | Nachrichten. |
 
 ### `chat.markRead`
 
 Markiert einen Chat als gelesen.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
 | `chatType` | string | ja |
 | `chatKey` | string | ja |
 
-Result: `chat.list`.
+Ergebnis: `chat.list`.
 
 ### `chat.send`
 
 Sendet eine Nachricht.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
 | `chatType` | string | ja | `channel` oder `dm`. |
-| `chatKey` | string | ja | Channel index string oder peer node id. |
+| `chatKey` | string | ja | Kanalindex als Text oder Knotenkennung des Gesprächspartners. |
 | `text` | string | ja | Nicht-leerer Text. |
-| `replyId` | number | nein | Packet id der beantworteten Nachricht; kann negativ sein. |
-| `clientRequestId` | string | nein | Idempotency key. Eine Wiederholung innerhalb von 5 Minuten gibt die bereits erzeugte Nachricht zurueck. |
+| `replyId` | number | nein | Paketkennung der Nachricht, auf die geantwortet wird. Kann negativ sein. |
+| `clientRequestId` | string | nein | Kennung zum Vermeiden doppelter Sendungen. Bei einer Wiederholung mit derselben Kennung innerhalb von 5 Minuten wird die bereits erzeugte Nachricht zurückgegeben. |
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
 | `message` | `Message` |
 | `chat` | Ergebnis von `chat.list` |
 
-Dedup-cache-Limit: 512 Eintraege, TTL 5 Minuten.
+Der Server speichert dafür bis zu 512 Einträge, jeweils für 5 Minuten.
 
 ### `chat.retry`
 
-Wiederholt das Senden einer fehlgeschlagenen outgoing-Nachricht.
+Sendet eine ausgehende Nachricht erneut, deren vorheriger Sendeversuch fehlgeschlagen ist.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
 | `chatType` | string | ja | `channel` oder `dm`. |
-| `chatKey` | string | ja | Chat key. |
-| `dbId` | number | bedingt | DB id der Nachricht. Benoetigt `dbId > 0` oder `packetId != 0`. |
-| `packetId` | number | bedingt | Packet id der Nachricht. |
+| `chatKey` | string | ja | Kennung des Chats. |
+| `dbId` | number | bedingt | Datenbank-ID der Nachricht. Erforderlich ist `dbId > 0` oder `packetId != 0`. |
+| `packetId` | number | bedingt | Paketkennung der Nachricht. |
 
-Result: wie `chat.send`.
+Ergebnis: wie `chat.send`.
 
-Einschraenkungen: funktioniert nur fuer fehlgeschlagene outgoing-Nachrichten und wird fuer MeshCore Companion runtime nicht unterstuetzt.
+Erneutes Senden ist nur für ausgehende Nachrichten mit Sendefehler möglich. MeshCore Companion unterstützt diese Methode nicht.
 
 ### `chat.react`
 
 Sendet eine Reaktion auf eine Nachricht.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
@@ -572,39 +625,39 @@ Params:
 | `targetPacketId` | number | ja, nicht `0` |
 | `emoji` | string | ja |
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
-| `message` | aktualisierte target `Message` |
+| `message` | Aktualisiertes `Message`-Objekt mit der Reaktion |
 | `chat` | Ergebnis von `chat.list` |
 
-Einschraenkung: Reaktionen werden fuer MeshCore Companion runtime nicht unterstuetzt.
+Reaktionen werden von MeshCore Companion nicht unterstützt.
 
 ### `Message`
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `fromNodeId` | string | Sender node id. |
-| `toNodeId` | string | Recipient node id; Broadcast normalerweise `!ffffffff`. |
+| `fromNodeId` | string | Knotenkennung des Absenders. |
+| `toNodeId` | string | Knotenkennung des Empfängers; bei einer Nachricht an alle Knoten normalerweise `!ffffffff`. |
 | `channelIndex` | number | Kanalindex. |
 | `text` | string | Text. |
-| `timestamp` | number | Unix epoch seconds. |
-| `outgoing` | boolean | Nachricht wurde vom lokalen Geraet gesendet. |
+| `timestamp` | number | Zeitpunkt der Nachricht in Unix-Sekunden. |
+| `outgoing` | boolean | Nachricht wurde vom lokalen Gerät gesendet. |
 | `status` | string/null | `SENDING`, `DELIVERED`, `CONFIRMED`, `FAILED`. |
-| `packetId` | number | Meshtastic packet id. |
-| `errorReason` | string/null | Grund fuer Sendefehler. |
-| `replyId` | number | Packet id der urspruenglichen Nachricht. |
-| `replyText` | string/null | Text der urspruenglichen Nachricht. |
-| `replyToOutgoing` | boolean | Reply target war outgoing. |
-| `hopStart` | number | Urspruengliches hop limit. |
-| `hopLimit` | number | Verbleibendes hop limit. |
-| `rxRssi` | number | RSSI. |
-| `rxSnr` | number | SNR. |
-| `senderName` | string | Aufgeloester sender display name. |
-| `viaMqtt` | boolean | Nachricht kam ueber MQTT. |
+| `packetId` | number | Paketkennung von Meshtastic. |
+| `errorReason` | string/null | Grund für Sendefehler. |
+| `replyId` | number | Paketkennung der Nachricht, auf die geantwortet wird. |
+| `replyText` | string/null | Text der ursprünglichen Nachricht. |
+| `replyToOutgoing` | boolean | War die ursprüngliche Nachricht ausgehend? |
+| `hopStart` | number | Ursprünglich erlaubte Anzahl von Weiterleitungen über andere Knoten. |
+| `hopLimit` | number | Noch erlaubte Anzahl von Weiterleitungen über andere Knoten. |
+| `rxRssi` | number | RSSI: Stärke des empfangenen Funksignals. |
+| `rxSnr` | number | SNR: Verhältnis von Signal- zu Rauschleistung. |
+| `senderName` | string | Name des Absenders für die Anzeige. |
+| `viaMqtt` | boolean | Nachricht kam über MQTT. |
 | `systemMessage` | boolean | Systemnachricht. |
-| `dbId` | number | Lokale DB id. |
+| `dbId` | number | Kennung der Nachricht in der lokalen Datenbank. |
 | `reactions` | `Reaction[]` | Reaktionen. |
 
 `Reaction`:
@@ -622,20 +675,22 @@ Einschraenkung: Reaktionen werden fuer MeshCore Companion runtime nicht unterstu
 | `errorReason` | string/null |
 | `senderName` | string |
 
-## Node-Methoden
+<a id="node-methoden"></a>
+
+## Netzknoten
 
 ### `node.list`
 
-Gibt nodes der ausgewaehlten Host-Verbindung zurueck.
+Gibt die Knoten der ausgewählten Serververbindung zurück.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
-| `includeFavorites` | boolean | nein | Offline favorites aus dem Cache hinzufuegen. |
-| `includeIgnored` | boolean | nein | Offline ignored nodes aus dem Cache hinzufuegen. |
+| `includeFavorites` | boolean | nein | Gespeicherte Favoriten auch dann einschließen, wenn sie derzeit nicht erreichbar sind. |
+| `includeIgnored` | boolean | nein | Gespeicherte ignorierte Knoten auch dann einschließen, wenn sie derzeit nicht erreichbar sind. |
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
@@ -644,29 +699,29 @@ Result:
 
 ### `node.get`
 
-Gibt einen node zurueck.
+Gibt Informationen zu einem einzelnen Knoten zurück.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
 | `nodeId` | string | ja |
 
-Result: `{"ownerNodeId":"...","items":[Node]}`.
+Ergebnis: `{"ownerNodeId":"...","items":[Node]}`.
 
 ### `node.traceroute`
 
-Startet traceroute zu einem node. Das Ergebnis kommt als separates Event `node.traceroute.result`.
+Fragt die Route zu einem Knoten ab, also die Folge der Knoten, über die eine Nachricht dorthin gelangt. Das Ergebnis wird später als Ereignis `node.traceroute.result` gesendet.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
-| `nodeId` | string | bedingt | Target node id. |
-| `nodeNum` | number | bedingt | Target node num. Benoetigt `nodeId` oder non-zero `nodeNum`. |
-| `requestId` | string | nein | Wenn fehlt, erzeugt der Host eine UUID. |
+| `nodeId` | string | bedingt | Kennung des Zielknotens. |
+| `nodeNum` | number | bedingt | Nummer des Zielknotens. Geben Sie `nodeId` oder eine von null verschiedene `nodeNum` an. |
+| `requestId` | string | nein | Fehlt die Kennung, erzeugt der Server eine UUID als eindeutige Anfragekennung. |
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
@@ -674,15 +729,15 @@ Result:
 | `targetNodeNum` | number |
 | `targetNodeId` | string |
 | `targetName` | string |
-| `nodeNames` | object map unsigned node num string -> display name |
+| `nodeNames` | JSON-Objekt: vorzeichenlose Knotennummer als Text → angezeigter Name |
 
-Einschraenkung: benoetigt einen protocol handler; nicht verfuegbar fuer ausgewaehlte runtimes, die kein traceroute senden koennen.
+Die Methode steht nur zur Verfügung, wenn die Verarbeitung des gewählten Protokolls Routenabfragen unterstützt.
 
 ### `node.refresh`
 
-Fordert frische UserInfo fuer einen node an.
+Fordert aktuelle Benutzerdaten (`UserInfo`) vom Knoten an.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
@@ -690,59 +745,59 @@ Params:
 | `includeFavorites` | boolean | nein |
 | `includeIgnored` | boolean | nein |
 
-Result: `node.list` mit denselben Filter-Flags.
+Ergebnis: wie `node.list`, mit denselben Werten für `includeFavorites` und `includeIgnored`.
 
 ### `node.delete`
 
-Loescht einen node aus runtime/cache.
+Entfernt den Knoten aus den Daten der aktuellen Verbindung und aus dem gespeicherten Cache.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
-| `nodeId` | string | ja | Node id. |
-| `nodeNum` | number | nein | Wenn non-zero, wird der node aus dem aktuellen `DeviceState` entfernt. |
-| `includeFavorites` | boolean | nein | Wird an das result `node.list` uebergeben. |
-| `includeIgnored` | boolean | nein | Wird an das result `node.list` uebergeben. |
+| `nodeId` | string | ja | Knotenkennung. |
+| `nodeNum` | number | nein | Bei einer Nummer ungleich null wird der Knoten auch aus dem aktuellen `DeviceState` entfernt. |
+| `includeFavorites` | boolean | nein | Wird beim Erstellen des Ergebnisses von `node.list` berücksichtigt. |
+| `includeIgnored` | boolean | nein | Wird beim Erstellen des Ergebnisses von `node.list` berücksichtigt. |
 
-Result: `node.list`.
+Ergebnis: `node.list`.
 
 ### `node.favorite`
 
-Aktiviert/deaktiviert das favorite flag.
+Fügt den Knoten den Favoriten hinzu oder entfernt ihn daraus.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
 | `nodeId` | string | ja |
-| `enabled` | boolean | nein, default `false` |
+| `enabled` | boolean | nein, Standard `false` |
 | `includeFavorites` | boolean | nein |
 | `includeIgnored` | boolean | nein |
 
-Result: `node.list`.
+Ergebnis: `node.list`.
 
 ### `node.ignored`
 
-Aktiviert/deaktiviert das ignored flag.
+Schaltet das Ignorieren des Knotens ein oder aus.
 
-Params: wie `node.favorite`.
+Parameter: wie `node.favorite`.
 
-Result: `node.list`.
+Ergebnis: `node.list`.
 
 ### `Node`
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `nodeNum` | number | Java int node number. |
-| `nodeId` | string | Stable id der Form `!12345678`. |
+| `nodeNum` | number | Knotennummer als Java-Zahl vom Typ `int`. |
+| `nodeId` | string | Dauerhafte Kennung wie `!12345678`. |
 | `longName` | string |
 | `shortName` | string |
 | `latitude` | number |
 | `longitude` | number |
 | `altitude` | number |
 | `snr` | number |
-| `lastHeard` | number | Unix epoch seconds oder runtime value. |
+| `lastHeard` | number | Zeitpunkt des letzten Empfangs in Unix-Sekunden oder ein von der Protokollverarbeitung gelieferter Wert. |
 | `batteryLevel` | number |
 | `externallyPowered` | boolean |
 | `voltage` | number |
@@ -757,7 +812,7 @@ Result: `node.list`.
 | `channel` | number |
 | `role` | string |
 | `hwModel` | string |
-| `publicKey` | string | Base64 public key oder `""`. |
+| `publicKey` | string | Öffentlicher Schlüssel in Base64 oder `""`. |
 | `unmessagable` | boolean |
 | `licensed` | boolean |
 | `favorite` | boolean |
@@ -767,63 +822,65 @@ Result: `node.list`.
 
 ### `telemetry.dashboard`
 
-Gibt das telemetry dashboard fuer einen node zurueck.
+Gibt die Daten für die Telemetrieansicht eines Knotens zurück.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
-| `nodeId` | string | nein | Wenn blank, wird die lokale node id der Host-Verbindung verwendet. |
-| `sinceEpoch` | number | nein | Untere Grenze in Unix epoch seconds, default `0`. |
-| `maxFutureTs` | number | nein | Obere Grenze in Unix epoch seconds. Wenn `<= 0`, verwendet der Host `now + 300`. |
+| `nodeId` | string | nein | Fehlt der Wert oder enthält er nur Leerzeichen, wird das am Server angeschlossene Funkgerät verwendet. |
+| `sinceEpoch` | number | nein | Beginn des Zeitraums in Unix-Sekunden, Standard `0`. |
+| `maxFutureTs` | number | nein | Ende des Zeitraums in Unix-Sekunden. Bei `<= 0` verwendet der Server die aktuelle Zeit plus 300 Sekunden. |
 
-Result:
+Ergebnis:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `ownerNodeId` | string | Lokale node id. |
-| `nodeId` | string | Node id, fuer die telemetry geladen wurde. |
-| `entries` | `TelemetryEntry[]` | Telemetry des ausgewaehlten node. |
-| `qualityEntries` | `TelemetryEntry[]` | Quality telemetry des Netzes. |
+| `ownerNodeId` | string | Kennung des am Server angeschlossenen Funkgeräts. |
+| `nodeId` | string | Kennung des Knotens, dessen Telemetrie geladen wurde. |
+| `entries` | `TelemetryEntry[]` | Telemetrie des ausgewählten Knotens. |
+| `qualityEntries` | `TelemetryEntry[]` | Daten zur Verbindungsqualität im Netz. |
 
-`TelemetryEntry` wird per Gson aus dem Java model serialisiert. Aktuelle Felder:
+Gson wandelt das Java-Objekt `TelemetryEntry` in JSON um. Die Felder sind hier nach ihrem Zweck gruppiert:
 
-- core: `timestamp`, `nodeId`, `telemetryVariant`;
-- device metrics: `batteryLevel`, `externallyPowered`, `voltage`, `channelUtilization`, `airUtilTx`, `deviceUptimeSeconds`;
-- environment metrics: `temperature`, `relativeHumidity`, `barometricPressure`, `gasResistance`, `environmentVoltage`, `environmentCurrent`, `iaq`, `distance`, `lux`, `whiteLux`, `irLux`, `uvLux`, `windDirection`, `windSpeed`, `weight`, `windGust`, `windLull`, `radiation`, `rainfall1h`, `rainfall24h`, `soilMoisture`, `soilTemperature`, `oneWireTemperatures`;
-- air quality metrics: `pm10Standard`, `pm25Standard`, `pm100Standard`, `pm10Environmental`, `pm25Environmental`, `pm100Environmental`, `particles03um`, `particles05um`, `particles10um`, `particles25um`, `particles50um`, `particles100um`, `co2`, `co2Temperature`, `co2Humidity`, `formFormaldehyde`, `formHumidity`, `formTemperature`, `pm40Standard`, `particles40um`, `pmTemperature`, `pmHumidity`, `pmVocIdx`, `pmNoxIdx`, `particlesTps`;
-- power metrics: `ch1Voltage`..`ch8Voltage`, `ch1Current`..`ch8Current`;
-- local stats: `numPacketsRx`, `numPacketsRxBad`, `numRxDupe`, `numPacketsTx`, `numTxDropped`, `numTxRelay`, `numTxRelayCanceled`, `localUptimeSeconds`, `numOnlineNodes`, `numTotalNodes`, `heapTotalBytes`, `heapFreeBytes`, `noiseFloor`;
-- health metrics: `healthHeartBpm`, `healthSpO2`, `healthTemperature`;
-- host metrics: `hostUptimeSeconds`, `hostFreememBytes`, `hostDiskfree1Bytes`, `hostDiskfree2Bytes`, `hostDiskfree3Bytes`, `hostLoad1`, `hostLoad5`, `hostLoad15`, `hostUserString`;
-- traffic stats: `trafficPacketsInspected`, `trafficPositionDedupDrops`, `trafficNodeinfoCacheHits`, `trafficRateLimitDrops`, `trafficUnknownPacketDrops`, `trafficHopExhaustedPackets`, `trafficRouterHopsPreserved`;
-- RF/hops: `rxSnr`, `rxRssi`, `hopStart`, `hopLimit`.
+- Grunddaten: `timestamp`, `nodeId`, `telemetryVariant`;
+- Gerätemesswerte: `batteryLevel`, `externallyPowered`, `voltage`, `channelUtilization`, `airUtilTx`, `deviceUptimeSeconds`;
+- Umweltsensoren: `temperature`, `relativeHumidity`, `barometricPressure`, `gasResistance`, `environmentVoltage`, `environmentCurrent`, `iaq`, `distance`, `lux`, `whiteLux`, `irLux`, `uvLux`, `windDirection`, `windSpeed`, `weight`, `windGust`, `windLull`, `radiation`, `rainfall1h`, `rainfall24h`, `soilMoisture`, `soilTemperature`, `oneWireTemperatures`;
+- Luftqualität: `pm10Standard`, `pm25Standard`, `pm100Standard`, `pm10Environmental`, `pm25Environmental`, `pm100Environmental`, `particles03um`, `particles05um`, `particles10um`, `particles25um`, `particles50um`, `particles100um`, `co2`, `co2Temperature`, `co2Humidity`, `formFormaldehyde`, `formHumidity`, `formTemperature`, `pm40Standard`, `particles40um`, `pmTemperature`, `pmHumidity`, `pmVocIdx`, `pmNoxIdx`, `particlesTps`;
+- Stromversorgung: `ch1Voltage`..`ch8Voltage`, `ch1Current`..`ch8Current`;
+- Gerätestatistik: `numPacketsRx`, `numPacketsRxBad`, `numRxDupe`, `numPacketsTx`, `numTxDropped`, `numTxRelay`, `numTxRelayCanceled`, `localUptimeSeconds`, `numOnlineNodes`, `numTotalNodes`, `heapTotalBytes`, `heapFreeBytes`, `noiseFloor`;
+- Gesundheitsmesswerte: `healthHeartBpm`, `healthSpO2`, `healthTemperature`;
+- Rechnermesswerte: `hostUptimeSeconds`, `hostFreememBytes`, `hostDiskfree1Bytes`, `hostDiskfree2Bytes`, `hostDiskfree3Bytes`, `hostLoad1`, `hostLoad5`, `hostLoad15`, `hostUserString`;
+- Paketverarbeitung: `trafficPacketsInspected`, `trafficPositionDedupDrops`, `trafficNodeinfoCacheHits`, `trafficRateLimitDrops`, `trafficUnknownPacketDrops`, `trafficHopExhaustedPackets`, `trafficRouterHopsPreserved`;
+- Funksignal und Weiterleitungen: `rxSnr`, `rxRssi`, `hopStart`, `hopLimit`.
 
-## Packet-Monitor-Methoden
+<a id="packet-monitor-methoden"></a>
+
+## Paketprotokoll
 
 ### `packetMonitor.page`
 
-Gibt eine LoRa-packet-monitor-Seite zurueck.
+Gibt einen Abschnitt des LoRa-Paketprotokolls zurück.
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht | Beschreibung |
 |------|-----|---------|--------------|
-| `request` | string | nein | `older`, `newer` oder ein anderer/blank Wert fuer latest. |
-| `query` | `PacketQuery` | nein | Filter query. |
-| `cursor` | `PageCursor` | nein | Cursor fuer older/newer. |
-| `limit` | number | nein | 1..10000, default `200`. |
+| `request` | string | nein | `older` für ältere, `newer` für neuere Einträge. Jeder andere Wert oder eine leere Zeichenfolge liefert die neuesten Einträge. |
+| `query` | `PacketQuery` | nein | Filter für die Einträge. |
+| `cursor` | `PageCursor` | nein | Ausgangsposition für die Suche nach älteren oder neueren Einträgen. |
+| `limit` | number | nein | Anzahl der Einträge von 1 bis 10000, Standard `200`. |
 
 `PacketQuery`:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
 | `direction` | string | `INCOMING`, `OUTGOING`, `INTERNAL` oder fehlend. |
-| `packetType` | string | Packet type filter. |
-| `transportMechanism` | string | Transport filter. |
-| `searchText` | string | Full-text filter. |
-| `capturedAtFromMillis` | number | Untere capturedAt-Grenze. |
-| `capturedAtToMillis` | number | Obere capturedAt-Grenze. |
+| `packetType` | string | Nach Pakettyp filtern. |
+| `transportMechanism` | string | Nach Übertragungsweg filtern. |
+| `searchText` | string | Text, nach dem in den Einträgen gesucht wird. |
+| `capturedAtFromMillis` | number | Untere Zeitgrenze für `capturedAt` in Millisekunden. |
+| `capturedAtToMillis` | number | Obere Zeitgrenze für `capturedAt` in Millisekunden. |
 
 `PageCursor`:
 
@@ -832,7 +889,7 @@ Params:
 | `capturedAt` | number |
 | `id` | number |
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
@@ -844,15 +901,15 @@ Result:
 
 ### `packetMonitor.types`
 
-Params: `{"query": PacketQuery}`.
+Parameter: `{"query": PacketQuery}`.
 
-Result: `{"items":["TEXT_MESSAGE_APP","POSITION_APP",...]}`.
+Ergebnis: `{"items":["TEXT_MESSAGE_APP","POSITION_APP",...]}`.
 
 ### `packetMonitor.counts`
 
-Params: `{"query": PacketQuery}`.
+Parameter: `{"query": PacketQuery}`.
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
@@ -861,86 +918,86 @@ Result:
 
 ### `packetMonitor.captureState`
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"enabled": boolean}`.
+Ergebnis: `{"enabled": boolean}`.
 
 ### `packetMonitor.start`
 
-Aktiviert capture.
+Schaltet die Aufzeichnung von Paketen ein.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"enabled": true}`.
+Ergebnis: `{"enabled": true}`.
 
 ### `packetMonitor.stop`
 
-Deaktiviert capture.
+Schaltet die Aufzeichnung neuer Pakete aus.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"enabled": false}`.
+Ergebnis: `{"enabled": false}`.
 
 ### `packetMonitor.clear`
 
-Leert den packet monitor.
+Leert das Paketprotokoll.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"matching":0,"total":0}`.
+Ergebnis: `{"matching":0,"total":0}`.
 
 ### `PacketLogEntry`
 
-Wird per Gson aus dem immutable Java model serialisiert:
+Ein Eintrag im Paketprotokoll. Gson überträgt die Felder des unveränderlichen Java-Objekts als JSON:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `id` | number | DB id. |
+| `id` | number | Kennung des Datenbankeintrags. |
 | `ownerNodeId` | string |
-| `capturedAt` | number | Unix epoch milliseconds. |
+| `capturedAt` | number | Zeitpunkt der Aufzeichnung in Unix-Millisekunden. |
 | `direction` | string | `INCOMING`, `OUTGOING`, `INTERNAL`. |
 | `packetType` | string |
 | `transportMechanism` | string |
 | `fromNode` | string |
 | `toNode` | string |
 | `payloadText` | string |
-| `packetBytes` | byte array | Gson byte-array encoding. |
+| `packetBytes` | Byte-Array | JSON-Zahlenarray in der Darstellung, die Gson für ein Java-Array vom Typ `byte[]` erzeugt. |
 
 ## Lua-Methoden
 
-Lua RPC verwaltet MeshApp-IDE-Skripte auf dem Host. `scriptId` ist erforderlich und muss in allen Methoden, in denen es angegeben ist, `> 0` sein.
+Die Methoden unter `lua.*` verwalten MeshApp-IDE-Skripte auf dem Server. Wenn eine Methode `scriptId` entgegennimmt, ist dieser Parameter erforderlich und muss größer als 0 sein.
 
 ### `lua.list`
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"items": LuaScript[]}`.
+Ergebnis: `{"items": LuaScript[]}`.
 
 ### `lua.get`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: `{"script": LuaScript}`.
+Ergebnis: `{"script": LuaScript}`.
 
 ### `lua.draft`
 
-Erzeugt ein draft script.
+Erstellt einen Skriptentwurf.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"script": LuaScript}`.
+Ergebnis: `{"script": LuaScript}`.
 
 ### `lua.createDefault`
 
-Erzeugt ein script mit Standardwerten.
+Erstellt ein Skript mit Standardwerten.
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `{"script": LuaScript}`.
+Ergebnis: `{"script": LuaScript}`.
 
 ### `lua.create`
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
@@ -949,16 +1006,16 @@ Params:
 | `enabled` | boolean | nein |
 | `icon` | string | nein |
 | `nodeId` | string | nein |
-| `botType` | string | nein, default `AIR_BOT` |
+| `botType` | string | nein, Standard `AIR_BOT` |
 | `automationName` | string | nein |
 | `description` | string | nein |
 | `author` | string | nein |
 
-Result: `{"script": LuaScript}`.
+Ergebnis: `{"script": LuaScript}`.
 
 ### `lua.save`
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
@@ -967,31 +1024,31 @@ Params:
 | `code` | string | nein |
 | `enabled` | boolean | nein |
 
-Result: `{"script": LuaScript}`.
+Ergebnis: `{"script": LuaScript}`.
 
 ### `lua.saveSettings`
 
-Params: `scriptId` + Felder aus `lua.create`, ausser `code`.
+Parameter: `scriptId` + Felder aus `lua.create`, außer `code`.
 
-Result: `{"script": LuaScript}`.
+Ergebnis: `{"script": LuaScript}`.
 
 ### `lua.delete`
 
-Stoppt ein script und loescht es.
+Stoppt und löscht das Skript.
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: `lua.list`.
+Ergebnis: `lua.list`.
 
 ### `lua.importJson`
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
 | `json` | string | ja |
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
@@ -1000,25 +1057,25 @@ Result:
 
 ### `lua.importExport`
 
-Params:
+Parameter:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `exportFile` | object | Gson-Serialisierung von `LuaScriptService.LuaScriptExportFile`. |
+| `exportFile` | object | Das von Gson in JSON umgewandelte Objekt `LuaScriptService.LuaScriptExportFile`. |
 
-Result: wie `lua.importJson`.
+Ergebnis: wie `lua.importJson`.
 
 ### `lua.export`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: `{"json": string}`.
+Ergebnis: `{"json": string}`.
 
 ### `lua.runningState`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result:
+Ergebnis:
 
 | Feld | Typ |
 |------|-----|
@@ -1028,17 +1085,17 @@ Result:
 
 ### `lua.run`
 
-Startet ein script. Fuer `EXTENSION` wird die remote form bridge verwendet.
+Startet das Skript. Bei `EXTENSION` wird das Formular auf dem Client angezeigt; Benutzeraktionen werden an das Skript auf dem Server weitergegeben.
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.automation.run`
 
-Startet einen automation bot command.
+Führt einen Befehl eines Automatisierungsbots aus.
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
@@ -1057,13 +1114,13 @@ Params:
 | `argumentTokens` | string[] |
 | `requestId` | string |
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.ui.nodeSelection`
 
-Liefert dem runtime das Ergebnis einer node-Auswahl fuer ein zuvor gesendetes Event `lua.ui.nodePick.request`.
+Übergibt dem Skript den vom Benutzer gewählten Knoten. Dies ist die Antwort auf das zuvor gesendete Ereignis `lua.ui.nodePick.request`.
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
@@ -1076,86 +1133,86 @@ Params:
 | `chatKey` | string |
 | `node` | `Node`, optional |
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.form.event`
 
-Liefert ein Event einer extension form component.
+Übergibt dem Skript eine Benutzeraktion an einem Formularelement der Erweiterung.
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
 | `scriptId` | number |
 | `componentId` | string |
 | `type` | string |
-| `value` | any |
+| `value` | Beliebiger JSON-Wert |
 | `text` | string |
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.form.valueResult`
 
-Antwort des Remote client auf den Host-Befehl `lua.form.command` mit `command="value"`.
+Übermittelt dem Server den Wert eines Formularelements. Der Client ruft diese Methode als Antwort auf `lua.form.command` mit `command="value"` auf.
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
 | `scriptId` | number |
 | `requestId` | string |
-| `value` | any |
+| `value` | Beliebiger JSON-Wert |
 
-Result: `{}`.
+Ergebnis: `{}`.
 
 ### `lua.debug`
 
-Startet ein script im debug-Modus.
+Startet das Skript im Debugmodus.
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
 | `scriptId` | number |
 | `breakpoints` | number[] |
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.stop`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.debugContinue`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.debugStep`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: running state.
+Ergebnis: Ausführungszustand wie bei `lua.runningState`.
 
 ### `lua.debugSnapshot`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result:
+Ergebnis:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `snapshot` | `LuaDebugSnapshot`, optional | Fehlt, wenn es keinen snapshot gibt. |
+| `snapshot` | `LuaDebugSnapshot`, optional | Aktueller Zustand beim Debuggen. Das Feld fehlt, wenn keine solchen Daten vorliegen. |
 
-`LuaDebugSnapshot`: `scriptId`, `line`, `reason`, `variables`. `variables[]`: `scope`, `name`, `value`.
+`LuaDebugSnapshot` enthält `scriptId`, `line`, `reason` und `variables`: Skriptkennung, angehaltene Zeile, Grund für den Halt und Variablen. Jeder Eintrag in `variables[]` enthält Gültigkeitsbereich `scope`, Name `name` und Wert `value`.
 
 ### `lua.kv.list`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result:
+Ergebnis:
 
 ```json
 {
@@ -1167,7 +1224,7 @@ Result:
 
 ### `lua.kv.set`
 
-Params:
+Parameter:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
@@ -1175,19 +1232,19 @@ Params:
 | `key` | string | ja |
 | `value` | string | nein |
 
-Result: `{}`.
+Ergebnis: `{}`.
 
 ### `lua.kv.delete`
 
-Params: `{"scriptId": number, "key": "..."}`.
+Parameter: `{"scriptId": number, "key": "..."}`.
 
-Result: `{"deleted": boolean}`.
+Ergebnis: `{"deleted": boolean}`.
 
 ### `lua.kv.clear`
 
-Params: `{"scriptId": number}`.
+Parameter: `{"scriptId": number}`.
 
-Result: `{}`.
+Ergebnis: `{}`.
 
 ### `LuaScript`
 
@@ -1210,30 +1267,32 @@ Result: `{}`.
 | `lastRunAt` | number |
 | `lastStatus` | string |
 | `lastError` | string/null |
-| `running` | boolean | Nur wenn das result aus dem runtime service gesammelt wurde. |
-| `paused` | boolean | Nur wenn das result aus dem runtime service gesammelt wurde. |
+| `running` | boolean | Nur enthalten, wenn beim Erstellen der Antwort der Ausführungszustand des Skripts abgefragt wurde. |
+| `paused` | boolean | Nur enthalten, wenn beim Erstellen der Antwort der Ausführungszustand des Skripts abgefragt wurde. |
 
 ### `LuaFormComponentSpec`
 
-Die extension form spec wird als JSON object serialisiert:
+Ein Formularelement der Erweiterung wird durch ein JSON-Objekt mit folgenden Feldern beschrieben:
 
 `id`, `type`, `parentId`, `text`, `prompt`, `value`, `items`, `min`, `max`, `disabled`, `visible`, `style`, `orientation`, `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `readOnly`, `wrap`, `monospace`, `grow`, `rows`, `chartType`, `xLabel`, `yLabel`, `xType`, `legend`, `symbols`, `series`.
 
-`series[]`: `name`, `color`, `points`; `points[]`: `x`, `y`.
+`series[]` beschreibt die Datenreihen eines Diagramms mit Name `name`, Farbe `color` und Punkten `points`. Jeder Punkt in `points[]` enthält die Koordinaten `x` und `y`.
 
-## Settings-Methoden
+<a id="settings-methoden"></a>
 
-`settings.*` arbeitet mit dem lokalen node der ausgewaehlten Host-Verbindung. Viele Methoden versuchen zuerst, den session passkey zu erhalten. Die meisten Methoden geben einen settings snapshot zurueck.
+## Einstellungen des angeschlossenen Geräts
+
+Die Methoden unter `settings.*` arbeiten mit dem Funkgerät der ausgewählten Serververbindung. Vor vielen Vorgängen versucht MeshApp, einen vorübergehenden Verwaltungsschlüssel (`session passkey`) vom Gerät zu erhalten. Die meisten Methoden geben `AdminSnapshot` zurück, ein Objekt mit den aktuellen Geräteeinstellungen.
 
 ### `settings.snapshot`
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `AdminSnapshot` fuer den lokalen Host node.
+Ergebnis: `AdminSnapshot` für das am Server angeschlossene Funkgerät.
 
 ### `settings.saveOwner`
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
@@ -1241,23 +1300,23 @@ Params:
 | `shortName` | string |
 | `isLicensed` | boolean |
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `settings.saveConfigChanges`
 
-Params:
+Parameter:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `configs` | string[] | Base64 `ConfigProtos.Config`. |
-| `moduleConfigs` | string[] | Base64 `ModuleConfigProtos.ModuleConfig`. |
-| `channels` | string[] | Base64 `ChannelProtos.Channel`. |
+| `configs` | string[] | Binäre Nachricht `ConfigProtos.Config`, als Base64 codiert. |
+| `moduleConfigs` | string[] | Binäre Nachricht `ModuleConfigProtos.ModuleConfig`, als Base64 codiert. |
+| `channels` | string[] | Binäre Nachricht `ChannelProtos.Channel`, als Base64 codiert. |
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `settings.setFixedPosition`
 
-Params:
+Parameter:
 
 | Feld | Typ |
 |------|-----|
@@ -1265,44 +1324,46 @@ Params:
 | `lonDegrees` | number |
 | `altMeters` | number |
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `settings.removeFixedPosition`
 
-Params: `{}`.
+Parameter: `{}`.
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `settings.setRingtone`
 
-Params: `{"ringtone": string}`.
+Parameter: `{"ringtone": string}`.
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `settings.command`
 
-Params:
+Parameter:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
 | `command` | string | `reboot`, `shutdown`, `syncTime`, `enterDfuMode`. |
-| `delaySeconds` | number | Fuer `reboot` und `shutdown`, default `0`. |
-| `epochSeconds` | number | Fuer `syncTime`. |
+| `delaySeconds` | number | Verzögerung für `reboot` und `shutdown`, Standard `0`. |
+| `epochSeconds` | number | Für `syncTime`. |
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
-## Remote-Admin-Methoden
+<a id="remote-admin-methoden"></a>
 
-`admin.*` sendet Meshtastic remote admin packets ueber die ausgewaehlte Host-Verbindung an einen anderen node.
+## Andere Netzknoten verwalten
+
+Die Methoden unter `admin.*` senden Verwaltungsbefehle für Meshtastic über die ausgewählte Serververbindung an einen anderen Netzknoten.
 
 Allgemeine Anforderungen:
 
-- die ausgewaehlte Host-Verbindung muss einen `ProtocolHandler` haben;
-- target wird ueber `nodeId` oder non-zero `nodeNum` angegeben;
-- target darf nicht der lokale Host node sein;
-- target node muss einen public key haben.
+- Die ausgewählte Serververbindung muss einen `ProtocolHandler` besitzen.
+- Geben Sie den Zielknoten mit `nodeId` oder einer von null verschiedenen `nodeNum` an.
+- Das Ziel muss ein anderes Gerät als das direkt am Server angeschlossene Funkgerät sein.
+- Der öffentliche Schlüssel des Zielknotens muss bekannt sein.
 
-Allgemeine target params:
+In allen diesen Methoden wird das Ziel mit folgenden Parametern angegeben:
 
 | Feld | Typ | Pflicht |
 |------|-----|---------|
@@ -1311,82 +1372,82 @@ Allgemeine target params:
 
 ### `admin.load`
 
-Params: target params.
+Parameter: `nodeId` oder `nodeNum`, wie oben beschrieben.
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `admin.requestConfig`
 
-Params:
+Parameter:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `nodeId`/`nodeNum` | string/number | Target. |
-| `type` | string | Enum-Name `AdminProtos.AdminMessage.ConfigType`, ausser `UNRECOGNIZED`. |
+| `nodeId`/`nodeNum` | string/number | Kennung oder Nummer des Zielknotens. |
+| `type` | string | Name eines Werts aus `AdminProtos.AdminMessage.ConfigType`, außer `UNRECOGNIZED`. |
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `admin.requestModuleConfig`
 
-Params:
+Parameter:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `nodeId`/`nodeNum` | string/number | Target. |
-| `type` | string | Enum-Name `AdminProtos.AdminMessage.ModuleConfigType`, ausser `UNRECOGNIZED`. |
+| `nodeId`/`nodeNum` | string/number | Kennung oder Nummer des Zielknotens. |
+| `type` | string | Name eines Werts aus `AdminProtos.AdminMessage.ModuleConfigType`, außer `UNRECOGNIZED`. |
 
-Result: `AdminSnapshot`.
+Ergebnis: `AdminSnapshot`.
 
 ### `admin.saveOwner`
 
-Params: target params + `longName`, `shortName`, `isLicensed`.
+Parameter: `nodeId` oder `nodeNum` sowie `longName`, `shortName`, `isLicensed`.
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.saveConfigChanges`
 
-Params: target params + `configs`, `moduleConfigs`, `channels` wie in `settings.saveConfigChanges`.
+Parameter: `nodeId` oder `nodeNum` sowie `configs`, `moduleConfigs`, `channels` wie bei `settings.saveConfigChanges`.
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.setFixedPosition`
 
-Params: target params + `latDegrees`, `lonDegrees`, `altMeters`.
+Parameter: `nodeId` oder `nodeNum` sowie `latDegrees`, `lonDegrees`, `altMeters`.
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.removeFixedPosition`
 
-Params: target params.
+Parameter: `nodeId` oder `nodeNum`.
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.setRingtone`
 
-Params: target params + `ringtone`.
+Parameter: `nodeId` oder `nodeNum` sowie `ringtone`.
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.setCannedMessages`
 
-Params: target params + `messages`.
+Parameter: `nodeId` oder `nodeNum` sowie `messages`.
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.command`
 
-Params:
+Parameter:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `nodeId`/`nodeNum` | string/number | Target. |
+| `nodeId`/`nodeNum` | string/number | Kennung oder Nummer des Zielknotens. |
 | `command` | string | Siehe Liste unten. |
-| `delaySeconds` | number | Fuer `reboot`/`shutdown`. |
-| `epochSeconds` | number | Fuer `syncTime`. |
-| `location` | string | Fuer backup commands: enum `AdminProtos.AdminMessage.BackupLocation`, ausser `UNRECOGNIZED`. |
-| `preserveFavorites` | boolean | Fuer `resetNodeDb`. |
+| `delaySeconds` | number | Für `reboot`/`shutdown`. |
+| `epochSeconds` | number | Für `syncTime`. |
+| `location` | string | Speicherort für Befehle zur Datensicherung. Ein Wert aus `AdminProtos.AdminMessage.BackupLocation`, außer `UNRECOGNIZED`. |
+| `preserveFavorites` | boolean | Für `resetNodeDb`. |
 
-Commands:
+Verfügbare Befehle:
 
 - `reboot`
 - `shutdown`
@@ -1399,17 +1460,17 @@ Commands:
 - `resetNodeDb`
 - `enterDfuMode`
 
-Result: `{"ok": true}`.
+Ergebnis: `{"ok": true}`.
 
 ### `admin.refreshConnectionStatus`
 
-Params: target params.
+Parameter: `nodeId` oder `nodeNum`.
 
-Result: `AdminSnapshot` plus Feld:
+Ergebnis: `AdminSnapshot` plus Feld:
 
 | Feld | Typ | Beschreibung |
 |------|-----|--------------|
-| `adminMessage` | string | Base64 `AdminProtos.AdminMessage`. |
+| `adminMessage` | string | Binäre Nachricht `AdminProtos.AdminMessage`, als Base64 codiert. |
 
 ### `AdminSnapshot`
 
@@ -1417,18 +1478,18 @@ Result: `AdminSnapshot` plus Feld:
 |------|-----|--------------|
 | `targetNodeNum` | number |
 | `node` | `Node` |
-| `owner` | string | Base64 `MeshProtos.User`. |
-| `deviceMetadata` | string | Base64 `MeshProtos.DeviceMetadata`. |
-| `configs` | string[] | Base64 `ConfigProtos.Config`. |
-| `moduleConfigs` | string[] | Base64 `ModuleConfigProtos.ModuleConfig`. |
-| `channels` | string[] | Base64 `ChannelProtos.Channel`. |
+| `owner` | string | Binäre Nachricht `MeshProtos.User`, als Base64 codiert. |
+| `deviceMetadata` | string | Binäre Nachricht `MeshProtos.DeviceMetadata`, als Base64 codiert. |
+| `configs` | string[] | Binäre Nachricht `ConfigProtos.Config`, als Base64 codiert. |
+| `moduleConfigs` | string[] | Binäre Nachricht `ModuleConfigProtos.ModuleConfig`, als Base64 codiert. |
+| `channels` | string[] | Binäre Nachricht `ChannelProtos.Channel`, als Base64 codiert. |
 | `channelCatalogReady` | boolean |
 | `ringtone` | string |
 | `ringtoneLoaded` | boolean |
 | `cannedMessages` | string |
 | `cannedMessagesLoaded` | boolean |
-| `uiConfig` | string | Base64 `DeviceUIProtos.DeviceUIConfig`. |
-| `connectionStatus` | string | Base64 `ConnStatusProtos.DeviceConnectionStatus`. |
+| `uiConfig` | string | Binäre Nachricht `DeviceUIProtos.DeviceUIConfig`, als Base64 codiert. |
+| `connectionStatus` | string | Binäre Nachricht `ConnStatusProtos.DeviceConnectionStatus`, als Base64 codiert. |
 | `queryStatuses` | `QueryStatus[]` |
 
 `QueryStatus`:
@@ -1439,13 +1500,15 @@ Result: `AdminSnapshot` plus Feld:
 | `state` | string | `SENT`, `RECEIVED`, `FAILED`. |
 | `detail` | string |
 
-## Host-Events
+<a id="host-events"></a>
+
+## Ereignisse des Servers
 
 ### `message.incoming`
 
-Wird bei einer eingehenden Nachricht veroeffentlicht. Die remote runtime verwendet es fuer desktop notification und unread indicator.
+Der Server sendet dieses Ereignis beim Empfang einer Nachricht. Der Client zeigt damit eine Systembenachrichtigung an und markiert die Nachricht als ungelesen.
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1457,9 +1520,9 @@ Payload:
 
 ### `message.changed`
 
-Wird bei einer non-notification-Chat-Aenderung veroeffentlicht, z. B. Reaktionen oder metadata.
+Der Server sendet dieses Ereignis, wenn sich Chatdaten ohne Benachrichtigung über eine neue Nachricht ändern, etwa bei einer Reaktion oder geänderten Nachrichtenangaben.
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1470,9 +1533,9 @@ Payload:
 
 ### `message.status`
 
-Wird veroeffentlicht, wenn sich der delivery status einer outgoing-Nachricht aendert.
+Der Server sendet dieses Ereignis, wenn sich der Zustellstatus einer ausgehenden Nachricht ändert.
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1485,7 +1548,7 @@ Payload:
 
 ### `node.traceroute.result`
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1496,26 +1559,26 @@ Payload:
 | `targetName` | string |
 | `responseFromNodeNum` | number |
 | `responseFromNodeId` | string |
-| `routeData` | string, Base64 `MeshProtos.RouteDiscovery` |
+| `routeData` | Zeichenfolge mit der binären Nachricht `MeshProtos.RouteDiscovery` in Base64 |
 | `formattedText` | string |
-| `timestamp` | number, Unix epoch seconds |
-| `nodeNames` | object map unsigned node num string -> display name |
+| `timestamp` | Zahl der Sekunden seit Beginn der Unix-Zeit |
+| `nodeNames` | JSON-Objekt: vorzeichenlose Knotennummer als Text → angezeigter Name |
 
 ### `packet.monitor.logged`
 
-Payload: `{"entry": PacketLogEntry}`.
+Ereignisdaten (`payload`): `{"entry": PacketLogEntry}`.
 
 ### `packet.monitor.capture`
 
-Payload: `{"enabled": boolean}`.
+Ereignisdaten (`payload`): `{"enabled": boolean}`.
 
 ### `packet.monitor.cleared`
 
-Payload: `{}`.
+Ereignisdaten (`payload`): `{}`.
 
 ### `lua.runtime.event`
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1523,13 +1586,13 @@ Payload:
 | `scriptId` | number |
 | `message` | string |
 | `errorMessage` | string, optional |
-| `payload` | object, optional; fuer `UI_BOT_NOTICE` ist es `LuaUiBotNotice` |
+| `payload` | object, optional; für `UI_BOT_NOTICE` ist es `LuaUiBotNotice` |
 
 `LuaUiBotNotice`: `scriptId`, `source`, `name`, `chatType`, `chatKey`, `text`.
 
 ### `lua.ui.nodePick.request`
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1542,11 +1605,11 @@ Payload:
 | `chatType` | string |
 | `chatKey` | string |
 
-Der Remote client muss mit der Methode `lua.ui.nodeSelection` antworten.
+Der Client muss die Auswahl mit `lua.ui.nodeSelection` zurückmelden.
 
 ### `lua.form.command`
 
-Payload:
+Ereignisdaten (`payload`):
 
 | Feld | Typ |
 |------|-----|
@@ -1558,13 +1621,15 @@ Payload:
 | `script` | `LuaScript` |
 | `spec` | `LuaFormComponentSpec`, optional |
 
-Fuer `command="value"` muss der Remote client `lua.form.valueResult` mit derselben `requestId` aufrufen. Die aktuelle Implementierung der remote form bridge prueft availability ueber den direct server state, daher haengt die tatsaechliche Verfuegbarkeit von extension forms vom aktiven host endpoint ab.
+Bei `command="value"` muss der Client den Feldwert mit `lua.form.valueResult` und derselben `requestId` zurückgeben. Die derzeitige Implementierung prüft die Verfügbarkeit entfernter Formulare anhand des Zustands des direkten RPC-Servers. Ob Erweiterungsformulare nutzbar sind, hängt daher von der aktiven Serververbindung ab.
 
 ## Beispiele
 
-### Request/response
+<a id="requestresponse"></a>
 
-Plaintext-RPC-Envelope vor encryption:
+### Anfrage und Antwort
+
+Inhalt der Anfrage vor der Verschlüsselung:
 
 ```json
 {
@@ -1575,7 +1640,7 @@ Plaintext-RPC-Envelope vor encryption:
 }
 ```
 
-Response:
+Antwort:
 
 ```json
 {
@@ -1592,7 +1657,9 @@ Response:
 }
 ```
 
-### Unknown method
+<a id="unknown-method"></a>
+
+### Unbekannte Methode aufrufen
 
 ```json
 {
@@ -1606,9 +1673,11 @@ Response:
 }
 ```
 
-### Chat send
+<a id="chat-send"></a>
 
-Request params:
+### Chatnachricht senden
+
+Parameter der Anfrage:
 
 ```json
 {
@@ -1620,7 +1689,7 @@ Request params:
 }
 ```
 
-Result shape:
+Aufbau des Ergebnisses:
 
 ```json
 {
@@ -1644,19 +1713,23 @@ Result shape:
 }
 ```
 
-### Direct encrypted line
+<a id="direct-encrypted-line"></a>
 
-Nach `auth_ok` enthaelt die tatsaechliche TCP-Zeile kein JSON mehr:
+### Verschlüsselte TCP-Zeile
+
+Nach der Bestätigung mit `auth_ok` wird eine verschlüsselte Zeile übertragen, nicht mehr das ursprüngliche JSON:
 
 ```text
 enc1_xs3B9XjglG8FjQg4N0rQLj2r8eOJlYkq7H...
 ```
 
-## Kompatibilitaet
+<a id="kompatibilitaet"></a>
 
-- Neue methods werden nur durch explizite Registrierung in `RpcMethodRegistry` hinzugefuegt.
-- Unknown methods muessen clientseitig immer als `METHOD_NOT_FOUND` behandelt werden.
-- Clients muessen unbekannte Felder in result/event payloads ignorieren.
-- Enum-Felder sollten mit tolerant parsing verarbeitet werden: Eine neue Host-Version kann einen Wert senden, den ein alter client nicht kennt.
-- Fuer protobuf payloads ist der Vertrag Base64 des binaeren protobuf, nicht JSON protobuf mapping.
-- Ein Remote-RPC-Profil muss `ProtocolType.REMOTE_RPC` verwenden; `ConnectionManager` lehnt jedes andere protocol fuer `ConnectionType.REMOTE_RPC` ab.
+## Kompatibilität
+
+- Neue Methoden stehen erst nach ausdrücklicher Registrierung in `RpcMethodRegistry` zur Verfügung.
+- `METHOD_NOT_FOUND` bedeutet, dass der Server die angefragte Methode nicht unterstützt. Der Client muss diesen Fall behandeln können.
+- Clients müssen unbekannte Felder im Ergebnis einer Anfrage und in den Daten eines Ereignisses ignorieren.
+- Bei Aufzählungen müssen unbekannte Werte berücksichtigt werden: Eine neue Serverversion kann Werte senden, die ein älterer Client noch nicht kennt.
+- Protobuf-Nachrichten werden als Binärdaten in Base64 übertragen, nicht als JSON-Darstellung von Protobuf.
+- Ein RPC-Profil muss `ProtocolType.REMOTE_RPC` verwenden. `ConnectionManager` lehnt andere Protokolle für `ConnectionType.REMOTE_RPC` ab.

@@ -177,9 +177,9 @@ Contents API и скачивает экспорты по `download_url` с `raw.
 в ограничение вложений GitHub — тогда прикрепите отдельный лог из архива.
 Токенов GitHub или Gitea в клиенте нет.
 
-Flatpak публикуется как отдельный `.flatpak` bundle. Требуется Freedesktop
-Platform 25.08 из Flathub; установка и обновление выполняются из скачанного
-bundle. Собственный OSTree-репозиторий и SSH не используются.
+Пакет `.flatpak` публикуется в GitHub Releases. Для запуска нужна установленная
+среда `org.freedesktop.Platform//25.08`. Установка и обновление выполняются из
+скачанного файла. Собственный OSTree-репозиторий и SSH не используются.
 `app.privatepractice.meshapp.yml` служит для локальной офлайн-сборки текущего
 checkout; основной CI использует `./gradlew flatpak`.
 

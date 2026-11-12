@@ -2,69 +2,82 @@
 
 **Язык:** Русский | [English](rpc-protocol.md) | [Deutsch](rpc-protocol.de.md)
 
-Эта страница описывает JSON RPC-протокол, который MeshApp использует для удаленного подключения одного экземпляра MeshApp к другому экземпляру MeshApp Host. Протокол не является JSON-RPC 2.0 и не передает raw Meshtastic/MeshCore byte stream. Remote RPC - это отдельный прикладной слой для вызова whitelisted host-методов, получения host-событий и работы с состоянием уже выбранного подключения на Host.
+Remote RPC позволяет управлять одним приложением MeshApp из другого. Например, MeshApp на компьютере рядом с радиоустройством принимает команду отправить сообщение, выполняет её и возвращает результат. Приложение, которое выполняет команды, здесь называется **сервером**, а то, которое их отправляет, — **клиентом**.
+
+RPC означает «удалённый вызов процедур»: клиент обращается к функции сервера по имени и передаёт ей параметры. Запросы и ответы MeshApp записываются в JSON — текстовом формате с именованными полями. Это собственный протокол MeshApp, несовместимый со стандартом JSON-RPC 2.0. Он передаёт команды приложения и их результаты, а не поток байтов напрямую к радиоустройству Meshtastic или MeshCore.
+
+Для обычного подключения достаточно [инструкции по запуску сервера](command-line.ru.md#rpc-сервер). Ниже описаны устройство протокола, форматы сообщений и доступные методы — эти сведения нужны для разработки клиента или интеграции с MeshApp.
 
 Основные исходники:
 
-- `src/main/java/com/meshtastic/client/rpc/*` - transport, handshake, envelope, dispatcher.
-- `src/main/java/com/meshtastic/client/service/RemoteRpcHostService.java` - реестр host-методов.
-- `src/main/java/com/meshtastic/client/protocol/rpc/*` - JSON-маппинг доменных объектов.
-- `src/main/java/com/meshtastic/client/connection/rpc/*` - интеграция Remote RPC в `ConnectionManager`.
+- `src/main/java/com/meshtastic/client/rpc/*` — соединение, проверка ключа, форматы сообщений и обработка запросов.
+- `src/main/java/com/meshtastic/client/service/RemoteRpcHostService.java` — методы, доступные на сервере.
+- `src/main/java/com/meshtastic/client/protocol/rpc/*` — преобразование данных приложения в JSON и обратно.
+- `src/main/java/com/meshtastic/client/connection/rpc/*` — работа с RPC-подключениями в `ConnectionManager`.
 
 ## Термины
 
 | Термин | Значение |
 |--------|----------|
-| Host | Экземпляр MeshApp, в котором включен Remote RPC server или подключение к External RPC Router. Именно Host выполняет RPC-методы. |
-| Remote client | Экземпляр MeshApp, который подключается к Host как `ConnectionType.REMOTE_RPC` / `ProtocolType.REMOTE_RPC`. |
-| Direct mode | Прямое TCP-подключение к Host. По умолчанию Host слушает `127.0.0.1:44030`. |
-| Router mode | Подключение через External RPC Router по WebSocket. Router только сводит участников комнаты и пересылает фреймы. RPC-аутентификация и шифрование остаются end-to-end между Remote client и Host. |
-| Envelope | JSON-объект верхнего уровня: request, response или event. |
-| Frame | Одна строка direct TCP stream или один `payload.frame` в router WebSocket. После аутентификации frame содержит encrypted RPC envelope. |
+| Сервер (Host) | MeshApp, который выполняет команды клиента. На нём включён RPC-сервер или настроено подключение к External RPC Router. |
+| Клиент (Remote client) | MeshApp, который отправляет команды серверу. В коде такое подключение обозначено как `ConnectionType.REMOTE_RPC` / `ProtocolType.REMOTE_RPC`. |
+| Прямое подключение (Direct) | Клиент соединяется с сервером по TCP. Адрес сервера по умолчанию — `127.0.0.1:44030`. |
+| Подключение через посредника (Router) | Клиент и сервер соединяются с External RPC Router по WebSocket. Посредник пересылает сообщения между ними. Ключ доступа проверяют сами клиент и сервер; только они могут расшифровать данные RPC. |
+| Сообщение RPC (envelope) | JSON-объект с запросом, ответом или событием. Событие — уведомление сервера, например о новом сообщении в чате. |
+| Передаваемый блок (frame, кадр) | Данные, которые отправляются одной строкой при прямом TCP-подключении или в поле `payload.frame` при работе через посредника. После проверки ключа блок содержит зашифрованное сообщение RPC. |
+| Комната (room) | Группа соединений на посреднике. По общему идентификатору `roomId` посредник определяет, какого клиента связать с каким сервером. |
 
 ## Режимы подключения
 
-### Direct TCP
+<a id="direct-tcp"></a>
 
-Direct server запускается в настройках приложения: "Удаленный RPC-доступ" -> "Включить RPC-сервер".
+### Прямое подключение по TCP
+
+В настройках приложения откройте вкладку **RPC** и включите сервер.
+
+Его можно запустить и без окна приложения: с параметром `--rpc-server` или командой `./gradlew runRpcServer` из исходников. Подробнее — в [инструкции по запуску RPC-сервера](command-line.ru.md#rpc-сервер).
 
 Параметры по умолчанию:
 
 | Параметр | Значение |
 |----------|----------|
-| bind address | `127.0.0.1` |
-| port | `44030` |
-| access key | строка `mra1_...`, генерируется пользователем |
+| Адрес, на котором сервер принимает подключения | `127.0.0.1` |
+| Порт | `44030` |
+| Ключ доступа | Строка `mra1_...`. Её можно создать в настройках приложения; при запуске из командной строки отсутствующий ключ создаётся автоматически. |
 
-Direct server принимает только одну активную authenticated-сессию. Если сессия уже открыта, новая TCP-сессия закрывается.
+При прямом подключении сервер обслуживает только одного клиента, прошедшего проверку ключа. Пока этот клиент подключён, новые TCP-соединения закрываются.
 
-До успешной аутентификации транспорт является newline-delimited UTF-8 JSON control stream. После аутентификации каждая строка содержит encrypted frame вида `enc1_<base64url>`.
+Сначала клиент и сервер проверяют, что у них один и тот же ключ доступа. Эта проверка называется аутентификацией. Во время проверки они обмениваются служебными сообщениями в формате JSON: каждое сообщение записывается в кодировке UTF-8 и передаётся отдельной строкой.
 
-### External RPC Router
+После успешной проверки сообщения RPC шифруются. В каждой строке TCP-соединения передаётся один зашифрованный блок вида `enc1_<base64url>`. Здесь `enc1_` — признак зашифрованных данных, а `base64url` — способ представить двоичные данные текстом.
 
-Router mode используется, когда прямой TCP-доступ к Host невозможен. Встроенное облачное значение:
+<a id="external-rpc-router"></a>
+
+### Подключение через External RPC Router
+
+External RPC Router — сервер-посредник для случаев, когда клиент не может подключиться к MeshApp напрямую. По умолчанию используется облачный посредник:
 
 | Параметр | Значение |
 |----------|----------|
-| display host | `cloud.meshapp.privatepractice.app` |
-| server | `wss://cloud.meshapp.privatepractice.app` |
-| port | `443` |
-| path по умолчанию | `/rpc` |
+| Имя в интерфейсе | `cloud.meshapp.privatepractice.app` |
+| Адрес | `wss://cloud.meshapp.privatepractice.app` |
+| Порт | `443` |
+| Путь по умолчанию | `/rpc` |
 
-Router URI строится так:
+Адрес подключения к посреднику имеет вид:
 
 ```text
 <ws-or-wss>://<host>:<port>/<path>?roomId=<roomId>&role=<host-or-client>
 ```
 
-Правила нормализации:
+Правила формирования адреса:
 
-- если scheme не указан, используется `ws://`;
-- разрешены только `ws://` и `wss://`;
+- если адрес указан без схемы, например `router.example.org`, добавляется `ws://`;
+- разрешены только схемы `ws://` и `wss://`;
 - порт по умолчанию: `8080` для `ws`, `443` для `wss`;
-- path по умолчанию: `/rpc`;
-- `roomId` выводится из access key и не раскрывает сам key;
-- `role` равен `host` для Host и `client` для Remote client.
+- путь по умолчанию — `/rpc`;
+- идентификатор комнаты `roomId` вычисляется из ключа доступа, но не раскрывает сам ключ;
+- поле `role` содержит `host` для сервера и `client` для клиента.
 
 Пример:
 
@@ -72,29 +85,31 @@ Router URI строится так:
 ws://router.example.org:8080/rpc?roomId=erpc1_MpmfGysDJIvccpcIQYIfh0aeET-OORKNPAXG-UoAyK0&role=client
 ```
 
-Router WebSocket передает JSON-объекты. Используемые типы router-сообщений:
+По WebSocket посредник принимает и отправляет следующие JSON-сообщения:
 
 | Направление | JSON | Назначение |
 |-------------|------|------------|
-| Host -> router | `{"type":"host_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Передать frame конкретному remote client. |
-| Client -> router | `{"payload":{"frame":"..."}}` | Передать frame активному Host комнаты. |
-| Любая сторона -> router | `{"type":"router_ping"}` | Healthcheck. |
-| Router -> Host | `{"type":"host_ready"}` | Host зарегистрирован в комнате. |
-| Router -> Host | `{"type":"client_joined","clientSessionId":"..."}` | Новый remote client подключился к комнате. |
-| Router -> Host | `{"type":"client_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Frame от remote client. |
-| Router -> Host | `{"type":"client_disconnected","clientSessionId":"..."}` | Remote client отключился. |
-| Router -> client | `{"type":"client_ready"}` | Client зарегистрирован в комнате. |
-| Router -> client | `{"type":"host_connected"}` | Host доступен. |
-| Router -> client | `{"type":"host_frame","payload":{"frame":"..."}}` или `{"type":"broadcast","payload":{"frame":"..."}}` | Frame от Host. |
-| Router -> client | `{"type":"host_disconnected"}` | Host отключился. |
-| Router -> любая сторона | `{"type":"router_pong"}` | Ответ на healthcheck. |
-| Router -> любая сторона | `{"type":"router_error","message":"..."}` | Ошибка router-канала. |
+| Сервер → посредник | `{"type":"host_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Передать блок данных указанному клиенту. |
+| Клиент → посредник | `{"payload":{"frame":"..."}}` | Передать блок данных серверу в той же комнате. |
+| Клиент или сервер → посредник | `{"type":"router_ping"}` | Проверить, работает ли соединение. |
+| Посредник → сервер | `{"type":"host_ready"}` | Сервер зарегистрирован в комнате. |
+| Посредник → сервер | `{"type":"client_joined","clientSessionId":"..."}` | К комнате подключился новый клиент. |
+| Посредник → сервер | `{"type":"client_frame","clientSessionId":"...","payload":{"frame":"..."}}` | Передать блок данных от клиента. |
+| Посредник → сервер | `{"type":"client_disconnected","clientSessionId":"..."}` | Клиент отключился. |
+| Посредник → клиент | `{"type":"client_ready"}` | Клиент зарегистрирован в комнате. |
+| Посредник → клиент | `{"type":"host_connected"}` | Сервер доступен. |
+| Посредник → клиент | `{"type":"host_frame","payload":{"frame":"..."}}` или `{"type":"broadcast","payload":{"frame":"..."}}` | Передать блок данных от сервера. |
+| Посредник → клиент | `{"type":"host_disconnected"}` | Сервер отключился. |
+| Посредник → клиент или сервер | `{"type":"router_pong"}` | Ответить на проверку соединения. |
+| Посредник → клиент или сервер | `{"type":"router_error","message":"..."}` | Сообщить об ошибке соединения через посредника. |
 
-Host и client отправляют `router_ping` каждые 15 секунд. Если `router_pong` или другие router-сообщения не приходят больше 45 секунд, соединение закрывается как failed.
+Клиент и сервер отправляют посреднику `router_ping` каждые 15 секунд. Если в течение 45 секунд не приходит ни `router_pong`, ни другое сообщение от посредника, соединение считается потерянным и закрывается.
 
-## Access key
+<a id="access-key"></a>
 
-Access key - общий секрет Host и Remote client.
+## Ключ доступа
+
+Один и тот же секретный ключ доступа задаётся на сервере и на клиенте. При подключении они подтверждают, что знают этот ключ, не передавая его по сети.
 
 Формат:
 
@@ -104,13 +119,13 @@ mra1_<base64url-without-padding-32-random-bytes>
 
 Свойства:
 
-- key material: 32 байта;
-- nonce: 24 случайных байта, кодируются base64url без padding;
-- access key никогда не отправляется по сети;
-- proof и encrypted session keys считаются через HMAC-SHA256;
-- router room id выводится как `erpc1_` + base64url без padding от HMAC-SHA256.
+- основа ключа — 32 случайных байта;
+- для каждой проверки создаются одноразовые случайные значения (`nonce`) длиной 24 байта;
+- ключ и одноразовые значения записываются в base64url без завершающих символов `=`; сам ключ доступа по сети не передаётся;
+- для подтверждения знания ключа (`proof`) и получения ключей шифрования соединения используются вычисления на основе HMAC-SHA256;
+- идентификатор комнаты состоит из префикса `erpc1_` и результата HMAC-SHA256, записанного в base64url без завершающих символов `=`.
 
-Room id:
+Формула идентификатора комнаты:
 
 ```text
 roomId = "erpc1_" + base64url_no_padding(HMAC_SHA256(keyBytes, "ERPC-Router room id v1"))
@@ -118,11 +133,15 @@ roomId = "erpc1_" + base64url_no_padding(HMAC_SHA256(keyBytes, "ERPC-Router room
 
 ## Аутентификация и шифрование
 
-Direct mode и Router mode используют один и тот же encrypted RPC session protocol версии 2. В router mode control frames relay-ятся через `payload.frame`, но криптографически сессия остается end-to-end между Host и Remote client.
+И при прямом подключении, и при работе через посредника используется версия 2 протокола защищённого RPC-соединения. Через посредника служебные сообщения передаются в поле `payload.frame`. Проверка ключа и шифрование выполняются между клиентом и сервером; посредник ключ доступа не получает.
 
-### Шаг 1. Host challenge
+Проверка состоит из трёх шагов. Сервер отправляет случайное значение, клиент рассчитывает ответ с помощью общего ключа, затем сервер подтверждает, что тоже знает этот ключ. Ниже приведены точные форматы сообщений и формулы расчёта.
 
-Host генерирует `serverNonce` и отправляет plaintext control frame:
+<a id="шаг-1-host-challenge"></a>
+
+### Шаг 1. Сервер начинает проверку
+
+Сервер создаёт случайное значение `serverNonce` и отправляет служебное сообщение без шифрования:
 
 ```json
 {
@@ -133,9 +152,11 @@ Host генерирует `serverNonce` и отправляет plaintext contro
 }
 ```
 
-### Шаг 2. Client response
+<a id="шаг-2-client-response"></a>
 
-Client генерирует `clientNonce` и отправляет:
+### Шаг 2. Клиент подтверждает знание ключа
+
+Клиент создаёт своё случайное значение `clientNonce`. Из общего ключа и обоих случайных значений он вычисляет подтверждение `proof` и отправляет:
 
 ```json
 {
@@ -146,7 +167,7 @@ Client генерирует `clientNonce` и отправляет:
 }
 ```
 
-Client proof:
+Подтверждение клиента рассчитывается так:
 
 ```text
 clientProof = base64url_no_padding(
@@ -154,9 +175,11 @@ clientProof = base64url_no_padding(
 )
 ```
 
-### Шаг 3. Host ok/error
+<a id="шаг-3-host-okerror"></a>
 
-Если proof неверный:
+### Шаг 3. Сервер проверяет ответ
+
+Если подтверждение клиента не совпадает с ожидаемым, сервер сообщает об ошибке:
 
 ```json
 {
@@ -165,7 +188,7 @@ clientProof = base64url_no_padding(
 }
 ```
 
-Если proof верный:
+Если подтверждение верно, сервер отвечает сообщением `auth_ok` со своим подтверждением:
 
 ```json
 {
@@ -176,14 +199,14 @@ clientProof = base64url_no_padding(
 }
 ```
 
-Server proof:
+Подтверждение сервера рассчитывается так:
 
 ```text
 serverProof = base64url_no_padding(
   HMAC_SHA256(keyBytes, transcript("meshapp-rpc-server-auth-v2", serverNonce, clientNonce))
 )
 ```
-
+`transcript(context, serverNonce, clientNonce)` — последовательность байтов для расчёта подтверждения. Она состоит из строки контекста, затем длины и содержимого каждого случайного значения. `utf8` означает запись строки в UTF-8, а `uint32_be` — четырёхбайтовое целое число, старший байт которого записан первым:
 `transcript(context, serverNonce, clientNonce)` кодируется как:
 
 ```text
@@ -194,11 +217,13 @@ uint32_be(len(utf8(clientNonce)))
 utf8(clientNonce)
 ```
 
-Client проверяет `serverProof`. После этого обе стороны выводят session keys.
+Клиент проверяет `serverProof`. После успешной проверки обе стороны независимо рассчитывают одинаковые ключи шифрования для этого соединения.
 
-### Session key derivation
+<a id="session-key-derivation"></a>
 
-Salt transcript:
+### Расчёт ключей шифрования
+
+Сначала из обоих случайных значений формируется дополнительный входной параметр — «соль» (`saltTranscript`):
 
 ```text
 utf8("meshapp-rpc-secure-v1:salt")
@@ -208,7 +233,7 @@ uint32_be(len(utf8(clientNonce)))
 utf8(clientNonce)
 ```
 
-HKDF-подобный вывод:
+Затем рассчитываются ключи по схеме, аналогичной HKDF — алгоритму получения ключей из общего секрета. Для каждого направления передачи создаются свой ключ и свой префикс одноразового параметра шифрования:
 
 ```text
 prk = HMAC_SHA256(saltTranscript, keyBytes)
@@ -217,7 +242,7 @@ clientToServerNoncePrefix = HKDF-Expand(prk, "meshapp-rpc-secure-v1:client-to-se
 serverToClientKey = HKDF-Expand(prk, "meshapp-rpc-secure-v1:server-to-client:key", 32)
 serverToClientNoncePrefix = HKDF-Expand(prk, "meshapp-rpc-secure-v1:server-to-client:nonce-prefix", 4)
 ```
-
+`HKDF-Expand` последовательно вычисляет блоки с помощью HMAC-SHA256 и объединяет их до нужной длины. В формулах `||` означает соединение последовательностей байтов:
 `HKDF-Expand` использует HMAC-SHA256 blocks:
 
 ```text
@@ -226,34 +251,42 @@ T(n) = HMAC_SHA256(prk, T(n-1) || info || uint8(n))
 output = T(1) || T(2) || ...
 ```
 
-### Encrypted frames
+<a id="encrypted-frames"></a>
 
-Каждый plaintext RPC envelope шифруется отдельно:
+### Передача зашифрованных сообщений
+
+Каждое сообщение RPC шифруется отдельно. Параметры шифрования:
 
 | Параметр | Значение |
 |----------|----------|
-| Cipher | `AES/GCM/NoPadding` |
-| Key | direction-specific 32-byte key |
-| Nonce | 4-byte direction nonce prefix + 8-byte big-endian sequence |
-| Sequence | отдельный счетчик для каждого направления, начинается с `0` |
-| AAD | `meshapp-rpc-secure-v1:frame` |
-| Tag | 128 bit |
-| Frame prefix | `enc1_` |
-| Encoding | base64url без padding |
+| Алгоритм | `AES/GCM/NoPadding` |
+| Ключ | 32 байта; отдельный ключ для каждого направления передачи |
+| Одноразовый параметр шифрования (`nonce`) | 4 байта префикса для данного направления и 8 байт счётчика; старший байт счётчика записывается первым |
+| Счётчик сообщений (`sequence`) | Отдельный для каждого направления, начинается с `0` |
+| Дополнительные проверяемые данные (AAD) | `meshapp-rpc-secure-v1:frame` |
+| Метка проверки целостности (GCM tag) | 128 бит |
+| Префикс блока | `enc1_` |
+| Запись двоичных данных | base64url без завершающих символов `=` |
 
-Frame:
+В зашифрованный блок входят данные сообщения и метка проверки целостности:
 
 ```text
 enc1_<base64url_no_padding(ciphertext_plus_gcm_tag)>
 ```
 
-Если frame не начинается с `enc1_`, sequence исчерпан или GCM authentication не проходит, транспорт закрывается с ошибкой.
+Если блок не начинается с `enc1_`, счётчик исчерпан или проверка целостности GCM не пройдена, соединение закрывается с ошибкой.
 
-## RPC envelope
+<a id="rpc-envelope"></a>
 
-Все RPC envelopes сериализуются compact JSON через Gson с `serializeNulls`. Поля с `null` могут присутствовать явно. Direct transport передает один envelope на строку после encrypted framing. Router transport кладет encrypted frame в `payload.frame`.
+## Формат сообщений RPC
 
-### Request
+Сообщение RPC — это запрос, ответ или событие, записанное одним JSON-объектом. MeshApp использует библиотеку Gson с настройкой `serializeNulls`, поэтому поля со значением `null` могут явно присутствовать в сообщении. Перед шифрованием JSON записывается без отступов и переносов строк.
+
+При прямом соединении каждый зашифрованный блок отправляется отдельной строкой. При работе через посредника тот же блок передаётся в поле `payload.frame`. Примеры JSON ниже показывают содержимое сообщений до шифрования; отступы и переносы строк добавлены для удобства чтения.
+
+<a id="request"></a>
+
+### Запрос
 
 ```json
 {
@@ -271,13 +304,15 @@ enc1_<base64url_no_padding(ciphertext_plus_gcm_tag)>
 Правила:
 
 - `type` должен быть `rpc_request`;
-- `requestId` обязателен и не должен быть blank;
-- `method` обязателен на client side, trim-ится перед отправкой;
-- `params` должен быть JSON object; если поле отсутствует или не object, Host использует `{}`;
-- Host обрабатывает только методы, явно зарегистрированные в `RpcMethodRegistry`;
-- malformed JSON, non-object envelope, unsupported `type` и request без `requestId` игнорируются без response.
+- `requestId` обязателен; пустая строка или строка из одних пробелов не допускается;
+- клиент обязан указать `method`; пробелы по краям значения удаляются перед отправкой;
+- `params` должен быть JSON-объектом; если поля нет или в нём значение другого типа, сервер использует `{}`;
+- сервер выполняет только методы, явно зарегистрированные в `RpcMethodRegistry`;
+- сервер не отвечает на некорректный JSON, сообщения, которые не являются объектами, сообщения с неизвестным `type` и запросы без `requestId`.
 
-### Successful response
+<a id="successful-response"></a>
+
+### Успешный ответ
 
 ```json
 {
@@ -290,9 +325,11 @@ enc1_<base64url_no_padding(ciphertext_plus_gcm_tag)>
 }
 ```
 
-`result` может быть object, array, primitive или `null`. Большинство текущих методов возвращают object.
+`result` может содержать объект, массив, строку, число, логическое значение или `null`. Большинство методов возвращают объект. Поле `requestId` связывает ответ с исходным запросом.
 
-### Error response
+<a id="error-response"></a>
+
+### Ответ с ошибкой
 
 ```json
 {
@@ -306,20 +343,22 @@ enc1_<base64url_no_padding(ciphertext_plus_gcm_tag)>
 }
 ```
 
-Error codes:
+Коды ошибок:
 
-| Code | Когда возникает |
+| Код | Когда возникает |
 |------|-----------------|
-| `BAD_REQUEST` | Handler бросил `IllegalArgumentException`, обычно из-за отсутствующего или некорректного параметра. |
-| `METHOD_NOT_FOUND` | Метод не зарегистрирован на Host. |
-| `CONNECTION_FAILED` | Handler бросил `ConnectionException`; в message добавляется root cause, если он есть. |
-| `INTERNAL_ERROR` | Непредвиденная ошибка handler-а или custom `RpcException` без code. |
-| `TIMEOUT` | Client-side timeout ожидания response. |
-| `TRANSPORT_CLOSED` | RPC client/transport закрыт до или во время вызова. |
+| `BAD_REQUEST` | Обычно означает, что параметр отсутствует или содержит недопустимое значение. В коде возникает исключение `IllegalArgumentException`. |
+| `METHOD_NOT_FOUND` | Запрошенный метод не зарегистрирован на сервере. |
+| `CONNECTION_FAILED` | Не удалось установить соединение; в коде возникает исключение `ConnectionException`. Если известна исходная причина ошибки, она добавляется в поле `message`. |
+| `INTERNAL_ERROR` | Непредвиденная ошибка обработчика или исключение `RpcException`, для которого не задан код ошибки. |
+| `TIMEOUT` | Клиент не получил ответ за отведённое время. |
+| `TRANSPORT_CLOSED` | RPC-клиент или соединение были закрыты до вызова либо во время его выполнения. |
 
-`RpcException` внутри host handler-а может вернуть custom code; code trim-ится, blank превращается в `INTERNAL_ERROR`.
+Обработчик на сервере может передать собственный код ошибки через `RpcException`. Пробелы по краям кода удаляются; пустое значение заменяется на `INTERNAL_ERROR`.
 
-### Event
+<a id="event"></a>
+
+### Событие
 
 ```json
 {
@@ -332,142 +371,154 @@ Error codes:
 }
 ```
 
-Events являются push-сообщениями Host -> Remote client и не имеют `requestId`/response. Если `payload` отсутствует, client передает listener-ам `null` JSON value. Event без непустого `event` игнорируется.
+Сервер отправляет события по своей инициативе, например при получении нового сообщения в чате. У события нет `requestId`, и клиент не должен отвечать на него как на запрос. Если поле `payload` отсутствует, обработчикам события на клиенте передаётся JSON-значение `null`. Событие без непустого имени в поле `event` игнорируется.
 
-## Таймауты
+<a id="таймауты"></a>
 
-| Участок | Значение |
+## Время ожидания
+
+| Операция | Время |
 |---------|----------|
-| Default RPC call timeout | 30 секунд |
-| Remote protocol startup `system.ping` | 5 секунд |
-| UI remote RPC calls в формах | обычно 15 секунд |
-| Direct TCP connect | 5 секунд |
-| Router connect/auth | 8 секунд |
-| Router ping interval | 15 секунд |
-| Router ping timeout | 45 секунд |
-| Lua remote form value wait | 2 секунды |
-| Traceroute pending cleanup | 365 секунд |
+| Ожидание ответа на RPC-вызов по умолчанию | 30 секунд |
+| Проверка `system.ping` при подключении клиента | 5 секунд |
+| RPC-вызовы из экранных форм приложения | Обычно 15 секунд |
+| Установление прямого TCP-соединения | 5 секунд |
+| Подключение и проверка ключа через посредника | 8 секунд |
+| Интервал проверки связи с посредником | 15 секунд |
+| Допустимое отсутствие сообщений от посредника | 45 секунд |
+| Ожидание значения поля удалённой формы Lua | 2 секунды |
+| Срок хранения незавершённого запроса маршрута | 365 секунд |
 
 ## Общие правила JSON
 
-- Строковые required-поля должны быть JSON primitive string и не blank после trim.
-- Numeric-поля читаются как Java `int`, `long`, `double` или `float`; out-of-range проверяется только там, где явно указано.
-- Boolean-поля читаются только из JSON primitive boolean.
-- Отсутствующие optional string-поля обычно трактуются как `""`.
-- Отсутствующие optional number-поля обычно трактуются как `0`.
-- Отсутствующие optional boolean-поля обычно трактуются как `false`.
-- `nodeId` обычно имеет вид `!` + 8 hex-символов.
-- `nodeNum` передается как Java signed `int`; для отображения unsigned используется `nodeId`.
-- Chat timestamp и telemetry timestamp - Unix epoch seconds.
-- Packet monitor `capturedAt` - Unix epoch milliseconds.
-- Protobuf payloads, `publicKey`, `routeData`, `adminMessage` кодируются обычным Base64, не base64url.
+- Обязательные строковые поля должны содержать JSON-строку. После удаления пробелов по краям она не должна быть пустой.
+- Числа читаются как Java-типы `int`, `long`, `double` или `float`. Проверка допустимого диапазона выполняется только там, где это явно указано.
+- Логические поля принимают только JSON-значения `true` или `false`.
+- Если необязательное строковое поле отсутствует, обычно используется `""`.
+- Если необязательное числовое поле отсутствует, обычно используется `0`.
+- Если необязательное логическое поле отсутствует, обычно используется `false`.
+- Идентификатор узла `nodeId` обычно состоит из `!` и 8 шестнадцатеричных символов.
+- Номер узла `nodeNum` передаётся как Java-число `int` со знаком. Для отображения идентификатора без знака используется `nodeId`.
+- Время в сообщениях чата и телеметрии — число секунд с 1 января 1970 года, 00:00:00 UTC (Unix-время).
+- В журнале пакетов поле `capturedAt` содержит число миллисекунд с того же момента.
+- Двоичные данные Protobuf, а также `publicKey`, `routeData` и `adminMessage` записываются в обычном Base64, а не base64url.
 
-## Host state model
+<a id="host-state-model"></a>
 
-Remote RPC client вызывает методы Host, а Host применяет их к своему локальному состоянию:
+## С какими данными работает сервер
 
-- `connection.*` управляют списком подключений Host.
-- Большинство `chat.*`, `node.*`, `telemetry.*`, `settings.*` и `admin.*` требуют выбранное и подключенное Host-подключение.
-- Remote RPC connection на client-side проходит `system.ping`; затем `RemoteRpcState` хранит `RpcClient` и ping-result.
-- Remote RPC transport не принимает raw radio bytes через `TransportConnection.sendBytes`.
+Команда клиента выполняется на сервере и изменяет данные или подключения именно на нём:
+
+- `connection.*` управляют подключениями, сохранёнными на сервере.
+- Для большинства методов `chat.*`, `node.*`, `telemetry.*`, `settings.*` и `admin.*` на сервере нужно выбрать подключение и установить связь с устройством.
+- При создании RPC-подключения клиент вызывает `system.ping`. Объект `RemoteRpcState` затем хранит `RpcClient` и результат этой проверки.
+- Отправлять произвольные байты радиоустройству через `TransportConnection.sendBytes` нельзя: RPC работает только с предусмотренными методами.
 
 ## Методы
 
+В каждом описании **параметры** — это содержимое поля `params` в запросе, а **результат** — содержимое поля `result` в ответе. Если параметры не нужны, передаётся `{}`.
+
+Если вместо таблицы результата указано имя другого метода, оба метода возвращают данные одинаковой структуры.
+
+В таблицах `string` означает строку, `number` — число, `boolean` — `true` или `false`, `object` — JSON-объект, `null` — отсутствие значения. Запись `string[]` или `Node[]` означает массив строк или объектов указанного типа. Имена полей и значения в обратных кавычках нужно передавать точно как написано.
+
 ### `system.ping`
 
-Проверяет доступность Host RPC.
+Проверяет, отвечает ли RPC-сервер.
 
-Params:
+Параметры:
 
 ```json
 {}
 ```
 
-Result:
+Результат:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `app` | string | Всегда `MeshApp`. |
 | `version` | string | Версия приложения. |
-| `versionCode` | number | Numeric version code. |
+| `versionCode` | number | Числовой код версии приложения. |
 | `remoteRpc` | boolean | Всегда `true`. |
-| `activeConnections` | number | Количество активных подключений на Host. |
+| `activeConnections` | number | Число активных подключений на сервере. |
 
 ### `connection.list`
 
-Возвращает сохраненные подключения Host.
+Возвращает подключения, сохранённые на сервере.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result:
+Результат:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `selectedConnectionId` | string/null | ID выбранного подключения Host. |
-| `items` | `Connection[]` | Подключения Host. |
+| `selectedConnectionId` | string/null | Идентификатор подключения, выбранного на сервере. |
+| `items` | `Connection[]` | Сохранённые подключения. |
 
 `Connection`:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `id` | string | Stable connection profile id. |
+| `id` | string | Постоянный идентификатор профиля подключения. |
 | `name` | string | Имя профиля. |
 | `type` | string | `TCP`, `SERIAL`, `BLE`, `REMOTE_RPC`. |
 | `protocol` | string | `MESHTASTIC`, `MESHCORE_KISS`, `MESHCORE_COMPANION`, `REMOTE_RPC`. |
-| `connected` | boolean | Подключено ли сейчас. |
-| `reconnecting` | boolean | Идет ли reconnect. |
-| `selected` | boolean | Является ли выбранным на Host. |
-| `nodeId` | string/null | Node id, если известен. |
-| `address` | string | Человекочитаемый адрес. |
+| `connected` | boolean | Установлено ли соединение. |
+| `reconnecting` | boolean | Выполняется ли повторное подключение. |
+| `selected` | boolean | Выбрано ли это подключение на сервере. |
+| `nodeId` | string/null | Идентификатор узла, если он известен. |
+| `address` | string | Адрес подключения в виде строки для отображения. |
 
 ### `connection.connect`
 
-Подключает профиль Host и выбирает его.
+Устанавливает соединение по сохранённому профилю и выбирает его на сервере.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
-| `id` | string | да | Connection id. |
+| `id` | string | да | Идентификатор профиля подключения. |
 
-Result: тот же shape, что `connection.list`, плюс `connection`, если профиль найден.
+Результат содержит те же поля, что у `connection.list`, и дополнительно поле `connection`, если профиль найден.
 
 ### `connection.disconnect`
 
-Отключает профиль Host.
+Закрывает соединение по указанному профилю на сервере.
 
-Params: `{"id":"..."}`.
+Параметры: `{"id":"..."}`.
 
-Result: тот же shape, что `connection.connect`.
+Результат имеет ту же структуру, что у `connection.connect`.
 
 ### `connection.select`
 
-Выбирает профиль Host без подключения.
+Выбирает профиль на сервере, но не устанавливает соединение.
 
-Params: `{"id":"..."}`.
+Параметры: `{"id":"..."}`.
 
-Result: тот же shape, что `connection.connect`.
+Результат имеет ту же структуру, что у `connection.connect`.
 
-## Chat methods
+<a id="chat-methods"></a>
 
-В chat API используются:
+## Чаты и сообщения
+
+В методах чата используются следующие обозначения:
 
 - `chatType`: `channel` или `dm`;
-- `chatKey`: для `channel` - индекс канала строкой, например `"0"`; для `dm` - peer `nodeId`, например `"!12345678"`;
-- `ownerNodeId`: локальный node id выбранного Host-подключения.
+- `chatKey`: для канала (`channel`) — его индекс строкой, например `"0"`; для личного диалога (`dm`) — `nodeId` собеседника, например `"!12345678"`;
+- `ownerNodeId`: идентификатор радиоустройства, к которому подключён сервер через выбранный профиль.
 
 ### `chat.list`
 
 Возвращает список каналов и личных диалогов.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result:
+Результат:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `ownerNodeId` | string | Локальный node id Host-подключения. |
-| `connectionId` | string | ID выбранного Host-подключения. |
+| `ownerNodeId` | string | Идентификатор радиоустройства в выбранном подключении сервера. |
+| `connectionId` | string | Идентификатор выбранного подключения сервера. |
 | `items` | `ChatItem[]` | Чаты. |
 
 `ChatItem`:
@@ -478,133 +529,133 @@ Result:
 | `displayName` | string | Название чата. |
 | `avatarText` | string | Текст аватара. |
 | `avatarColor` | string | Цвет аватара, например `#5B8DEF`. |
-| `lastMessageText` | string | Последний текст. |
-| `lastMessageTime` | number | Unix epoch seconds. |
-| `unreadCount` | number | Непрочитанные. |
+| `lastMessageText` | string | Текст последнего сообщения. |
+| `lastMessageTime` | number | Время последнего сообщения, в секундах Unix-времени. |
+| `unreadCount` | number | Число непрочитанных сообщений. |
 | `channelIndex` | number | Индекс канала или `0`. |
-| `peerNodeId` | string | Peer node id для DM или `""`. |
-| `muted` | boolean | Muted flag. |
+| `peerNodeId` | string | Идентификатор собеседника в личном диалоге или `""`. |
+| `muted` | boolean | Отключены ли уведомления чата. |
 
 ### `chat.messages`
 
 Загружает сообщения чата.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
 | `chatType` | string | да | `channel` или `dm`. |
-| `chatKey` | string | да | Channel index string или peer node id. |
-| `limit` | number | нет | 1..200, default `50`. |
-| `beforeDbId` | number | нет | Если > 0, загрузить сообщения до DB id. |
-| `afterDbId` | number | нет | Если > 0 и `beforeDbId == 0`, загрузить сообщения после DB id. |
+| `chatKey` | string | да | Индекс канала строкой или идентификатор собеседника. |
+| `limit` | number | нет | Число сообщений: от 1 до 200, по умолчанию `50`. |
+| `beforeDbId` | number | нет | При значении больше 0 загрузить сообщения с меньшим идентификатором в базе. |
+| `afterDbId` | number | нет | Если значение больше 0 и `beforeDbId == 0`, загрузить сообщения с большим идентификатором в базе. |
 
-Result:
+Результат:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `ownerNodeId` | string | Локальный node id. |
+| `ownerNodeId` | string | Идентификатор радиоустройства, подключённого к серверу. |
 | `items` | `Message[]` | Сообщения. |
 
 ### `chat.markRead`
 
 Помечает чат прочитанным.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `chatType` | string | да |
 | `chatKey` | string | да |
 
-Result: `chat.list`.
+Результат: `chat.list`.
 
 ### `chat.send`
 
 Отправляет сообщение.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
 | `chatType` | string | да | `channel` или `dm`. |
-| `chatKey` | string | да | Channel index string или peer node id. |
+| `chatKey` | string | да | Индекс канала строкой или идентификатор собеседника. |
 | `text` | string | да | Непустой текст. |
-| `replyId` | number | нет | Packet id сообщения-ответа; может быть отрицательным. |
-| `clientRequestId` | string | нет | Idempotency key. Повтор в течение 5 минут возвращает уже созданное сообщение. |
+| `replyId` | number | нет | Идентификатор пакета сообщения, на которое отвечают. Может быть отрицательным. |
+| `clientRequestId` | string | нет | Идентификатор для защиты от повторной отправки. Если повторить запрос с тем же идентификатором в течение 5 минут, сервер вернёт уже созданное сообщение. |
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
 | `message` | `Message` |
 | `chat` | результат `chat.list` |
 
-Ограничение dedup cache: 512 записей, TTL 5 минут.
+Для защиты от повторной отправки сервер хранит до 512 записей. Каждая запись хранится 5 минут.
 
 ### `chat.retry`
 
-Повторяет отправку failed outgoing сообщения.
+Повторно отправляет исходящее сообщение, предыдущая отправка которого завершилась ошибкой.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
 | `chatType` | string | да | `channel` или `dm`. |
-| `chatKey` | string | да | Chat key. |
-| `dbId` | number | условно | DB id сообщения. Нужен `dbId > 0` или `packetId != 0`. |
-| `packetId` | number | условно | Packet id сообщения. |
+| `chatKey` | string | да | Идентификатор чата. |
+| `dbId` | number | условно | Идентификатор сообщения в базе. Нужно указать `dbId > 0` или `packetId != 0`. |
+| `packetId` | number | условно | Идентификатор пакета сообщения. |
 
-Result: как `chat.send`.
+Результат: как `chat.send`.
 
-Ограничения: работает только для failed outgoing сообщений и не поддерживается для MeshCore Companion runtime.
+Повторная отправка доступна только для исходящих сообщений с ошибкой отправки. Для MeshCore Companion этот метод не поддерживается.
 
 ### `chat.react`
 
 Отправляет реакцию на сообщение.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `chatType` | string | да |
 | `chatKey` | string | да |
 | `targetPacketId` | number | да, не `0` |
 | `emoji` | string | да |
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
-| `message` | обновленное target `Message` |
+| `message` | Объект `Message` с добавленной реакцией |
 | `chat` | результат `chat.list` |
 
-Ограничение: реакции не поддерживаются для MeshCore Companion runtime.
+В MeshCore Companion реакции не поддерживаются.
 
 ### `Message`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `fromNodeId` | string | Sender node id. |
-| `toNodeId` | string | Recipient node id; broadcast обычно `!ffffffff`. |
+| `fromNodeId` | string | Идентификатор отправителя. |
+| `toNodeId` | string | Идентификатор получателя; для сообщения всем узлам обычно `!ffffffff`. |
 | `channelIndex` | number | Индекс канала. |
 | `text` | string | Текст. |
-| `timestamp` | number | Unix epoch seconds. |
+| `timestamp` | number | Время сообщения, в секундах Unix-времени. |
 | `outgoing` | boolean | Сообщение отправлено локальным устройством. |
 | `status` | string/null | `SENDING`, `DELIVERED`, `CONFIRMED`, `FAILED`. |
-| `packetId` | number | Meshtastic packet id. |
+| `packetId` | number | Идентификатор пакета Meshtastic. |
 | `errorReason` | string/null | Причина ошибки отправки. |
-| `replyId` | number | Packet id исходного сообщения. |
+| `replyId` | number | Идентификатор пакета сообщения, на которое отвечают. |
 | `replyText` | string/null | Текст исходного сообщения. |
-| `replyToOutgoing` | boolean | Reply target был outgoing. |
-| `hopStart` | number | Исходный hop limit. |
-| `hopLimit` | number | Оставшийся hop limit. |
-| `rxRssi` | number | RSSI. |
-| `rxSnr` | number | SNR. |
-| `senderName` | string | Resolved sender display name. |
+| `replyToOutgoing` | boolean | Было ли сообщение, на которое отвечают, исходящим. |
+| `hopStart` | number | Сколько пересылок через другие узлы было разрешено исходно. |
+| `hopLimit` | number | Сколько пересылок через другие узлы ещё разрешено. |
+| `rxRssi` | number | RSSI — уровень принятого радиосигнала. |
+| `rxSnr` | number | SNR — отношение мощности сигнала к мощности шума. |
+| `senderName` | string | Имя отправителя для отображения. |
 | `viaMqtt` | boolean | Сообщение пришло через MQTT. |
 | `systemMessage` | boolean | Системное сообщение. |
-| `dbId` | number | Локальный DB id. |
+| `dbId` | number | Идентификатор сообщения в локальной базе. |
 | `reactions` | `Reaction[]` | Реакции. |
 
 `Reaction`:
@@ -622,20 +673,22 @@ Result:
 | `errorReason` | string/null |
 | `senderName` | string |
 
-## Node methods
+<a id="node-methods"></a>
+
+## Узлы сети
 
 ### `node.list`
 
-Возвращает nodes выбранного Host-подключения.
+Возвращает узлы сети для выбранного подключения сервера.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
-| `includeFavorites` | boolean | нет | Добавить offline favorites из cache. |
-| `includeIgnored` | boolean | нет | Добавить offline ignored nodes из cache. |
+| `includeFavorites` | boolean | нет | Включить сохранённые избранные узлы, даже если сейчас они недоступны. |
+| `includeIgnored` | boolean | нет | Включить сохранённые игнорируемые узлы, даже если сейчас они недоступны. |
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
@@ -644,29 +697,29 @@ Result:
 
 ### `node.get`
 
-Возвращает один node.
+Возвращает сведения об одном узле.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `nodeId` | string | да |
 
-Result: `{"ownerNodeId":"...","items":[Node]}`.
+Результат: `{"ownerNodeId":"...","items":[Node]}`.
 
 ### `node.traceroute`
 
-Запускает traceroute до node. Результат приходит отдельным event `node.traceroute.result`.
+Запрашивает маршрут до узла — последовательность узлов, через которые проходит сообщение. Результат приходит отдельно, в событии `node.traceroute.result`.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
-| `nodeId` | string | условно | Target node id. |
-| `nodeNum` | number | условно | Target node num. Нужен `nodeId` или non-zero `nodeNum`. |
-| `requestId` | string | нет | Если отсутствует, Host сгенерирует UUID. |
+| `nodeId` | string | условно | Идентификатор узла назначения. |
+| `nodeNum` | number | условно | Номер узла назначения. Нужно указать `nodeId` или ненулевой `nodeNum`. |
+| `requestId` | string | нет | Если не указан, сервер создаст UUID — уникальный идентификатор запроса. |
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
@@ -674,75 +727,75 @@ Result:
 | `targetNodeNum` | number |
 | `targetNodeId` | string |
 | `targetName` | string |
-| `nodeNames` | object map unsigned node num string -> display name |
+| `nodeNames` | JSON-объект: ключ — номер узла без знака, записанный строкой; значение — имя для отображения |
 
-Ограничение: требует protocol handler; недоступно для выбранных runtime-ов, которые не умеют отправлять traceroute.
+Метод доступен, только если обработчик выбранного протокола поддерживает запрос маршрута.
 
 ### `node.refresh`
 
-Запрашивает свежий UserInfo для node.
+Запрашивает у узла обновлённые сведения о пользователе (`UserInfo`).
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `nodeNum` | number | да, не `0` |
 | `includeFavorites` | boolean | нет |
 | `includeIgnored` | boolean | нет |
 
-Result: `node.list` с теми же filter flags.
+Результат соответствует `node.list` с теми же параметрами `includeFavorites` и `includeIgnored`.
 
 ### `node.delete`
 
-Удаляет node из runtime/cache.
+Удаляет узел из данных текущего подключения и сохранённого кэша.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
-| `nodeId` | string | да | Node id. |
-| `nodeNum` | number | нет | Если non-zero, node удаляется из текущего `DeviceState`. |
-| `includeFavorites` | boolean | нет | Передается в result `node.list`. |
-| `includeIgnored` | boolean | нет | Передается в result `node.list`. |
+| `nodeId` | string | да | Идентификатор узла. |
+| `nodeNum` | number | нет | Если указан ненулевой номер, узел удаляется и из текущего `DeviceState`. |
+| `includeFavorites` | boolean | нет | Используется при формировании результата `node.list`. |
+| `includeIgnored` | boolean | нет | Используется при формировании результата `node.list`. |
 
-Result: `node.list`.
+Результат: `node.list`.
 
 ### `node.favorite`
 
-Включает/выключает favorite flag.
+Добавляет узел в избранное или убирает его оттуда.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `nodeId` | string | да |
-| `enabled` | boolean | нет, default `false` |
+| `enabled` | boolean | нет, по умолчанию `false` |
 | `includeFavorites` | boolean | нет |
 | `includeIgnored` | boolean | нет |
 
-Result: `node.list`.
+Результат: `node.list`.
 
 ### `node.ignored`
 
-Включает/выключает ignored flag.
+Включает или отключает игнорирование узла.
 
-Params: как `node.favorite`.
+Параметры: как `node.favorite`.
 
-Result: `node.list`.
+Результат: `node.list`.
 
 ### `Node`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `nodeNum` | number | Java int node number. |
-| `nodeId` | string | Stable id вида `!12345678`. |
+| `nodeNum` | number | Номер узла в формате Java `int`. |
+| `nodeId` | string | Постоянный идентификатор вида `!12345678`. |
 | `longName` | string |
 | `shortName` | string |
 | `latitude` | number |
 | `longitude` | number |
 | `altitude` | number |
 | `snr` | number |
-| `lastHeard` | number | Unix epoch seconds или runtime value. |
+| `lastHeard` | number | Время последнего приёма, в секундах Unix-времени, либо значение, предоставленное обработчиком протокола. |
 | `batteryLevel` | number |
 | `externallyPowered` | boolean |
 | `voltage` | number |
@@ -757,73 +810,77 @@ Result: `node.list`.
 | `channel` | number |
 | `role` | string |
 | `hwModel` | string |
-| `publicKey` | string | Base64 public key или `""`. |
+| `publicKey` | string | Открытый ключ в Base64 или `""`. |
 | `unmessagable` | boolean |
 | `licensed` | boolean |
 | `favorite` | boolean |
 | `ignored` | boolean |
 
-## Telemetry methods
+<a id="telemetry-methods"></a>
+
+## Телеметрия
 
 ### `telemetry.dashboard`
 
-Возвращает telemetry dashboard для node.
+Возвращает данные для экрана телеметрии выбранного узла.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
-| `nodeId` | string | нет | Если blank, используется локальный node id Host-подключения. |
-| `sinceEpoch` | number | нет | Нижняя граница Unix epoch seconds, default `0`. |
-| `maxFutureTs` | number | нет | Верхняя граница Unix epoch seconds. Если `<= 0`, Host использует `now + 300`. |
+| `nodeId` | string | нет | Если не указан или содержит только пробелы, используется идентификатор радиоустройства, подключённого к серверу. |
+| `sinceEpoch` | number | нет | Начало периода, в секундах Unix-времени. По умолчанию `0`. |
+| `maxFutureTs` | number | нет | Конец периода, в секундах Unix-времени. При значении `<= 0` сервер использует текущее время плюс 300 секунд. |
 
-Result:
+Результат:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `ownerNodeId` | string | Локальный node id. |
-| `nodeId` | string | Node id, для которого загружена telemetry. |
-| `entries` | `TelemetryEntry[]` | Telemetry выбранного node. |
-| `qualityEntries` | `TelemetryEntry[]` | Quality telemetry по сети. |
+| `ownerNodeId` | string | Идентификатор радиоустройства, подключённого к серверу. |
+| `nodeId` | string | Идентификатор узла, для которого получена телеметрия. |
+| `entries` | `TelemetryEntry[]` | Телеметрия выбранного узла. |
+| `qualityEntries` | `TelemetryEntry[]` | Данные о качестве связи в сети. |
 
-`TelemetryEntry` сериализуется Gson-ом из Java model. Текущие поля:
+Объект `TelemetryEntry` преобразуется в JSON библиотекой Gson из одноимённой Java-модели. Поля сгруппированы по назначению:
 
-- core: `timestamp`, `nodeId`, `telemetryVariant`;
-- device metrics: `batteryLevel`, `externallyPowered`, `voltage`, `channelUtilization`, `airUtilTx`, `deviceUptimeSeconds`;
-- environment metrics: `temperature`, `relativeHumidity`, `barometricPressure`, `gasResistance`, `environmentVoltage`, `environmentCurrent`, `iaq`, `distance`, `lux`, `whiteLux`, `irLux`, `uvLux`, `windDirection`, `windSpeed`, `weight`, `windGust`, `windLull`, `radiation`, `rainfall1h`, `rainfall24h`, `soilMoisture`, `soilTemperature`, `oneWireTemperatures`;
-- air quality metrics: `pm10Standard`, `pm25Standard`, `pm100Standard`, `pm10Environmental`, `pm25Environmental`, `pm100Environmental`, `particles03um`, `particles05um`, `particles10um`, `particles25um`, `particles50um`, `particles100um`, `co2`, `co2Temperature`, `co2Humidity`, `formFormaldehyde`, `formHumidity`, `formTemperature`, `pm40Standard`, `particles40um`, `pmTemperature`, `pmHumidity`, `pmVocIdx`, `pmNoxIdx`, `particlesTps`;
-- power metrics: `ch1Voltage`..`ch8Voltage`, `ch1Current`..`ch8Current`;
-- local stats: `numPacketsRx`, `numPacketsRxBad`, `numRxDupe`, `numPacketsTx`, `numTxDropped`, `numTxRelay`, `numTxRelayCanceled`, `localUptimeSeconds`, `numOnlineNodes`, `numTotalNodes`, `heapTotalBytes`, `heapFreeBytes`, `noiseFloor`;
-- health metrics: `healthHeartBpm`, `healthSpO2`, `healthTemperature`;
-- host metrics: `hostUptimeSeconds`, `hostFreememBytes`, `hostDiskfree1Bytes`, `hostDiskfree2Bytes`, `hostDiskfree3Bytes`, `hostLoad1`, `hostLoad5`, `hostLoad15`, `hostUserString`;
-- traffic stats: `trafficPacketsInspected`, `trafficPositionDedupDrops`, `trafficNodeinfoCacheHits`, `trafficRateLimitDrops`, `trafficUnknownPacketDrops`, `trafficHopExhaustedPackets`, `trafficRouterHopsPreserved`;
-- RF/hops: `rxSnr`, `rxRssi`, `hopStart`, `hopLimit`.
+- основные сведения: `timestamp`, `nodeId`, `telemetryVariant`;
+- показатели устройства: `batteryLevel`, `externallyPowered`, `voltage`, `channelUtilization`, `airUtilTx`, `deviceUptimeSeconds`;
+- показания датчиков окружающей среды: `temperature`, `relativeHumidity`, `barometricPressure`, `gasResistance`, `environmentVoltage`, `environmentCurrent`, `iaq`, `distance`, `lux`, `whiteLux`, `irLux`, `uvLux`, `windDirection`, `windSpeed`, `weight`, `windGust`, `windLull`, `radiation`, `rainfall1h`, `rainfall24h`, `soilMoisture`, `soilTemperature`, `oneWireTemperatures`;
+- показатели качества воздуха: `pm10Standard`, `pm25Standard`, `pm100Standard`, `pm10Environmental`, `pm25Environmental`, `pm100Environmental`, `particles03um`, `particles05um`, `particles10um`, `particles25um`, `particles50um`, `particles100um`, `co2`, `co2Temperature`, `co2Humidity`, `formFormaldehyde`, `formHumidity`, `formTemperature`, `pm40Standard`, `particles40um`, `pmTemperature`, `pmHumidity`, `pmVocIdx`, `pmNoxIdx`, `particlesTps`;
+- показатели питания: `ch1Voltage`..`ch8Voltage`, `ch1Current`..`ch8Current`;
+- статистика устройства: `numPacketsRx`, `numPacketsRxBad`, `numRxDupe`, `numPacketsTx`, `numTxDropped`, `numTxRelay`, `numTxRelayCanceled`, `localUptimeSeconds`, `numOnlineNodes`, `numTotalNodes`, `heapTotalBytes`, `heapFreeBytes`, `noiseFloor`;
+- показатели здоровья: `healthHeartBpm`, `healthSpO2`, `healthTemperature`;
+- показатели компьютера: `hostUptimeSeconds`, `hostFreememBytes`, `hostDiskfree1Bytes`, `hostDiskfree2Bytes`, `hostDiskfree3Bytes`, `hostLoad1`, `hostLoad5`, `hostLoad15`, `hostUserString`;
+- статистика обработки пакетов: `trafficPacketsInspected`, `trafficPositionDedupDrops`, `trafficNodeinfoCacheHits`, `trafficRateLimitDrops`, `trafficUnknownPacketDrops`, `trafficHopExhaustedPackets`, `trafficRouterHopsPreserved`;
+- радиосигнал и число пересылок: `rxSnr`, `rxRssi`, `hopStart`, `hopLimit`.
 
-## Packet monitor methods
+<a id="packet-monitor-methods"></a>
+
+## Журнал пакетов
 
 ### `packetMonitor.page`
 
-Возвращает страницу LoRa packet monitor.
+Возвращает порцию записей журнала LoRa-пакетов.
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. | Описание |
+| Поле | Тип | Обязательно | Описание |
 |------|-----|-------|----------|
-| `request` | string | нет | `older`, `newer` или любое другое/blank для latest. |
-| `query` | `PacketQuery` | нет | Filter query. |
-| `cursor` | `PageCursor` | нет | Cursor для older/newer. |
-| `limit` | number | нет | 1..10000, default `200`. |
+| `request` | string | нет | `older` — более старые записи, `newer` — более новые. Любое другое значение или пустая строка — последние записи. |
+| `query` | `PacketQuery` | нет | Условия отбора записей. |
+| `cursor` | `PageCursor` | нет | Позиция в журнале, от которой отсчитываются старые или новые записи. |
+| `limit` | number | нет | Число записей: от 1 до 10000, по умолчанию `200`. |
 
 `PacketQuery`:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `direction` | string | `INCOMING`, `OUTGOING`, `INTERNAL` или отсутствует. |
-| `packetType` | string | Packet type filter. |
-| `transportMechanism` | string | Transport filter. |
-| `searchText` | string | Full-text filter. |
-| `capturedAtFromMillis` | number | Lower capturedAt bound. |
-| `capturedAtToMillis` | number | Upper capturedAt bound. |
+| `packetType` | string | Фильтр по типу пакета. |
+| `transportMechanism` | string | Фильтр по способу передачи. |
+| `searchText` | string | Текст для поиска в записях. |
+| `capturedAtFromMillis` | number | Нижняя граница времени записи `capturedAt`, в миллисекундах. |
+| `capturedAtToMillis` | number | Верхняя граница времени записи `capturedAt`, в миллисекундах. |
 
 `PageCursor`:
 
@@ -832,7 +889,7 @@ Params:
 | `capturedAt` | number |
 | `id` | number |
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
@@ -844,15 +901,15 @@ Result:
 
 ### `packetMonitor.types`
 
-Params: `{"query": PacketQuery}`.
+Параметры: `{"query": PacketQuery}`.
 
-Result: `{"items":["TEXT_MESSAGE_APP","POSITION_APP",...]}`.
+Результат: `{"items":["TEXT_MESSAGE_APP","POSITION_APP",...]}`.
 
 ### `packetMonitor.counts`
 
-Params: `{"query": PacketQuery}`.
+Параметры: `{"query": PacketQuery}`.
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
@@ -861,137 +918,139 @@ Result:
 
 ### `packetMonitor.captureState`
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"enabled": boolean}`.
+Результат: `{"enabled": boolean}`.
 
 ### `packetMonitor.start`
 
-Включает capture.
+Включает запись пакетов в журнал.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"enabled": true}`.
+Результат: `{"enabled": true}`.
 
 ### `packetMonitor.stop`
 
-Выключает capture.
+Отключает запись новых пакетов в журнал.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"enabled": false}`.
+Результат: `{"enabled": false}`.
 
 ### `packetMonitor.clear`
 
-Очищает packet monitor.
+Очищает журнал пакетов.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"matching":0,"total":0}`.
+Результат: `{"matching":0,"total":0}`.
 
 ### `PacketLogEntry`
 
-Сериализуется Gson-ом из immutable Java model:
+Запись журнала. При передаче библиотека Gson преобразует в JSON поля неизменяемого Java-объекта:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `id` | number | DB id. |
+| `id` | number | Идентификатор записи в базе. |
 | `ownerNodeId` | string |
-| `capturedAt` | number | Unix epoch milliseconds. |
+| `capturedAt` | number | Время записи, в миллисекундах Unix-времени. |
 | `direction` | string | `INCOMING`, `OUTGOING`, `INTERNAL`. |
 | `packetType` | string |
 | `transportMechanism` | string |
 | `fromNode` | string |
 | `toNode` | string |
 | `payloadText` | string |
-| `packetBytes` | byte array | Gson byte-array encoding. |
+| `packetBytes` | Массив байтов | JSON-массив чисел в формате, который создаёт Gson для Java-массива `byte[]`. |
 
-## Lua methods
+<a id="lua-methods"></a>
 
-Lua RPC управляет скриптами MeshApp IDE на Host. `scriptId` обязателен и должен быть `> 0` во всех методах, где он указан.
+## Скрипты Lua
+
+Методы `lua.*` управляют скриптами MeshApp IDE на сервере. Во всех методах, принимающих `scriptId`, этот параметр обязателен и должен быть больше 0.
 
 ### `lua.list`
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"items": LuaScript[]}`.
+Результат: `{"items": LuaScript[]}`.
 
 ### `lua.get`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: `{"script": LuaScript}`.
+Результат: `{"script": LuaScript}`.
 
 ### `lua.draft`
 
-Создает draft script.
+Создаёт черновик скрипта.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"script": LuaScript}`.
+Результат: `{"script": LuaScript}`.
 
 ### `lua.createDefault`
 
-Создает script со значениями по умолчанию.
+Создаёт скрипт со значениями по умолчанию.
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `{"script": LuaScript}`.
+Результат: `{"script": LuaScript}`.
 
 ### `lua.create`
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `name` | string | да |
 | `code` | string | нет |
 | `enabled` | boolean | нет |
 | `icon` | string | нет |
 | `nodeId` | string | нет |
-| `botType` | string | нет, default `AIR_BOT` |
+| `botType` | string | нет, по умолчанию `AIR_BOT` |
 | `automationName` | string | нет |
 | `description` | string | нет |
 | `author` | string | нет |
 
-Result: `{"script": LuaScript}`.
+Результат: `{"script": LuaScript}`.
 
 ### `lua.save`
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `scriptId` | number | да |
 | `name` | string | да |
 | `code` | string | нет |
 | `enabled` | boolean | нет |
 
-Result: `{"script": LuaScript}`.
+Результат: `{"script": LuaScript}`.
 
 ### `lua.saveSettings`
 
-Params: `scriptId` + поля `lua.create`, кроме `code`.
+Параметры: `scriptId` + поля `lua.create`, кроме `code`.
 
-Result: `{"script": LuaScript}`.
+Результат: `{"script": LuaScript}`.
 
 ### `lua.delete`
 
-Останавливает script и удаляет его.
+Останавливает и удаляет скрипт.
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: `lua.list`.
+Результат: `lua.list`.
 
 ### `lua.importJson`
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `json` | string | да |
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
@@ -1000,25 +1059,25 @@ Result:
 
 ### `lua.importExport`
 
-Params:
+Параметры:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `exportFile` | object | Gson-сериализация `LuaScriptService.LuaScriptExportFile`. |
+| `exportFile` | object | Объект `LuaScriptService.LuaScriptExportFile`, преобразованный в JSON библиотекой Gson. |
 
-Result: как `lua.importJson`.
+Результат: как `lua.importJson`.
 
 ### `lua.export`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: `{"json": string}`.
+Результат: `{"json": string}`.
 
 ### `lua.runningState`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result:
+Результат:
 
 | Поле | Тип |
 |------|-----|
@@ -1028,17 +1087,17 @@ Result:
 
 ### `lua.run`
 
-Запускает script. Для `EXTENSION` используется remote form bridge.
+Запускает скрипт. Если его тип — `EXTENSION`, форма расширения открывается на клиенте, а действия пользователя передаются скрипту на сервере.
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.automation.run`
 
-Запускает automation bot command.
+Запускает команду бота автоматизации.
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
@@ -1057,13 +1116,13 @@ Params:
 | `argumentTokens` | string[] |
 | `requestId` | string |
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.ui.nodeSelection`
 
-Доставляет в runtime результат выбора node для ранее отправленного event `lua.ui.nodePick.request`.
+Передаёт скрипту результат выбора узла пользователем. Это ответ на ранее полученное событие `lua.ui.nodePick.request`.
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
@@ -1074,88 +1133,88 @@ Params:
 | `selected` | boolean |
 | `chatType` | string |
 | `chatKey` | string |
-| `node` | `Node`, optional |
+| `node` | `Node`, необязательно |
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.form.event`
 
-Доставляет событие extension form component.
+Передаёт скрипту действие пользователя с элементом формы расширения.
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
 | `scriptId` | number |
 | `componentId` | string |
 | `type` | string |
-| `value` | any |
+| `value` | Любое JSON-значение |
 | `text` | string |
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.form.valueResult`
 
-Ответ Remote client на Host-команду `lua.form.command` с `command="value"`.
+Передаёт серверу значение элемента формы. Клиент вызывает этот метод в ответ на событие `lua.form.command` с `command="value"`.
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
 | `scriptId` | number |
 | `requestId` | string |
-| `value` | any |
+| `value` | Любое JSON-значение |
 
-Result: `{}`.
+Результат: `{}`.
 
 ### `lua.debug`
 
-Запускает script в debug-режиме.
+Запускает скрипт в режиме отладки.
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
 | `scriptId` | number |
 | `breakpoints` | number[] |
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.stop`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.debugContinue`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.debugStep`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: running state.
+Результат: состояние выполнения скрипта, как у `lua.runningState`.
 
 ### `lua.debugSnapshot`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result:
+Результат:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `snapshot` | `LuaDebugSnapshot`, optional | Отсутствует, если snapshot нет. |
+| `snapshot` | `LuaDebugSnapshot`, необязательно | Состояние отладки; поле отсутствует, если таких данных нет. |
 
-`LuaDebugSnapshot`: `scriptId`, `line`, `reason`, `variables`. `variables[]`: `scope`, `name`, `value`.
+`LuaDebugSnapshot` содержит поля `scriptId`, `line`, `reason` и `variables`: идентификатор скрипта, строку остановки, причину остановки и переменные. У каждого элемента `variables[]` есть область видимости `scope`, имя `name` и значение `value`.
 
 ### `lua.kv.list`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result:
+Результат:
 
 ```json
 {
@@ -1167,27 +1226,27 @@ Result:
 
 ### `lua.kv.set`
 
-Params:
+Параметры:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `scriptId` | number | да |
 | `key` | string | да |
 | `value` | string | нет |
 
-Result: `{}`.
+Результат: `{}`.
 
 ### `lua.kv.delete`
 
-Params: `{"scriptId": number, "key": "..."}`.
+Параметры: `{"scriptId": number, "key": "..."}`.
 
-Result: `{"deleted": boolean}`.
+Результат: `{"deleted": boolean}`.
 
 ### `lua.kv.clear`
 
-Params: `{"scriptId": number}`.
+Параметры: `{"scriptId": number}`.
 
-Result: `{}`.
+Результат: `{}`.
 
 ### `LuaScript`
 
@@ -1210,30 +1269,32 @@ Result: `{}`.
 | `lastRunAt` | number |
 | `lastStatus` | string |
 | `lastError` | string/null |
-| `running` | boolean | Только когда result собран с runtime service. |
-| `paused` | boolean | Только когда result собран с runtime service. |
+| `running` | boolean | Передаётся, только если при формировании ответа запрашивалось состояние выполнения скрипта. |
+| `paused` | boolean | Передаётся, только если при формировании ответа запрашивалось состояние выполнения скрипта. |
 
 ### `LuaFormComponentSpec`
 
-Extension form spec сериализуется как JSON object:
+Описание элемента формы расширения передаётся JSON-объектом со следующими полями:
 
 `id`, `type`, `parentId`, `text`, `prompt`, `value`, `items`, `min`, `max`, `disabled`, `visible`, `style`, `orientation`, `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `readOnly`, `wrap`, `monospace`, `grow`, `rows`, `chartType`, `xLabel`, `yLabel`, `xType`, `legend`, `symbols`, `series`.
 
-`series[]`: `name`, `color`, `points`; `points[]`: `x`, `y`.
+`series[]` описывает ряды данных графика: имя `name`, цвет `color` и точки `points`. Каждая точка в `points[]` содержит координаты `x` и `y`.
 
-## Settings methods
+<a id="settings-methods"></a>
 
-`settings.*` работают с локальным node выбранного Host-подключения. Многие методы предварительно пытаются получить session passkey. Большинство методов возвращают settings snapshot.
+## Настройки подключённого устройства
+
+Методы `settings.*` работают с радиоустройством, к которому сервер подключён через выбранный профиль. Перед многими операциями MeshApp пытается получить у устройства временный ключ административного доступа (`session passkey`). Большинство методов возвращают `AdminSnapshot` — объект с текущими настройками устройства.
 
 ### `settings.snapshot`
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `AdminSnapshot` для локального Host node.
+Результат: `AdminSnapshot` для радиоустройства, подключённого к серверу.
 
 ### `settings.saveOwner`
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
@@ -1241,23 +1302,23 @@ Params:
 | `shortName` | string |
 | `isLicensed` | boolean |
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `settings.saveConfigChanges`
 
-Params:
+Параметры:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `configs` | string[] | Base64 `ConfigProtos.Config`. |
-| `moduleConfigs` | string[] | Base64 `ModuleConfigProtos.ModuleConfig`. |
-| `channels` | string[] | Base64 `ChannelProtos.Channel`. |
+| `configs` | string[] | Двоичное сообщение `ConfigProtos.Config`, записанное в Base64. |
+| `moduleConfigs` | string[] | Двоичное сообщение `ModuleConfigProtos.ModuleConfig`, записанное в Base64. |
+| `channels` | string[] | Двоичное сообщение `ChannelProtos.Channel`, записанное в Base64. |
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `settings.setFixedPosition`
 
-Params:
+Параметры:
 
 | Поле | Тип |
 |------|-----|
@@ -1265,128 +1326,130 @@ Params:
 | `lonDegrees` | number |
 | `altMeters` | number |
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `settings.removeFixedPosition`
 
-Params: `{}`.
+Параметры: `{}`.
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `settings.setRingtone`
 
-Params: `{"ringtone": string}`.
+Параметры: `{"ringtone": string}`.
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `settings.command`
 
-Params:
+Параметры:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `command` | string | `reboot`, `shutdown`, `syncTime`, `enterDfuMode`. |
-| `delaySeconds` | number | Для `reboot` и `shutdown`, default `0`. |
+| `delaySeconds` | number | Задержка для `reboot` и `shutdown`, по умолчанию `0`. |
 | `epochSeconds` | number | Для `syncTime`. |
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
-## Remote admin methods
+<a id="remote-admin-methods"></a>
 
-`admin.*` отправляют Meshtastic remote admin packets к другому node через выбранное Host-подключение.
+## Настройки других узлов сети
+
+Методы `admin.*` отправляют команды администрирования Meshtastic другому узлу сети через выбранное подключение сервера.
 
 Общие требования:
 
-- выбранное Host-подключение должно иметь `ProtocolHandler`;
-- target задается через `nodeId` или non-zero `nodeNum`;
-- target не может быть локальным Host node;
-- target node должен иметь public key.
+- у выбранного подключения сервера должен быть обработчик `ProtocolHandler`;
+- узел назначения задаётся через `nodeId` или ненулевой `nodeNum`;
+- узел назначения должен отличаться от радиоустройства, к которому подключён сервер;
+- для узла назначения должен быть известен открытый ключ.
 
-Общие target params:
+Во всех этих методах узел назначения задаётся следующими параметрами:
 
-| Поле | Тип | Обяз. |
+| Поле | Тип | Обязательно |
 |------|-----|-------|
 | `nodeId` | string | условно |
 | `nodeNum` | number | условно |
 
 ### `admin.load`
 
-Params: target params.
+Параметры: `nodeId` или `nodeNum`, как указано выше.
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `admin.requestConfig`
 
-Params:
+Параметры:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `nodeId`/`nodeNum` | string/number | Target. |
-| `type` | string | Имя enum `AdminProtos.AdminMessage.ConfigType`, кроме `UNRECOGNIZED`. |
+| `nodeId`/`nodeNum` | string/number | Идентификатор или номер узла назначения. |
+| `type` | string | Имя значения из перечисления `AdminProtos.AdminMessage.ConfigType`, кроме `UNRECOGNIZED`. |
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `admin.requestModuleConfig`
 
-Params:
+Параметры:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `nodeId`/`nodeNum` | string/number | Target. |
-| `type` | string | Имя enum `AdminProtos.AdminMessage.ModuleConfigType`, кроме `UNRECOGNIZED`. |
+| `nodeId`/`nodeNum` | string/number | Идентификатор или номер узла назначения. |
+| `type` | string | Имя значения из перечисления `AdminProtos.AdminMessage.ModuleConfigType`, кроме `UNRECOGNIZED`. |
 
-Result: `AdminSnapshot`.
+Результат: `AdminSnapshot`.
 
 ### `admin.saveOwner`
 
-Params: target params + `longName`, `shortName`, `isLicensed`.
+Параметры: `nodeId` или `nodeNum`, а также `longName`, `shortName`, `isLicensed`.
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.saveConfigChanges`
 
-Params: target params + `configs`, `moduleConfigs`, `channels` как в `settings.saveConfigChanges`.
+Параметры: `nodeId` или `nodeNum`, а также `configs`, `moduleConfigs` и `channels`, как в `settings.saveConfigChanges`.
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.setFixedPosition`
 
-Params: target params + `latDegrees`, `lonDegrees`, `altMeters`.
+Параметры: `nodeId` или `nodeNum`, а также `latDegrees`, `lonDegrees`, `altMeters`.
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.removeFixedPosition`
 
-Params: target params.
+Параметры: `nodeId` или `nodeNum`.
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.setRingtone`
 
-Params: target params + `ringtone`.
+Параметры: `nodeId` или `nodeNum`, а также `ringtone`.
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.setCannedMessages`
 
-Params: target params + `messages`.
+Параметры: `nodeId` или `nodeNum`, а также `messages`.
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.command`
 
-Params:
+Параметры:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `nodeId`/`nodeNum` | string/number | Target. |
+| `nodeId`/`nodeNum` | string/number | Идентификатор или номер узла назначения. |
 | `command` | string | См. список ниже. |
 | `delaySeconds` | number | Для `reboot`/`shutdown`. |
 | `epochSeconds` | number | Для `syncTime`. |
-| `location` | string | Для backup commands: enum `AdminProtos.AdminMessage.BackupLocation`, кроме `UNRECOGNIZED`. |
+| `location` | string | Место хранения резервной копии для команд работы с ней. Значение из перечисления `AdminProtos.AdminMessage.BackupLocation`, кроме `UNRECOGNIZED`. |
 | `preserveFavorites` | boolean | Для `resetNodeDb`. |
 
-Commands:
+Доступные команды:
 
 - `reboot`
 - `shutdown`
@@ -1399,17 +1462,17 @@ Commands:
 - `resetNodeDb`
 - `enterDfuMode`
 
-Result: `{"ok": true}`.
+Результат: `{"ok": true}`.
 
 ### `admin.refreshConnectionStatus`
 
-Params: target params.
+Параметры: `nodeId` или `nodeNum`.
 
-Result: `AdminSnapshot` плюс поле:
+Результат: `AdminSnapshot` плюс поле:
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `adminMessage` | string | Base64 `AdminProtos.AdminMessage`. |
+| `adminMessage` | string | Двоичное сообщение `AdminProtos.AdminMessage`, записанное в Base64. |
 
 ### `AdminSnapshot`
 
@@ -1417,18 +1480,18 @@ Result: `AdminSnapshot` плюс поле:
 |------|-----|----------|
 | `targetNodeNum` | number |
 | `node` | `Node` |
-| `owner` | string | Base64 `MeshProtos.User`. |
-| `deviceMetadata` | string | Base64 `MeshProtos.DeviceMetadata`. |
-| `configs` | string[] | Base64 `ConfigProtos.Config`. |
-| `moduleConfigs` | string[] | Base64 `ModuleConfigProtos.ModuleConfig`. |
-| `channels` | string[] | Base64 `ChannelProtos.Channel`. |
+| `owner` | string | Двоичное сообщение `MeshProtos.User`, записанное в Base64. |
+| `deviceMetadata` | string | Двоичное сообщение `MeshProtos.DeviceMetadata`, записанное в Base64. |
+| `configs` | string[] | Двоичное сообщение `ConfigProtos.Config`, записанное в Base64. |
+| `moduleConfigs` | string[] | Двоичное сообщение `ModuleConfigProtos.ModuleConfig`, записанное в Base64. |
+| `channels` | string[] | Двоичное сообщение `ChannelProtos.Channel`, записанное в Base64. |
 | `channelCatalogReady` | boolean |
 | `ringtone` | string |
 | `ringtoneLoaded` | boolean |
 | `cannedMessages` | string |
 | `cannedMessagesLoaded` | boolean |
-| `uiConfig` | string | Base64 `DeviceUIProtos.DeviceUIConfig`. |
-| `connectionStatus` | string | Base64 `ConnStatusProtos.DeviceConnectionStatus`. |
+| `uiConfig` | string | Двоичное сообщение `DeviceUIProtos.DeviceUIConfig`, записанное в Base64. |
+| `connectionStatus` | string | Двоичное сообщение `ConnStatusProtos.DeviceConnectionStatus`, записанное в Base64. |
 | `queryStatuses` | `QueryStatus[]` |
 
 `QueryStatus`:
@@ -1439,13 +1502,15 @@ Result: `AdminSnapshot` плюс поле:
 | `state` | string | `SENT`, `RECEIVED`, `FAILED`. |
 | `detail` | string |
 
-## Host events
+<a id="host-events"></a>
+
+## События сервера
 
 ### `message.incoming`
 
-Публикуется при входящем сообщении. Remote runtime использует его для desktop notification и unread indicator.
+Сервер отправляет это событие при получении сообщения. Клиент использует его, чтобы показать системное уведомление и отметить непрочитанное сообщение.
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
@@ -1457,22 +1522,22 @@ Payload:
 
 ### `message.changed`
 
-Публикуется при non-notification изменении чата, например реакции или metadata.
+Сервер отправляет это событие, когда данные чата изменились без уведомления о новом сообщении, например при добавлении реакции или изменении сведений о сообщении.
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
 | `chatType` | string |
 | `chatKey` | string |
 | `targetPacketId` | number |
-| `message` | `Message`, optional |
+| `message` | `Message`, необязательно |
 
 ### `message.status`
 
-Публикуется при изменении delivery status outgoing сообщения.
+Сервер отправляет это событие при изменении статуса доставки исходящего сообщения.
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
@@ -1485,7 +1550,7 @@ Payload:
 
 ### `node.traceroute.result`
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
@@ -1496,40 +1561,40 @@ Payload:
 | `targetName` | string |
 | `responseFromNodeNum` | number |
 | `responseFromNodeId` | string |
-| `routeData` | string, Base64 `MeshProtos.RouteDiscovery` |
+| `routeData` | Строка с двоичным сообщением `MeshProtos.RouteDiscovery`, записанным в Base64 |
 | `formattedText` | string |
-| `timestamp` | number, Unix epoch seconds |
-| `nodeNames` | object map unsigned node num string -> display name |
+| `timestamp` | Число секунд Unix-времени |
+| `nodeNames` | JSON-объект: ключ — номер узла без знака, записанный строкой; значение — имя для отображения |
 
 ### `packet.monitor.logged`
 
-Payload: `{"entry": PacketLogEntry}`.
+Данные события (`payload`): `{"entry": PacketLogEntry}`.
 
 ### `packet.monitor.capture`
 
-Payload: `{"enabled": boolean}`.
+Данные события (`payload`): `{"enabled": boolean}`.
 
 ### `packet.monitor.cleared`
 
-Payload: `{}`.
+Данные события (`payload`): `{}`.
 
 ### `lua.runtime.event`
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
 | `type` | string: `INFO`, `OUTPUT`, `WARNING`, `ERROR`, `STARTED`, `STOPPED`, `UI_BOT_NOTICE`, `DEBUG_PAUSED`, `DEBUG_RESUMED` |
 | `scriptId` | number |
 | `message` | string |
-| `errorMessage` | string, optional |
-| `payload` | object, optional; для `UI_BOT_NOTICE` это `LuaUiBotNotice` |
+| `errorMessage` | string, необязательно |
+| `payload` | object, необязательно; для `UI_BOT_NOTICE` это `LuaUiBotNotice` |
 
 `LuaUiBotNotice`: `scriptId`, `source`, `name`, `chatType`, `chatKey`, `text`.
 
 ### `lua.ui.nodePick.request`
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
@@ -1542,11 +1607,11 @@ Payload:
 | `chatType` | string |
 | `chatKey` | string |
 
-Remote client должен ответить методом `lua.ui.nodeSelection`.
+Клиент должен передать выбор пользователя методом `lua.ui.nodeSelection`.
 
 ### `lua.form.command`
 
-Payload:
+Данные события (`payload`):
 
 | Поле | Тип |
 |------|-----|
@@ -1556,15 +1621,17 @@ Payload:
 | `componentId` | string |
 | `title` | string |
 | `script` | `LuaScript` |
-| `spec` | `LuaFormComponentSpec`, optional |
+| `spec` | `LuaFormComponentSpec`, необязательно |
 
-Для `command="value"` Remote client должен вызвать `lua.form.valueResult` с тем же `requestId`. Текущая реализация remote form bridge проверяет availability через direct server state, поэтому фактическая доступность extension forms зависит от активного host endpoint.
+Если `command="value"`, клиент должен вернуть значение методом `lua.form.valueResult`, указав тот же `requestId`. В текущей реализации доступность удалённых форм проверяется по состоянию прямого RPC-сервера. Поэтому возможность работы с формами расширений зависит от того, какое соединение с сервером активно.
 
 ## Примеры
 
-### Request/response
+<a id="requestresponse"></a>
 
-Plaintext RPC envelope до encryption:
+### Запрос и ответ
+
+Содержимое запроса до шифрования:
 
 ```json
 {
@@ -1575,7 +1642,7 @@ Plaintext RPC envelope до encryption:
 }
 ```
 
-Response:
+Ответ:
 
 ```json
 {
@@ -1592,7 +1659,9 @@ Response:
 }
 ```
 
-### Unknown method
+<a id="unknown-method"></a>
+
+### Вызов неизвестного метода
 
 ```json
 {
@@ -1606,9 +1675,11 @@ Response:
 }
 ```
 
-### Chat send
+<a id="chat-send"></a>
 
-Request params:
+### Отправка сообщения в чат
+
+Параметры запроса:
 
 ```json
 {
@@ -1620,7 +1691,7 @@ Request params:
 }
 ```
 
-Result shape:
+Структура результата:
 
 ```json
 {
@@ -1644,9 +1715,11 @@ Result shape:
 }
 ```
 
-### Direct encrypted line
+<a id="direct-encrypted-line"></a>
 
-После `auth_ok` фактическая TCP-строка уже не содержит JSON:
+### Зашифрованная строка TCP
+
+После подтверждения `auth_ok` по TCP передаётся уже зашифрованная строка, а не исходный JSON:
 
 ```text
 enc1_xs3B9XjglG8FjQg4N0rQLj2r8eOJlYkq7H...
@@ -1654,9 +1727,9 @@ enc1_xs3B9XjglG8FjQg4N0rQLj2r8eOJlYkq7H...
 
 ## Совместимость
 
-- Новые methods добавляются только через явную регистрацию в `RpcMethodRegistry`.
-- Unknown methods всегда должны восприниматься client-side как `METHOD_NOT_FOUND`.
-- Клиенты должны игнорировать неизвестные поля в result/event payloads.
-- Enum-поля нужно обрабатывать tolerant parsing: новая версия Host может отправить значение, которого старый client не знает.
-- Для protobuf payloads контрактом является Base64 от бинарного protobuf, а не JSON protobuf mapping.
-- Remote RPC profile обязан использовать `ProtocolType.REMOTE_RPC`; `ConnectionManager` отклонит другой protocol для `ConnectionType.REMOTE_RPC`.
+- Новый метод становится доступен клиентам только после явной регистрации в `RpcMethodRegistry`.
+- Ответ `METHOD_NOT_FOUND` означает, что сервер не поддерживает запрошенный метод. Клиент должен уметь обработать такую ситуацию.
+- Клиент должен игнорировать неизвестные поля в результате запроса и в данных события.
+- При чтении перечислений нужно учитывать неизвестные значения: новая версия сервера может отправить значение, которого старый клиент ещё не знает.
+- Сообщения Protobuf передаются как двоичные данные в Base64, а не как JSON-представление Protobuf.
+- У профиля RPC должен быть протокол `ProtocolType.REMOTE_RPC`. `ConnectionManager` отклоняет другие протоколы для подключения типа `ConnectionType.REMOTE_RPC`.

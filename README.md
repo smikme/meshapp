@@ -21,12 +21,7 @@
   </a>
 </p>
 
-<p align="center">
-  Main development platform:
-  <a href="https://github.com/smikme/meshapp">github.com/smikme/meshapp</a>
-</p>
-
-[Installation](#installation)
+[Installation](#installation) · [Command-Line Launch](#command-line-launch)
 
 <div align="right">
 
@@ -62,15 +57,12 @@ Ready-made packages are published on the [GitHub Releases](https://github.com/sm
 - Debian / Ubuntu: download the `.deb` package and install it with `apt` or your package manager.
 - Linux AppImage: download the `.AppImage`, make it executable, and run it.
 
-Download the `.flatpak` bundle from GitHub Releases. Install or update it locally (replace the filename with the downloaded version):
+Download the `.flatpak` package from GitHub Releases. It requires Flatpak and the `org.freedesktop.Platform//25.08` runtime to be installed. Install the downloaded file and start the app (replace the filename with yours):
 
 ```bash
-flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub org.freedesktop.Platform//25.08
 flatpak install --user ./MeshApp-v2.4.0-linux-x86_64.flatpak
 flatpak run app.privatepractice.meshapp
 ```
-
 
 ---
 
@@ -351,6 +343,9 @@ cd meshapp
 
 # Terminal mode with a temporary TCP profile
 ./gradlew runTerminal --args="--host 192.168.1.10 --protocol meshtastic"
+
+# Headless RPC server
+./gradlew runRpcServer --args="--print-rpc-key"
 ```
 
 ### Connecting to a Device
@@ -379,6 +374,32 @@ On some distributions the group is named `uucp` or `lock`; use the group shown b
 The MeshApp `.deb` package installs udev rules for common USB-UART Meshtastic boards. The active local user receives a `uaccess` ACL, and ModemManager does not take over the port.
 
 If the error looks like `Device or resource busy`, the port is already open in another process: serial monitor, CLI, or ModemManager.
+
+---
+
+## Command-Line Launch
+
+You can use MeshApp as a desktop app, in a terminal (TUI), or as an RPC server for remote access.
+
+| To start | Run from the source folder |
+| --- | --- |
+| Desktop app | `./gradlew run` |
+| TUI | `./gradlew --console=plain runTerminal` |
+| RPC server | `./gradlew --console=plain runRpcServer` |
+
+If you installed the `.deb` package, use:
+
+```bash
+# Open the TUI and connect to a device over TCP
+/opt/meshapp/bin/MeshApp --terminal --host 192.168.1.10
+
+# Start the RPC server and print its access key
+/opt/meshapp/bin/MeshApp --rpc-server --print-rpc-key
+```
+
+Before starting the server, set up a device connection in the desktop app and enable auto-connect for it. Then quit the app completely: only one process can use its database at a time.
+
+See the [command-line guide](docs/command-line.md) for Windows, macOS, AppImage, and Flatpak commands, along with all TUI and RPC options.
 
 ---
 
@@ -537,8 +558,6 @@ MeshApp is built through `jpackage`. AppImage and Flatpak are additionally suppo
 `Flatpak` requires `flatpak`, `flatpak-builder`, runtime, and SDK. By default, `org.freedesktop.Platform//25.08` and `org.freedesktop.Sdk//25.08` are used.
 
 ```bash
-flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 ./gradlew flatpak
 ```
 
@@ -552,13 +571,6 @@ scripts/update-flatpak-sources.sh aarch64
 ```
 
 `flatpak-sources-x86_64.json`, `flatpak-sources-aarch64.json`, and `flatpak-sources-foojay.json` must be committed to git. The `offline-repository/` directory is only a local cache.
-
-Local verification through Flathub Builder:
-
-```bash
-flatpak install -y flathub org.flatpak.Builder org.freedesktop.Sdk.Extension.openjdk25//25.08
-flatpak run --command=flathub-build org.flatpak.Builder --install app.privatepractice.meshapp.yml
-```
 
 For `jpackage`, the JDK for the bundled runtime can be set explicitly: `-PpackagingJavaHome=/path/to/jdk` or `PACKAGING_JAVA_HOME=/path/to/jdk`. On macOS, the build checks the `.app` with `otool -L` and fails if external dependencies such as `/opt/homebrew/...` or `/usr/local/...` remain inside the bundle.
 
