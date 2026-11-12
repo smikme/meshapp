@@ -916,6 +916,7 @@ public final class LuaDevWindow {
     private VBox createEditorPane() {
         codeArea = new CodeArea();
         codeArea.getStyleClass().add("lua-code-area");
+        LuaEditorActions.install(codeArea, this::hideCompletion);
         installEditorGutter();
         codeArea.multiPlainChanges()
                 .successionEnds(java.time.Duration.ofMillis(120))
@@ -2286,6 +2287,14 @@ public final class LuaDevWindow {
         }
     }
 
+    /**
+     * Loads a script into the editor and refreshes its debugger and storage views.
+     * <p>
+     * Clears the undo history after replacing the text so undo cannot restore the
+     * previously opened script, then marks the loaded script as unmodified.
+     *
+     * @param script script to display and edit
+     */
     private void loadScript(LuaScript script) {
         loadingScript = true;
         currentScript = script;
@@ -2294,6 +2303,7 @@ public final class LuaDevWindow {
         clearDebugState();
         updateScriptNameLabel();
         codeArea.replaceText(script.getCode() != null ? script.getCode() : "");
+        codeArea.getUndoManager().forgetHistory();
         codeArea.setStyleSpans(0, computeHighlighting(codeArea.getText()));
         refreshFunctionTree();
         scheduleEditorEmojiOverlayUpdate();
