@@ -18,10 +18,11 @@ import java.util.function.BiPredicate;
  * Coordinates operating-system notifications for incoming messages.
  * <p>
  * The manager creates the platform notification service, honors notification
- * preferences, suppresses alerts for the active focused chat, rate-limits
- * notifications, and trims message bodies. It may be called from transport
- * reader threads through MessageListenerService; window focus is read from a
- * volatile snapshot maintained on the FX thread.
+ * preferences, rate-limits notifications, and trims message bodies. Alerts for
+ * the selected chat are suppressed only while the primary window is visible,
+ * not minimized, and focused. It may be called from transport reader threads
+ * through MessageListenerService; window activity is read from a volatile
+ * snapshot maintained on the FX thread.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -40,8 +41,9 @@ public class NotificationManager {
     private final AtomicLong lastNotificationTime = new AtomicLong(0);
 
     /**
-     * Volatile snapshot of Stage.isFocused(), updated by an FX-thread listener.
-     * Reader threads can check focus without blocking.
+     * Volatile snapshot of whether the primary window is visible, not minimized,
+     * and focused, updated by FX-thread listeners. Reader threads can check it
+     * without blocking.
      */
     private volatile boolean windowFocused = true;
 
@@ -52,15 +54,39 @@ public class NotificationManager {
      */
     private volatile BiPredicate<String, String> activeChatChecker;
 
+    /**
+     * Creates a manager using the current platform's notification service and
+     * starts tracking primary-window activity through {@link AppUi}.
+     *
+     * @param deviceState device supplying the notification owner and channel names;
+     *                    {@code null} for the manager used only for raw RPC notifications
+     */
     public NotificationManager(DeviceState deviceState) {
+        this(deviceState, createPlatformService());
+    }
+
+    /**
+     * Creates a manager with an explicit notification service, allowing tests to
+     * capture notifications without invoking the operating system.
+     *
+     * @param deviceState device supplying the notification owner and channel names;
+     *                    {@code null} when only raw RPC notifications are used
+     * @param service non-null notification service, also disposed by {@link #dispose()}
+     */
+    NotificationManager(DeviceState deviceState, NotificationService service) {
         this.deviceState = deviceState;
-        this.service = createPlatformService();
+        this.service = service;
         initFocusTracking();
     }
 
     /**
      * Called after a text message has been saved to the database.
      * Decides whether an OS notification should be shown.
+     * <p>
+     * May run on a transport reader thread. Notification preferences, outgoing
+     * messages, and the rate limit are checked before delivery through {@link AppUi}.
+     * Selecting a chat suppresses its alerts only while the primary window is
+     * visible, not minimized, and focused.
      *
      * @param msg incoming message
      * @param chatType {@code "channel"} or {@code "dm"}
@@ -115,13 +141,6 @@ public class NotificationManager {
 
     public void dispose() {
         service.dispose();
-    }
-
-    /**
-     * Shows a notification for an event received through MeshApp RPC.
-     */
-    public static void showRemoteNotification(String title, String message) {
-        RemoteNotificationManagerHolder.INSTANCE.showRawNotification(title, message);
     }
 
     /**
@@ -202,7 +221,7 @@ public class NotificationManager {
             for (ChannelProtos.Channel ch : channels) {
                 if (ch.getIndex() == index) {
                     String name = ch.getSettings().getName();
-                    if (name != null && !name.isEmpty()) {
+                    if (!name.isEmpty()) {
                         return name;
                     }
                     break;
@@ -229,6 +248,11 @@ public class NotificationManager {
         };
     }
 
+    /**
+     * Initializes and maintains the volatile window-activity snapshot used by
+     * transport reader threads. The desktop bridge publishes visibility and
+     * minimization changes as well as focus changes, including hiding to tray.
+     */
     private void initFocusTracking() {
         windowFocused = AppUi.isPrimaryWindowFocused();
         AppUi.addPrimaryWindowFocusListener(focused -> windowFocused = focused);
