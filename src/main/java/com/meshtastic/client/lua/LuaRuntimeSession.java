@@ -29,7 +29,6 @@ import org.meshtastic.proto.MeshProtos;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.Comparator;
@@ -38,6 +37,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -93,6 +93,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final LuaAutomationCommand command;
     private final boolean debugMode;
     private final Object debugLock = new Object();
+    /** Guards the output budget and its one-time warning across callbacks. */
+    private final Object outputLock = new Object();
     private final ExecutorService executor;
     private final ScheduledExecutorService scheduler;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -105,6 +107,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private final Map<String, PendingTimer> pendingTimers = new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<Integer, RemoteAdminService> remoteAdminServices = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicBoolean canvasOpen = new AtomicBoolean(false);
+    /** Separates node-pick responses from earlier launches of the same script. */
+    private final String uiRequestSessionId = UUID.randomUUID().toString();
     private final AtomicLong uiRequestCounter = new AtomicLong();
     private final AtomicLong tracerouteRequestCounter = new AtomicLong();
     private final AtomicLong nodeInfoRequestCounter = new AtomicLong();
@@ -117,8 +121,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     private Globals globals;
     private Future<?> activeFuture;
     private volatile boolean listenerRegistered;
-    private volatile int outputChars;
-    private volatile boolean outputLimitReported;
+    private int outputChars;
+    private boolean outputLimitReported;
     private volatile boolean paused;
     private volatile boolean pauseOnNextLine;
     private volatile DebugCommand debugCommand = DebugCommand.NONE;
@@ -215,7 +219,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
 
     @Override
     public String nextRequestId() {
-        return script.getId() + ":" + uiRequestCounter.incrementAndGet();
+        return script.getId() + ":" + uiRequestSessionId + ":" + uiRequestCounter.incrementAndGet();
     }
 
     @Override
@@ -277,6 +281,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     @Override
+    // The connection manager owns the shared runtime; this availability check must not close it.
+    @SuppressWarnings("resource")
     public boolean isNodeInfoAvailable() {
         return target.state() != null && (target.handler() != null || target.meshCoreRuntime() != null);
     }
@@ -486,9 +492,8 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     private static <T> List<T> snapshot(List<T> values) {
-        synchronized (values) {
-            return new ArrayList<>(values);
-        }
+        // ConfigStore exposes synchronized lists; their toArray() locks during the constructor's copy.
+        return new ArrayList<>(values);
     }
 
     private static boolean matchesSection(String actual, String requested) {
@@ -970,13 +975,20 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         }
     }
 
+    /**
+     * Delivers a node result only once and only to the session that requested it.
+     *
+     * <p>Replacing an open picker cancels its old request after a new automation
+     * may already have started. Such stale results must not invoke the new bot.
+     *
+     * @param selection selection or cancellation returned by the chat picker
+     */
     private void callNodeSelected(LuaUiNodeSelection selection) {
-        if (!running.get() || globals == null) {
+        if (!running.get() || globals == null || !pendingUiRequests.remove(selection.requestId())) {
             return;
         }
         LuaValue callback = globals.get("on_node_selected");
         try {
-            pendingUiRequests.remove(selection.requestId());
             if (callback.isfunction()) {
                 debugLib.begin(CALLBACK_TIMEOUT_MS);
                 callback.call(nodeSelectionToTable(selection));
@@ -1122,23 +1134,19 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     private LuaValue objectToLua(Object value) {
-        if (value == null) {
-            return LuaValue.NIL;
-        }
-        if (value instanceof Boolean booleanValue) {
-            return LuaValue.valueOf(booleanValue);
-        }
-        if (value instanceof Number number) {
-            return LuaValue.valueOf(number.doubleValue());
-        }
-        if (value instanceof List<?> list) {
-            LuaTable table = new LuaTable();
-            for (int i = 0; i < list.size(); i++) {
-                table.set(i + 1, objectToLua(list.get(i)));
+        return switch (value) {
+            case null -> LuaValue.NIL;
+            case Boolean booleanValue -> LuaValue.valueOf(booleanValue);
+            case Number number -> LuaValue.valueOf(number.doubleValue());
+            case List<?> list -> {
+                LuaTable table = new LuaTable();
+                for (int i = 0; i < list.size(); i++) {
+                    table.set(i + 1, objectToLua(list.get(i)));
+                }
+                yield table;
             }
-            return table;
-        }
-        return LuaValue.valueOf(value.toString());
+            default -> LuaValue.valueOf(value.toString());
+        };
     }
 
     private LuaValue tracerouteEventToTable(LuaTracerouteRequest request,
@@ -1416,18 +1424,18 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return LuaScriptRuntimeService.resolveSelectedTarget().toSandboxSnapshot();
     }
 
-    private boolean hasPendingAsyncWork() {
-        return !pendingUiRequests.isEmpty()
-                || !pendingTraceroutes.isEmpty()
-                || !pendingNodeInfos.isEmpty()
-                || !pendingRemoteAdmins.isEmpty()
-                || !pendingTimers.isEmpty()
-                || canvasOpen.get()
-                || isFormOpen();
+    private boolean isAsyncWorkIdle() {
+        return pendingUiRequests.isEmpty()
+                && pendingTraceroutes.isEmpty()
+                && pendingNodeInfos.isEmpty()
+                && pendingRemoteAdmins.isEmpty()
+                && pendingTimers.isEmpty()
+                && !canvasOpen.get()
+                && !isFormOpen();
     }
 
     private void finishIfIdle() {
-        if (!listenerRegistered && !hasPendingAsyncWork()) {
+        if (!listenerRegistered && isAsyncWorkIdle()) {
             scriptService.updateRunState(script.getId(), "FINISHED", null);
             finishWithoutInterruptingExecutor();
         }
@@ -1480,14 +1488,14 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                 if (command == null && formBridge == null) {
                     emit(LuaScriptEvent.info(script.getId(), I18n.t("meshIde.runtime.noOnMessage")));
                 }
-                if (!hasPendingAsyncWork()) {
+                if (isAsyncWorkIdle()) {
                     scriptService.updateRunState(script.getId(), "FINISHED", null);
                 }
             }
         } catch (Throwable error) {
             fail(error);
         } finally {
-            if (!keepListening && !hasPendingAsyncWork()) {
+            if (!keepListening && isAsyncWorkIdle()) {
                 finishWithoutInterruptingExecutor();
             }
         }
@@ -1849,19 +1857,32 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         return result;
     }
 
+    /**
+     * Accounts for output and emits the limit warning once, including concurrent callbacks.
+     *
+     * <p>The event sink runs outside the budget lock so it cannot block other
+     * callbacks while they check their allowance.
+     *
+     * @param message output text, or null for an empty message
+     */
     private void emitOutput(String message) {
         if (message == null) {
             message = "";
         }
-        if (outputChars >= MAX_OUTPUT_CHARS) {
-            if (!outputLimitReported) {
+        LuaScriptEvent event;
+        synchronized (outputLock) {
+            if (outputChars >= MAX_OUTPUT_CHARS) {
+                if (outputLimitReported) {
+                    return;
+                }
                 outputLimitReported = true;
-                emit(LuaScriptEvent.warning(script.getId(), I18n.t("meshIde.runtime.outputLimit")));
+                event = LuaScriptEvent.warning(script.getId(), I18n.t("meshIde.runtime.outputLimit"));
+            } else {
+                outputChars = (int) Math.min(MAX_OUTPUT_CHARS, (long) outputChars + message.length());
+                event = LuaScriptEvent.output(script.getId(), message);
             }
-            return;
         }
-        outputChars += message.length();
-        emit(LuaScriptEvent.output(script.getId(), message));
+        emit(event);
     }
 
     private void fail(Throwable error) {

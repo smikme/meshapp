@@ -105,7 +105,7 @@ MeshApp umfasst:
 
 Chats umfassen Netzwerkkanäle und Direktunterhaltungen. Nachrichten werden lokal gespeichert; Antworten, Reaktionen, Zustellstatus und Ungelesen-Zähler werden unterstützt.
 
-Die Eingabezeile kann `@tracebot`- und `@infobot`-Befehle ausführen. Sie prüfen die Route zum ausgewählten Knoten und fragen Informationen dazu ab; während der Eingabe schlägt die App Knotennamen und Adressen vor.
+Mit `@` in der Eingabezeile lassen sich Knoten nach Namen oder Adresse suchen und ihre vollständigen Namen in die Nachricht einfügen. Mit `/` am Zeilenanfang öffnet sich die Bot-Auswahl, etwa `/tracebot` oder `/infobot`, um eine Route zu prüfen oder Knoteninformationen abzufragen.
 
 Kanäle können erstellt und bearbeitet werden: Name, Zugriffsschlüssel, Positionsfreigabe und Positionsgenauigkeit. Benachrichtigungen lassen sich für jeden Kanal und jede Direktunterhaltung separat aktivieren oder deaktivieren.
 

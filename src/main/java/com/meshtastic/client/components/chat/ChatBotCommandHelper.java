@@ -14,7 +14,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Parses built-in chat bot commands and prepares autocomplete suggestions.
+ * Parses slash-prefixed chat bot commands and prepares bot and node suggestions.
+ *
+ * <p>A leading {@code /} selects bots, while {@code @} at the start of a token
+ * searches node names anywhere in a draft. Chat command spelling is separate
+ * from stored automation handles so existing Lua scripts retain their handles.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -30,9 +34,13 @@ public final class ChatBotCommandHelper {
         AUTOMATION
     }
 
+    /** Content offered by the autocomplete popup at the current caret position. */
     public enum SuggestionMode {
+        /** No autocomplete trigger is active. */
         NONE,
+        /** Bot commands matching a leading {@code /} token. */
         BOT,
+        /** Node names matching the current {@code @} token. */
         NODE
     }
 
@@ -42,13 +50,47 @@ public final class ChatBotCommandHelper {
         AMBIGUOUS
     }
 
+    /**
+     * Bot metadata shared by command parsing and autocomplete.
+     *
+     * @param handle stored automation handle, typically prefixed with {@code @}
+     * @param description explanatory text displayed below the command
+     * @param action action dispatched when the bot is selected or invoked
+     * @param scriptId identifier of the associated Lua script
+     */
     public record BotDefinition(String handle, String description, BotAction action, long scriptId) {
 
         public BotDefinition(String handle, String description, BotAction action) {
             this(handle, description, action, 0L);
         }
+
+        /**
+         * Returns the slash-prefixed spelling shown and accepted in chat.
+         *
+         * <p>For example, a stored {@code @tracebot} handle becomes
+         * {@code /tracebot}. This conversion preserves name casing and does not
+         * change the handle passed to Lua scripts.
+         *
+         * @return trimmed handle with its prefix replaced by, or prepended with,
+         *         {@code /}; a null or empty handle produces {@code /}
+         */
+        public String commandHandle() {
+            String name = handle != null ? handle.trim() : "";
+            return "/" + (name.startsWith("@") || name.startsWith("/") ? name.substring(1) : name);
+        }
     }
 
+    /**
+     * Autocomplete query and the complete token to replace upon selection.
+     *
+     * @param mode type of suggestions to display
+     * @param query text up to the caret, excluding {@code @} for nodes and
+     *              including {@code /} for bots
+     * @param replacementStart inclusive UTF-16 offset of the trigger character
+     * @param replacementEnd exclusive UTF-16 offset of the token's end, which
+     *                       may be after the caret
+     * @param action associated bot action, or null for trigger-based completion
+     */
     public record SuggestionContext(SuggestionMode mode,
                                     String query,
                                     int replacementStart,
@@ -92,6 +134,13 @@ public final class ChatBotCommandHelper {
         }
     }
 
+    /**
+     * Node completion data for both chat text and Lua node selection.
+     *
+     * @param insertText node token containing its address, used to resolve Lua selections
+     * @param primaryText display name inserted into chat when an {@code @} result is selected
+     * @param secondaryText additional names and address shown below the display name
+     */
     public record NodeSuggestion(String insertText, String primaryText, String secondaryText) {}
 
     public record NodeResolution(NodeResolutionStatus status, NodeData node) {
@@ -113,10 +162,25 @@ public final class ChatBotCommandHelper {
 
     private record RankedNodeSuggestion(NodeSuggestion suggestion, int score, int lastHeard) {}
 
+    /**
+     * Finds matching bots without additional automation definitions.
+     *
+     * @param rawQuery case-insensitive name fragment, optionally prefixed with {@code /}
+     * @return matching built-in definitions; currently empty
+     * @see #suggestBots(String, Collection)
+     */
     public static List<BotDefinition> suggestBots(String rawQuery) {
         return suggestBots(rawQuery, List.of());
     }
 
+    /**
+     * Finds bots whose handles contain the query, ignoring case and handle prefixes.
+     *
+     * @param rawQuery name fragment; a leading {@code /} or legacy {@code @} is
+     *                 ignored, and a null or blank query matches all bots
+     * @param extraBots additional automation definitions, or null for none
+     * @return matching definitions with their original stored handles
+     */
     public static List<BotDefinition> suggestBots(String rawQuery, Collection<BotDefinition> extraBots) {
         String query = normalizeBotQuery(rawQuery);
         return mergeBots(extraBots).stream()
@@ -129,48 +193,73 @@ public final class ChatBotCommandHelper {
         return query.isEmpty() || handle.startsWith(query) || handle.contains(query);
     }
 
+    /**
+     * Detects autocomplete for the whitespace-delimited token containing the caret.
+     *
+     * <p>A token beginning with {@code @} enables node search anywhere in the
+     * draft. A token beginning with {@code /} enables bot search only at offset
+     * zero. The caret must be after the trigger and at or before the token's end;
+     * embedded triggers in email addresses and URLs do not activate completion.
+     * The query ends at the caret, but selection replaces the entire token.
+     *
+     * @param text current draft, or null for an empty draft
+     * @param caretPosition UTF-16 caret offset, clamped to the draft's bounds
+     * @return active query and replacement range, or {@link SuggestionContext#none()}
+     */
     public static SuggestionContext detectSuggestionContext(String text, int caretPosition) {
         String safeText = text != null ? text : "";
-        int caret = Math.max(0, Math.min(caretPosition, safeText.length()));
+        int caret = Math.clamp(caretPosition, 0, safeText.length());
         List<Token> tokens = tokenize(safeText);
         if (tokens.isEmpty()) {
             return SuggestionContext.none();
         }
 
-        Token firstToken = tokens.getFirst();
-        if (firstToken.start() != 0) {
-            return SuggestionContext.none();
+        for (Token token : tokens) {
+            if (caret <= token.start() || caret > token.end()) {
+                continue;
+            }
+            if (token.text().startsWith("@")) {
+                return new SuggestionContext(
+                        SuggestionMode.NODE,
+                        safeText.substring(token.start() + 1, caret),
+                        token.start(),
+                        token.end(),
+                        null);
+            }
+            if (token.start() == 0 && token.text().startsWith("/")) {
+                return new SuggestionContext(
+                        SuggestionMode.BOT,
+                        safeText.substring(0, caret),
+                        0,
+                        token.end(),
+                        null);
+            }
         }
-
-        if (firstToken.text().startsWith("@") && caret <= firstToken.end()) {
-            return new SuggestionContext(
-                    SuggestionMode.BOT,
-                    firstToken.text(),
-                    firstToken.start(),
-                    firstToken.end(),
-                    null
-            );
-        }
-
-        BotDefinition bot = findBot(firstToken.text());
-        if (bot == null || tokens.size() > 2 || caret < firstToken.end()) {
-            return SuggestionContext.none();
-        }
-
-        String query = tokens.size() == 2 ? tokens.get(1).text() : "";
-        return new SuggestionContext(
-                SuggestionMode.NODE,
-                query,
-                firstToken.end(),
-                safeText.length(),
-                bot.action()
-        );
+        return SuggestionContext.none();
     }
 
+    /**
+     * Parses a slash command using only built-in bot definitions.
+     *
+     * @param text draft to parse, or null for an empty draft
+     * @return parsed command, or {@link ParsedBotCommand#none()} if no bot matches
+     * @see #parseCommand(String, Collection)
+     */
     public static ParsedBotCommand parseCommand(String text) {
         return parseCommand(text, List.of());
     }
 
+    /**
+     * Parses a leading slash command and its whitespace-delimited arguments.
+     *
+     * <p>Surrounding whitespace is trimmed and command matching ignores case.
+     * Text beginning with {@code @} is not a bot command. The result retains the
+     * matched bot's stored handle, including a legacy {@code @} prefix, for Lua.
+     *
+     * @param text draft to parse, or null for an empty draft
+     * @param extraBots additional automation definitions, or null for none
+     * @return matched bot and arguments, or {@link ParsedBotCommand#none()}
+     */
     public static ParsedBotCommand parseCommand(String text, Collection<BotDefinition> extraBots) {
         String safeText = text != null ? text.trim() : "";
         if (safeText.isEmpty()) {
@@ -200,6 +289,18 @@ public final class ChatBotCommandHelper {
                 bot.scriptId());
     }
 
+    /**
+     * Searches unique nodes by full name, short name, or address, ignoring case.
+     *
+     * <p>Results are ordered by match quality, then most recent contact, then
+     * display name. Chat completion inserts {@link NodeSuggestion#primaryText()},
+     * while Lua selection resolves {@link NodeSuggestion#insertText()}.
+     *
+     * @param rawNodes candidate nodes, possibly containing nulls or duplicate addresses
+     * @param rawQuery search text without the {@code @} trigger; null or blank matches all nodes
+     * @param limit maximum number of results; nonpositive values return an empty list
+     * @return ranked suggestions, or an empty list when no candidates match
+     */
     public static List<NodeSuggestion> suggestNodes(Collection<NodeData> rawNodes, String rawQuery, int limit) {
         String query = normalize(rawQuery);
         return uniqueNodes(rawNodes).stream()
@@ -290,17 +391,20 @@ public final class ChatBotCommandHelper {
         return tokens;
     }
 
-    private static BotDefinition findBot(String token) {
-        return findBot(token, List.of());
-    }
-
+    /**
+     * Resolves a slash-prefixed command against stored bot handles without changing them.
+     *
+     * @param token complete command token
+     * @param extraBots additional automation definitions, or null for none
+     * @return matching definition, or null for an unknown or non-slash token
+     */
     private static BotDefinition findBot(String token, Collection<BotDefinition> extraBots) {
-        if (isBlank(token)) {
+        if (isBlank(token) || !token.startsWith("/")) {
             return null;
         }
         String normalized = token.trim().toLowerCase(Locale.ROOT);
         return mergeBots(extraBots).stream()
-                .filter(bot -> bot.handle().equals(normalized))
+                .filter(bot -> bot.commandHandle().equalsIgnoreCase(normalized))
                 .findFirst()
                 .orElse(null);
     }
@@ -446,9 +550,15 @@ public final class ChatBotCommandHelper {
         return node != null ? String.format("!%08x", node.getNodeNum()) : "";
     }
 
+    /**
+     * Normalizes chat queries and stored handles for case-insensitive matching.
+     *
+     * @param rawQuery name or handle, optionally prefixed with {@code /} or {@code @}
+     * @return trimmed lowercase text without its prefix, or an empty string for null
+     */
     private static String normalizeBotQuery(String rawQuery) {
         String query = normalize(rawQuery);
-        return query.startsWith("@") ? query.substring(1) : query;
+        return query.startsWith("@") || query.startsWith("/") ? query.substring(1) : query;
     }
 
     private static String normalize(String value) {

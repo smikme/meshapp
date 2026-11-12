@@ -4,7 +4,7 @@ package com.meshtastic.client.lua;
  * Lua-script request for interactive node selection in the UI.
  *
  * @param scriptId Lua script id
- * @param requestId request id inside the runtime session
+ * @param requestId opaque request id unique across runtime sessions, returned unchanged with the result
  * @param source Lua API that created the request
  * @param name script-defined request name
  * @param prompt title or hint text

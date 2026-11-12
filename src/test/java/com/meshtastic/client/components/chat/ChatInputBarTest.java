@@ -3,6 +3,7 @@ package com.meshtastic.client.components.chat;
 import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.components.EmojiRenderingSupport;
 import com.meshtastic.client.model.MeshMessage;
+import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.themes.ThemeManager;
 import com.meshtastic.client.themes.TypographyManager;
 import com.meshtastic.client.utils.AppPreferences;
@@ -38,6 +39,7 @@ import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
@@ -129,6 +131,127 @@ class ChatInputBarTest {
     @BeforeAll
     static void startJavaFx() {
         TestEnvironmentSupport.ensureJavaFxStarted();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"@al", "Привет, @al как дела?", "@bravo\n  @al рядом"})
+    void selectingNodeInsertsFullNameAndPreservesSurroundingText(String draft) {
+        onFxThread(() -> {
+            NodeData alpha = new NodeData(0xBEEF);
+            alpha.setLongName("Альфа Нода");
+            alpha.setShortName("AL");
+            NodeData bravo = new NodeData(0xCAFE);
+            bravo.setLongName("Bravo");
+            var sent = new AtomicReference<ChatInputBar.SendRequest>();
+            ChatInputBar bar = new ChatInputBar(sent::set, _ -> {
+                throw new AssertionError("node selection must not run a bot");
+            }, _ -> List.of(), query -> ChatBotCommandHelper.suggestNodes(List.of(alpha, bravo), query, 8));
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText(draft);
+            int caret = draft.indexOf("@al") + 3;
+            input.positionCaret(caret);
+            showSuggestions(bar);
+
+            Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ENTER,
+                    false, false, false, false));
+
+            String expected = draft.replace("@al", "Альфа Нода") + (caret == draft.length() ? " " : "");
+            assertEquals(expected, input.getText());
+            assertEquals(expected.indexOf("Альфа Нода") + "Альфа Нода".length()
+                    + (caret == draft.length() ? 1 : 0), input.getCaretPosition());
+            assertNull(sent.get(), "Enter selects a node without sending the draft");
+            assertFalse(field(bar, "commandSuggestionRoot", VBox.class).isVisible());
+            input.undo();
+            assertEquals(draft, input.getText());
+            assertEquals(caret, input.getCaretPosition());
+            input.redo();
+            assertEquals(expected, input.getText());
+            return null;
+        });
+    }
+
+    @Test
+    void nodeCompletionCannotExceedTheMessageBudget() {
+        onFxThread(() -> {
+            ChatInputBar bar = new ChatInputBar(_ -> {}, _ -> false, _ -> List.of(),
+                    _ -> List.of(new ChatBotCommandHelper.NodeSuggestion("AL(!0000beef)", "Альфа Нода", "!0000beef")));
+            bar.setProtocolTextLimit(() -> 10);
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("Hi @al");
+            input.positionCaret(6);
+            showSuggestions(bar);
+            ((Button) field(bar, "commandSuggestionRoot", VBox.class).getChildren().getFirst()).fire();
+
+            assertEquals("Hi @al", input.getText());
+            assertEquals(6, input.getCaretPosition());
+            return null;
+        });
+    }
+
+    @Test
+    void slashSuggestionsDisplayAndRunExistingAutomationBots() {
+        onFxThread(() -> {
+            var selected = new AtomicReference<ChatBotCommandHelper.ParsedBotCommand>();
+            var bot = new ChatBotCommandHelper.BotDefinition(
+                    "@traceauto", "Automation", ChatBotCommandHelper.BotAction.AUTOMATION, 42L);
+            ChatInputBar bar = new ChatInputBar(_ -> {
+                throw new AssertionError("bot selection must not send a message");
+            }, command -> { selected.set(command); return true; },
+                    query -> ChatBotCommandHelper.suggestBots(query, List.of(bot)), _ -> List.of());
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("/tr");
+            input.positionCaret(3);
+            showSuggestions(bar);
+            Button row = (Button) field(bar, "commandSuggestionRoot", VBox.class).getChildren().getFirst();
+            assertEquals("/traceauto", ((Label) ((VBox) row.getGraphic()).getChildren().getFirst()).getText());
+            row.fire();
+
+            assertEquals(42L, selected.get().scriptId());
+            assertEquals("@traceauto", selected.get().botHandle());
+            assertEquals("", input.getText());
+            return null;
+        });
+    }
+
+    @Test
+    void slashCommandsRunBotsWhileAtNamesAreSentAsText() {
+        onFxThread(() -> {
+            var selected = new AtomicReference<ChatBotCommandHelper.ParsedBotCommand>();
+            var sent = new AtomicReference<ChatInputBar.SendRequest>();
+            var bot = new ChatBotCommandHelper.BotDefinition(
+                    "@traceauto", "Automation", ChatBotCommandHelper.BotAction.AUTOMATION, 42L);
+            ChatInputBar bar = new ChatInputBar(sent::set,
+                    command -> { selected.set(command); return true; },
+                    query -> ChatBotCommandHelper.suggestBots(query, List.of(bot)), _ -> List.of());
+            EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+            input.setText("/traceauto Alpha Node");
+            Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ENTER,
+                    false, false, false, false));
+            assertEquals("Alpha Node", selected.get().arguments());
+            assertNull(sent.get());
+
+            selected.set(null);
+            input.setText("@traceauto привет");
+            Event.fireEvent(input, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", KeyCode.ENTER,
+                    false, false, false, false));
+            assertEquals("@traceauto привет", sent.get().text());
+            assertNull(selected.get());
+            return null;
+        });
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void showSuggestions(ChatInputBar bar) throws Exception {
+        EmojiTextField input = field(bar, "messageInput", EmojiTextField.class);
+        var context = ChatBotCommandHelper.detectSuggestionContext(input.getText(), input.getCaretPosition());
+        String methodName = context.mode() == ChatBotCommandHelper.SuggestionMode.NODE
+                ? "buildNodeSuggestionRows" : "buildBotSuggestionRows";
+        Method method = ChatInputBar.class.getDeclaredMethod(methodName, ChatBotCommandHelper.SuggestionContext.class);
+        method.setAccessible(true);
+        VBox popup = field(bar, "commandSuggestionRoot", VBox.class);
+        popup.getChildren().setAll((List<Button>) method.invoke(bar, context));
+        setField(bar, "selectedSuggestionIndex", 0);
+        popup.setVisible(true);
     }
 
     private static void paste(EmojiTextField input) {
