@@ -832,6 +832,9 @@ class LuaScriptRuntimeServiceTest {
 
         awaitCondition(() -> "!0000beef".equals(scriptService.getKv(automation.getId(), "selection_node")),
                 "Lua node selection callback did not run");
+        // The callback writes its result before finishIfIdle closes the session.
+        awaitCondition(() -> !runtimeService.isRunning(automation.getId()),
+                "Lua node selection automation did not finish");
 
         assertEquals("selected", scriptService.getKv(automation.getId(), "selection_status"));
         assertEquals("ui_result", scriptService.getKv(automation.getId(), "selection_type"));
@@ -839,7 +842,7 @@ class LuaScriptRuntimeServiceTest {
         assertEquals("pick_target", scriptService.getKv(automation.getId(), "selection_name"));
         assertEquals(request.requestId(), scriptService.getKv(automation.getId(), "selection_request_id"));
         assertEquals("dm:!abcdef01", scriptService.getKv(automation.getId(), "selection_chat"));
-        assertFalse(runtimeService.isRunning(automation.getId()));
+        assertEquals("FINISHED", scriptService.findScript(automation.getId()).orElseThrow().getLastStatus());
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
