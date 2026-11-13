@@ -81,6 +81,8 @@ class FormChatAutomationTest {
             manager.addEntry(entry);
             state = new DeviceState();
             state.setMyNodeNum(0x12345678);
+            state.setOwnerInfo(MeshProtos.User.newBuilder()
+                    .setId("!12345678").setLongName("Bot host").setShortName("BOT").build());
             NodeData node = new NodeData(0xBEEF);
             node.setLongName("Альфа Нода");
             node.setShortName("ALP");
@@ -148,6 +150,9 @@ class FormChatAutomationTest {
             assertEquals("InfoBot".equals(botName) ? Portnums.PortNum.NODEINFO_APP : Portnums.PortNum.TRACEROUTE_APP,
                     packet.getDecoded().getPortnum());
             if ("InfoBot".equals(botName)) {
+                MeshProtos.User requester = MeshProtos.User.parseFrom(packet.getDecoded().getPayload());
+                assertEquals("Bot host", requester.getLongName());
+                assertTrue(packet.getDecoded().getWantResponse());
                 state.getNodeDb().get(0xBEEF).setLongName("Альфа Нода Updated");
                 state.fireNodeUpdateListeners(0xBEEF);
             } else {

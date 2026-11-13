@@ -499,31 +499,32 @@ public final class MessageService {
     }
 
     /**
-     * Requests node information by sending a NODEINFO_APP packet with want_response=true.
-     * The remote node responds with NODEINFO_APP containing User data.
+     * Requests node information by sending our User in a NODEINFO_APP packet with
+     * want_response=true. Receivers also store the request payload as the sender's
+     * identity, so an empty User would erase our names in their node databases.
      */
     public static void requestNodeInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
-        sendNodeInfoPacket(handler, state, targetNodeNum, null, true);
-    }
-
-    /**
-     * Exchanges user information with the selected node: first sends our local
-     * User data to it, then requests a fresh NODEINFO_APP response from it.
-     */
-    public static void exchangeNodeUserInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
         if (handler == null || state == null || targetNodeNum == 0) { return; }
         if (targetNodeNum == state.getMyNodeNum()) {
-            requestNodeInfo(handler, state, targetNodeNum);
+            requestOwnerInfo(handler, state);
             return;
         }
 
         MeshProtos.User localUser = buildLocalUserInfo(state);
-        if (shouldRefreshOwnerInfoBeforeExchange(state, localUser)) {
+        if (isLocalUserNameMissing(localUser)) {
             requestOwnerInfoThenExchange(handler, state, targetNodeNum);
             return;
         }
 
         continueNodeUserInfoExchange(handler, state, targetNodeNum, localUser);
+    }
+
+    /**
+     * Exchanges user information with the selected node in a single request
+     * containing our User data and asking for the peer's User data in response.
+     */
+    public static void exchangeNodeUserInfo(ProtocolHandler handler, DeviceState state, int targetNodeNum) {
+        requestNodeInfo(handler, state, targetNodeNum);
     }
 
     /**
@@ -1202,24 +1203,21 @@ public final class MessageService {
         return builder.build();
     }
 
-    private static boolean shouldRefreshOwnerInfoBeforeExchange(DeviceState state, MeshProtos.User localUser) {
-        if (state == null || state.getOwnerInfo() != null) { return false; }
-        if (localUser == null) { return true; }
-
-        return localUser.getLongName().isEmpty() && localUser.getShortName().isEmpty();
+    private static boolean isLocalUserNameMissing(MeshProtos.User localUser) {
+        return localUser == null
+                || (localUser.getLongName().isEmpty() && localUser.getShortName().isEmpty());
     }
 
     private static void continueNodeUserInfoExchange(ProtocolHandler handler,
                                                      DeviceState state,
                                                      int targetNodeNum,
                                                      MeshProtos.User localUser) {
-        if (localUser != null) {
-            sendNodeInfoPacket(handler, state, targetNodeNum, localUser.toByteString(), false);
-        } else {
-            log.debug("Skipping outgoing NODEINFO_APP exchange: local user info is unavailable");
+        if (isLocalUserNameMissing(localUser)) {
+            log.warn("Skipping NODEINFO_APP request to !{}: local user name is unavailable",
+                    Integer.toHexString(targetNodeNum));
+            return;
         }
-
-        requestNodeInfo(handler, state, targetNodeNum);
+        sendNodeInfoPacket(handler, state, targetNodeNum, localUser.toByteString());
     }
 
     /**
@@ -1397,13 +1395,12 @@ public final class MessageService {
     private static void sendNodeInfoPacket(ProtocolHandler handler,
                                            DeviceState state,
                                            int targetNodeNum,
-                                           ByteString payload,
-                                           boolean wantResponse) {
+                                           ByteString payload) {
         if (handler == null || state == null || targetNodeNum == 0) { return; }
 
         MeshProtos.Data.Builder dataBuilder = MeshProtos.Data.newBuilder()
                 .setPortnum(Portnums.PortNum.NODEINFO_APP)
-                .setWantResponse(wantResponse);
+                .setWantResponse(true);
         if (payload != null && !payload.isEmpty()) {
             dataBuilder.setPayload(payload);
         }

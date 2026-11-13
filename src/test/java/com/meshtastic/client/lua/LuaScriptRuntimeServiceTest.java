@@ -939,6 +939,7 @@ class LuaScriptRuntimeServiceTest {
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
         state.getNodeDb().put(0xBEEF, new NodeData(0xBEEF));
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Bot host").build());
         FakeTransportConnection transport = new FakeTransportConnection();
         CountDownLatch replyDelivered = new CountDownLatch(1);
         transport.onWrite = _ -> {
@@ -1137,6 +1138,7 @@ class LuaScriptRuntimeServiceTest {
                 "@infobot");
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Bot host").build());
         FakeTransportConnection transport = new FakeTransportConnection();
         ProtocolHandler handler = new ProtocolHandler(transport);
         AtomicBoolean closed = new AtomicBoolean(false);
@@ -1242,6 +1244,7 @@ class LuaScriptRuntimeServiceTest {
                 "@infobot");
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Bot host").build());
         NodeData cached = state.getOrCreateNode(0x0000BEEF);
         cached.setLongName("Alpha Cached");
         FakeTransportConnection transport = new FakeTransportConnection();
