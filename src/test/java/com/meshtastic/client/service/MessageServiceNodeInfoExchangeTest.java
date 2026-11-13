@@ -1,22 +1,27 @@
 package com.meshtastic.client.service;
 
-import com.meshtastic.client.connection.ConnectionException;
+import com.meshtastic.client.TestEnvironmentSupport;
 import com.meshtastic.client.connection.ConnectionListener;
 import com.meshtastic.client.connection.MeshtasticConnection;
 import com.meshtastic.client.model.DeviceState;
 import com.meshtastic.client.model.MeshMessage;
 import com.meshtastic.client.model.NodeData;
 import com.meshtastic.client.protocol.ProtocolHandler;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.meshtastic.proto.AdminProtos;
 import org.meshtastic.proto.ChannelProtos;
 import org.meshtastic.proto.ConfigProtos;
 import org.meshtastic.proto.MeshProtos;
 import org.meshtastic.proto.Portnums;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -33,8 +38,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class MessageServiceNodeInfoExchangeTest {
 
-    @Test
-    void exchangeNodeUserInfoSendsLocalUserThenRequestsRemoteUser() throws Exception {
+    @TempDir
+    Path tempHome;
+
+    @BeforeEach
+    void setUp() {
+        TestEnvironmentSupport.setUserHome(tempHome);
+        TestEnvironmentSupport.resetSingletons();
+    }
+
+    @AfterEach
+    void tearDown() {
+        TestEnvironmentSupport.resetSingletons();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void nodeInfoRequestIncludesLocalUserInTheSamePacket(boolean exchange) throws Exception {
         int myNodeNum = 0x10203040;
         int targetNodeNum = 0x55667788;
 
@@ -56,18 +76,22 @@ class MessageServiceNodeInfoExchangeTest {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = new ProtocolHandler(connection);
         try {
-            MessageService.exchangeNodeUserInfo(handler, state, targetNodeNum);
+            if (exchange) {
+                MessageService.exchangeNodeUserInfo(handler, state, targetNodeNum);
+            } else {
+                MessageService.requestNodeInfo(handler, state, targetNodeNum);
+            }
 
-            List<byte[]> sentFrames = connection.awaitSentFrames(2);
-            assertEquals(2, sentFrames.size(), "exchange should send user info and follow-up request");
+            List<byte[]> sentFrames = connection.awaitSentFrames(1);
+            assertEquals(1, sentFrames.size(), "share our identity and request the peer's in one packet");
 
-            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket sharedPacket = sharedUser.getPacket();
             assertEquals(myNodeNum, sharedPacket.getFrom());
             assertEquals(targetNodeNum, sharedPacket.getTo());
             assertTrue(sharedPacket.getWantAck());
             assertEquals(Portnums.PortNum.NODEINFO_APP, sharedPacket.getDecoded().getPortnum());
-            assertFalse(sharedPacket.getDecoded().getWantResponse());
+            assertTrue(sharedPacket.getDecoded().getWantResponse());
 
             MeshProtos.User sharedPayload = MeshProtos.User.parseFrom(sharedPacket.getDecoded().getPayload());
             assertEquals("!10203040", sharedPayload.getId());
@@ -79,13 +103,9 @@ class MessageServiceNodeInfoExchangeTest {
             assertTrue(sharedPayload.hasIsUnmessagable());
             assertFalse(sharedPayload.getIsUnmessagable());
 
-            MeshProtos.ToRadio requestUser = parseToRadio(sentFrames.get(1));
-            MeshProtos.MeshPacket requestPacket = requestUser.getPacket();
-            assertEquals(myNodeNum, requestPacket.getFrom());
-            assertEquals(targetNodeNum, requestPacket.getTo());
-            assertEquals(Portnums.PortNum.NODEINFO_APP, requestPacket.getDecoded().getPortnum());
-            assertTrue(requestPacket.getDecoded().getWantResponse());
-            assertTrue(requestPacket.getDecoded().getPayload().isEmpty());
+            Thread.sleep(100);
+            assertEquals(1, connection.snapshotSentFrames().size(),
+                    "a follow-up empty User would erase our identity in the peer's NodeDB");
         } finally {
             handler.shutdown();
         }
@@ -117,10 +137,10 @@ class MessageServiceNodeInfoExchangeTest {
         try {
             MessageService.exchangeNodeUserInfo(handler, state, targetNodeNum);
 
-            List<byte[]> sentFrames = connection.awaitSentFrames(2);
-            assertEquals(2, sentFrames.size());
+            List<byte[]> sentFrames = connection.awaitSentFrames(1);
+            assertEquals(1, sentFrames.size());
 
-            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.getFirst());
             MeshProtos.User sharedPayload = MeshProtos.User.parseFrom(sharedUser.getPacket().getDecoded().getPayload());
             assertEquals(ConfigProtos.Config.DeviceConfig.Role.CLIENT_BASE, sharedPayload.getRole());
             assertEquals(MeshProtos.HardwareModel.RAK4631, sharedPayload.getHwModel());
@@ -129,8 +149,9 @@ class MessageServiceNodeInfoExchangeTest {
         }
     }
 
-    @Test
-    void exchangeNodeUserInfoRequestsOwnerInfoBeforeSharingWhenLocalUserUnavailable() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void nodeInfoRequestWaitsForOwnerInfoWhenLocalUserUnavailable(boolean exchange) throws Exception {
         int myNodeNum = 0x0A0B0C0D;
         int targetNodeNum = 0x01020304;
 
@@ -145,12 +166,16 @@ class MessageServiceNodeInfoExchangeTest {
         RecordingConnection connection = new RecordingConnection();
         ProtocolHandler handler = new ProtocolHandler(connection);
         try {
-            MessageService.exchangeNodeUserInfo(handler, state, targetNodeNum);
+            if (exchange) {
+                MessageService.exchangeNodeUserInfo(handler, state, targetNodeNum);
+            } else {
+                MessageService.requestNodeInfo(handler, state, targetNodeNum);
+            }
 
             List<byte[]> sentFrames = connection.awaitSentFrames(1);
             assertEquals(1, sentFrames.size(), "without local user data exchange should start with owner-info request");
 
-            MeshProtos.ToRadio ownerRequest = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio ownerRequest = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket ownerPacket = ownerRequest.getPacket();
             assertEquals(myNodeNum, ownerPacket.getTo());
             assertEquals(Portnums.PortNum.ADMIN_APP, ownerPacket.getDecoded().getPortnum());
@@ -166,26 +191,82 @@ class MessageServiceNodeInfoExchangeTest {
                     .build());
             state.fireOwnerInfoListeners();
 
-            sentFrames = connection.awaitSentFrames(3);
-            assertEquals(3, sentFrames.size(), "owner-info response should resume user exchange");
+            sentFrames = connection.awaitSentFrames(2);
+            assertEquals(2, sentFrames.size(), "owner-info response should send one populated request");
 
             MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.get(1));
             MeshProtos.MeshPacket sharedPacket = sharedUser.getPacket();
             assertEquals(targetNodeNum, sharedPacket.getTo());
             assertEquals(Portnums.PortNum.NODEINFO_APP, sharedPacket.getDecoded().getPortnum());
-            assertFalse(sharedPacket.getDecoded().getWantResponse());
+            assertTrue(sharedPacket.getDecoded().getWantResponse());
 
             MeshProtos.User sharedPayload = MeshProtos.User.parseFrom(sharedPacket.getDecoded().getPayload());
             assertEquals("Recovered Owner", sharedPayload.getLongName());
             assertEquals("RO", sharedPayload.getShortName());
             assertArrayEquals(new byte[] {9, 8, 7}, sharedPayload.getPublicKey().toByteArray());
 
-            MeshProtos.ToRadio requestUser = parseToRadio(sentFrames.get(2));
-            MeshProtos.MeshPacket requestPacket = requestUser.getPacket();
-            assertEquals(targetNodeNum, requestPacket.getTo());
-            assertEquals(Portnums.PortNum.NODEINFO_APP, requestPacket.getDecoded().getPortnum());
-            assertTrue(requestPacket.getDecoded().getWantResponse());
-            assertTrue(requestPacket.getDecoded().getPayload().isEmpty());
+            state.fireOwnerInfoListeners();
+            Thread.sleep(100);
+            assertEquals(2, connection.snapshotSentFrames().size());
+        } finally {
+            handler.shutdown();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing", "metadata", "public-key", "empty-owner"})
+    void nodeInfoRequestNeverAdvertisesAnUnnamedUserAfterOwnerTimeout(String availableData) throws Exception {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x10203040);
+        switch (availableData) {
+            case "metadata" -> state.setDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder()
+                    .setHwModel(MeshProtos.HardwareModel.TBEAM).build());
+            case "public-key" -> state.addConfig(ConfigProtos.Config.newBuilder()
+                    .setSecurity(ConfigProtos.Config.SecurityConfig.newBuilder()
+                            .setPublicKey(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3, 4})))
+                    .build());
+            case "empty-owner" -> state.setOwnerInfo(MeshProtos.User.getDefaultInstance());
+            default -> { }
+        }
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = new ProtocolHandler(connection);
+        try {
+            MessageService.requestNodeInfo(handler, state, 0x55667788);
+
+            MeshProtos.MeshPacket packet = parseToRadio(connection.awaitSentFrames(1).getFirst()).getPacket();
+            assertEquals(state.getMyNodeNum(), packet.getTo());
+            assertEquals(Portnums.PortNum.ADMIN_APP, packet.getDecoded().getPortnum());
+            assertTrue(AdminProtos.AdminMessage.parseFrom(packet.getDecoded().getPayload()).getGetOwnerRequest());
+
+            Thread.sleep(3_000); // Includes the owner-info timeout and asynchronous transport dispatch.
+            assertEquals(1, connection.snapshotSentFrames().size(),
+                    "without a local name, neither an empty nor a partial User may be sent to the peer");
+            state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Late owner").build());
+            state.fireOwnerInfoListeners();
+            Thread.sleep(100);
+            assertEquals(1, connection.snapshotSentFrames().size(), "timed-out exchange must be finished");
+        } finally {
+            handler.shutdown();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void refreshingLocalNodeRequestsOwnerWithoutAdvertisingNodeInfo(boolean exchange) throws Exception {
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x10203040);
+        RecordingConnection connection = new RecordingConnection();
+        ProtocolHandler handler = new ProtocolHandler(connection);
+        try {
+            if (exchange) {
+                MessageService.exchangeNodeUserInfo(handler, state, state.getMyNodeNum());
+            } else {
+                MessageService.requestNodeInfo(handler, state, state.getMyNodeNum());
+            }
+            MeshProtos.MeshPacket packet = parseToRadio(connection.awaitSentFrames(1).getFirst()).getPacket();
+            assertEquals(state.getMyNodeNum(), packet.getTo());
+            assertEquals(Portnums.PortNum.ADMIN_APP, packet.getDecoded().getPortnum());
+            assertTrue(AdminProtos.AdminMessage.parseFrom(packet.getDecoded().getPayload()).getGetOwnerRequest());
         } finally {
             handler.shutdown();
         }
@@ -213,7 +294,7 @@ class MessageServiceNodeInfoExchangeTest {
             assertEquals(1, sentFrames.size(), "DM should still be sent using fallback hex nodeId");
             assertEquals("!55667788", sent.getToNodeId());
 
-            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket packet = directMessage.getPacket();
             assertEquals(myNodeNum, packet.getFrom());
             assertEquals(targetNodeNum, packet.getTo());
@@ -258,7 +339,7 @@ class MessageServiceNodeInfoExchangeTest {
             List<byte[]> sentFrames = connection.awaitSentFrames(1);
             assertEquals(1, sentFrames.size());
 
-            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket packet = directMessage.getPacket();
             assertEquals(targetNodeNum, packet.getTo());
             assertEquals(3, packet.getChannel());
@@ -303,7 +384,7 @@ class MessageServiceNodeInfoExchangeTest {
             List<byte[]> sentFrames = connection.awaitSentFrames(1);
             assertEquals(1, sentFrames.size());
 
-            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket packet = directMessage.getPacket();
             assertEquals(targetNodeNum, packet.getTo());
             assertEquals(4, packet.getChannel());
@@ -348,7 +429,7 @@ class MessageServiceNodeInfoExchangeTest {
             List<byte[]> sentFrames = connection.awaitSentFrames(1);
             assertEquals(1, sentFrames.size());
 
-            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket packet = directMessage.getPacket();
             assertEquals(targetNodeNum, packet.getTo());
             assertEquals(4, packet.getChannel());
@@ -399,7 +480,7 @@ class MessageServiceNodeInfoExchangeTest {
             List<byte[]> sentFrames = connection.awaitSentFrames(1);
             assertEquals(1, sentFrames.size());
 
-            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio directMessage = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket packet = directMessage.getPacket();
             assertEquals(targetNodeNum, packet.getTo());
             assertEquals(0, packet.getChannel());
@@ -443,7 +524,7 @@ class MessageServiceNodeInfoExchangeTest {
             List<byte[]> sentFrames = connection.awaitSentFrames(2);
             assertEquals(2, sentFrames.size());
 
-            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.get(0));
+            MeshProtos.ToRadio sharedUser = parseToRadio(sentFrames.getFirst());
             MeshProtos.MeshPacket sharedUserPacket = sharedUser.getPacket();
             assertEquals(Portnums.PortNum.NODEINFO_APP, sharedUserPacket.getDecoded().getPortnum());
             MeshProtos.User sharedPayload = MeshProtos.User.parseFrom(sharedUserPacket.getDecoded().getPayload());
@@ -478,7 +559,7 @@ class MessageServiceNodeInfoExchangeTest {
     }
 
     @Test
-    void sendDirectMessageSkipsPeersMarkedUnmessagable() throws Exception {
+    void sendDirectMessageSkipsPeersMarkedUnmessagable() {
         int myNodeNum = 0x11111111;
         int targetNodeNum = 0x66666666;
         String peerNodeId = "!66666666";
@@ -512,10 +593,10 @@ class MessageServiceNodeInfoExchangeTest {
 
     private static final class RecordingConnection implements MeshtasticConnection {
 
-        private final List<byte[]> sentFrames = Collections.synchronizedList(new ArrayList<>());
+        private final List<byte[]> sentFrames = new ArrayList<>();
 
         @Override
-        public void connect() throws ConnectionException {
+        public void connect() {
             // no-op for tests
         }
 
@@ -531,7 +612,10 @@ class MessageServiceNodeInfoExchangeTest {
 
         @Override
         public void sendBytes(byte[] data) {
-            sentFrames.add(Arrays.copyOf(data, data.length));
+            synchronized (sentFrames) {
+                sentFrames.add(Arrays.copyOf(data, data.length));
+                sentFrames.notifyAll();
+            }
         }
 
         @Override
@@ -551,16 +635,17 @@ class MessageServiceNodeInfoExchangeTest {
 
         List<byte[]> awaitSentFrames(int expectedCount) throws InterruptedException {
             long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-            List<byte[]> snapshot = snapshotSentFrames();
-            while (snapshot.size() < expectedCount && System.nanoTime() < deadlineNanos) {
-                Thread.sleep(10);
-                snapshot = snapshotSentFrames();
+            synchronized (sentFrames) {
+                while (sentFrames.size() < expectedCount) {
+                    long remainingNanos = deadlineNanos - System.nanoTime();
+                    if (remainingNanos <= 0) {
+                        throw new AssertionError("Timed out waiting for " + expectedCount
+                                + " outbound frames, got " + sentFrames.size());
+                    }
+                    TimeUnit.NANOSECONDS.timedWait(sentFrames, remainingNanos);
+                }
+                return new ArrayList<>(sentFrames);
             }
-            if (snapshot.size() < expectedCount) {
-                throw new AssertionError("Timed out waiting for " + expectedCount
-                        + " outbound frames, got " + snapshot.size());
-            }
-            return snapshot;
         }
 
         List<byte[]> snapshotSentFrames() {
