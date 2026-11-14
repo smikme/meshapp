@@ -11,6 +11,8 @@ import com.meshtastic.client.service.ConnectionManager;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.system.DrawerManager;
 import com.meshtastic.client.system.DrawerPane;
+import com.meshtastic.client.system.Form;
+import com.meshtastic.client.system.FormManager;
 import com.meshtastic.client.system.MainForm;
 import com.meshtastic.client.system.RootPane;
 import com.meshtastic.client.utils.AppPreferences;
@@ -29,7 +31,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.meshtastic.proto.ChannelProtos;
+import org.meshtastic.proto.MeshProtos;
 
 import java.lang.reflect.Field;
 import java.nio.file.Path;
@@ -214,6 +218,80 @@ class FormChatTest {
 
             assertFalse(form.formVisible);
             assertEquals(generation + 1, form.scrollOperationGeneration);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void canNavigateAwayFromNonemptyMeshCoreDmEvenIfPreferencesFail(boolean preferencesFail) {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            Field mainFormField = findField(FormManager.class, "mainForm");
+            Field currentFormField = findField(FormManager.class, "currentForm");
+            Object previousMainForm = mainFormField.get(null);
+            Object previousForm = currentFormField.get(null);
+            DrawerPane previousDrawer = DrawerManager.getDrawerPane();
+            try {
+                FormChat form = loadedMeshCoreDm(state);
+                String owner = form.currentOwnerNodeId();
+                String chat = form.chatScrollStateKey(form.selectedChat);
+                String cacheKey = form.chatScrollCacheKey(form.selectedChat);
+                long messageId = form.latestKnownDbId;
+                long generation = form.scrollOperationGeneration;
+                MainForm mainForm = new MainForm();
+                mainForm.setForm(form);
+                mainFormField.set(null, mainForm);
+                currentFormField.set(null, form);
+                DrawerManager.setDrawerPane(null);
+                if (preferencesFail) AppPreferences.getState().removeNode();
+
+                Form next = new Form();
+                FormManager.showDynamicForm(next, "test-navigation");
+
+                assertEquals(next, FormManager.getCurrentForm());
+                assertEquals(next, readField(mainForm, "currentForm"));
+                assertFalse(form.formVisible);
+                assertEquals(generation + 1, form.scrollOperationGeneration);
+                assertEquals(messageId, form.savedChatScrollStates.get(cacheKey).anchorDbId());
+                if (!preferencesFail) {
+                    AppPreferences.ChatScrollState saved = AppPreferences.loadChatScrollState(owner, chat);
+                    assertNotNull(saved);
+                    assertEquals(messageId, saved.getAnchorDbId());
+                    assertTrue(saved.isAtBottom());
+                }
+            } finally {
+                if (preferencesFail) AppPreferences.init();
+                mainFormField.set(null, previousMainForm);
+                currentFormField.set(null, previousForm);
+                DrawerManager.setDrawerPane(previousDrawer);
+                state.shutdown();
+            }
+        });
+    }
+
+    @Test
+    void canSwitchFromNonemptyMeshCoreDmToAnotherChat() {
+        onFxThread(() -> {
+            DeviceState state = new DeviceState();
+            FormChat form = loadedMeshCoreDm(state);
+            try {
+                String owner = form.currentOwnerNodeId();
+                String previousChat = form.chatScrollStateKey(form.selectedChat);
+                long messageId = form.latestKnownDbId;
+                state.addChannel(channelProto(0));
+                ChatItem next = channel(0);
+
+                invokeChatAction(form, "handleChatSelection", next);
+
+                assertEquals(next, form.selectedChat);
+                assertTrue(form.isChatDetailOpenFor(next));
+                AppPreferences.ChatScrollState saved = AppPreferences.loadChatScrollState(owner, previousChat);
+                assertNotNull(saved);
+                assertEquals(messageId, saved.getAnchorDbId());
+            } finally {
+                form.cancelHistoryLoading();
+                state.shutdown();
+            }
         });
     }
 
@@ -1099,6 +1177,26 @@ class FormChatTest {
         assertEquals(2, loaded.getHopLimit());
         assertEquals(-84, loaded.getRxRssi());
         assertEquals(6.0f, loaded.getRxSnr());
+    }
+
+    private static FormChat loadedMeshCoreDm(DeviceState state) {
+        String owner = "mc:" + "a".repeat(64);
+        String peer = "mc:" + "b".repeat(64);
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setId(owner).build());
+        MeshMessage message = new MeshMessage(owner, peer, 0, "sent DM", 10, true);
+        message.setPacketId(1_500_000_000);
+        state.addDirectMessage(message, peer);
+        assertTrue(message.getDbId() > 0);
+
+        FormChat form = new FormChat();
+        form.state = state;
+        form.selectedChat = ChatItem.fromDirectMessage(peer, null, message, 0, false);
+        form.loadedChatScrollCacheKey = form.chatScrollCacheKey(form.selectedChat);
+        form.loadedMessages.add(message);
+        form.newestLoadedDbId = message.getDbId();
+        form.latestKnownDbId = message.getDbId();
+        form.formVisible = true;
+        return form;
     }
 
     private static MeshMessage incoming(String text) {
