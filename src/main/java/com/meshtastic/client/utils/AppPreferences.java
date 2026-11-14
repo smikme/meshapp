@@ -32,6 +32,7 @@ public class AppPreferences {
     public static final String KEY_DISABLE_EFFECTS = "disableEffects";
     public static final String KEY_SOFTWARE_RENDERING = "softwareRendering";
     public static final String KEY_CHECK_UPDATES = "checkUpdates";
+    public static final String KEY_UPDATE_CHANNEL = "updateChannel";
     public static final String KEY_MINIMIZE_TO_TRAY = "minimizeToTray";
     public static final String KEY_JFR_DIAGNOSTICS = "jfrDiagnostics";
     public static final String KEY_LUA_CURL_SECURITY_RESTRICTIONS_DISABLED =
@@ -83,6 +84,36 @@ public class AppPreferences {
 
     private static Preferences state;
     private static final ReadOnlyBooleanWrapper cyrillicCompaction = new ReadOnlyBooleanWrapper(false);
+
+    public enum UpdateChannel {
+        STABLE("stable", "settings.updates.channel.stable"),
+        UNSTABLE("unstable", "settings.updates.channel.unstable");
+
+        private final String preferenceValue;
+        private final String displayKey;
+
+        UpdateChannel(String preferenceValue, String displayKey) {
+            this.preferenceValue = preferenceValue;
+            this.displayKey = displayKey;
+        }
+
+        public String preferenceValue() {
+            return preferenceValue;
+        }
+
+        public String displayKey() {
+            return displayKey;
+        }
+
+        static UpdateChannel fromPreferenceValue(String value) {
+            for (UpdateChannel channel : values()) {
+                if (channel.preferenceValue.equalsIgnoreCase(value)) {
+                    return channel;
+                }
+            }
+            return STABLE;
+        }
+    }
 
     public enum MqttDownlinkFilterMode {
         NO_FILTER("none", "settings.mqttFilter.mode.none"),
@@ -238,6 +269,15 @@ public class AppPreferences {
 
     public static void setCheckUpdates(boolean value) {
         state().putBoolean(KEY_CHECK_UPDATES, value);
+    }
+
+    /** Defaults to stable regardless of the installed build's channel. */
+    public static UpdateChannel getUpdateChannel() {
+        return UpdateChannel.fromPreferenceValue(state().get(KEY_UPDATE_CHANNEL, null));
+    }
+
+    public static void setUpdateChannel(UpdateChannel channel) {
+        state().put(KEY_UPDATE_CHANNEL, (channel != null ? channel : UpdateChannel.STABLE).preferenceValue());
     }
 
     public static boolean isMinimizeToTray() {

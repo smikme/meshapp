@@ -2,6 +2,8 @@ package com.meshtastic.client.update;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -182,6 +184,71 @@ class SelfUpdateLauncherTest {
         writeVersionJar(newer.resolve("MeshApp.jar"), "v2.4.0+build.127", 2004000);
         SelfUpdateInstaller.writeCurrent(plan.currentFile(), "v2.4.0+build.127");
         assertEquals("v2.4.0+build.127", SelfUpdateLauncher.ensurePayload(plan));
+    }
+
+    @Test
+    void installedStableSurvivesRestartWithTheSameUnstableNativePackage() throws Exception {
+        var unstablePackage = packagedPlan("v2.5.0-unstable.129");
+        assertEquals("v2.5.0-unstable.129", SelfUpdateLauncher.ensurePayload(unstablePackage));
+
+        installStablePayload(unstablePackage);
+
+        assertEquals("v2.4.0+build.128", SelfUpdateLauncher.ensurePayload(unstablePackage));
+        assertEquals("v2.4.0+build.128", SelfUpdateLauncher.ensurePayload(unstablePackage));
+        assertEquals("v2.4.0+build.128", Files.readString(unstablePackage.currentFile()).trim());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"v2.5.0+build.130", "v2.6.0-unstable.131"})
+    void replacingTheNativePackageStillActivatesItsNewerPayloadAfterAStableTransition(String nextVersion) throws Exception {
+        var previousPackage = packagedPlan("v2.5.0-unstable.129");
+        SelfUpdateLauncher.ensurePayload(previousPackage);
+        installStablePayload(previousPackage);
+
+        var nextPackage = packagedPlan(nextVersion);
+        assertEquals(nextVersion, SelfUpdateLauncher.ensurePayload(nextPackage));
+        assertEquals(nextVersion, Files.readString(nextPackage.currentFile()).trim());
+    }
+
+    @Test
+    void stableNativePackageStillRejectsAnOlderStablePayload() throws Exception {
+        var plan = packagedPlan("v2.5.0+build.129");
+        SelfUpdateLauncher.ensurePayload(plan);
+        installStablePayload(plan);
+
+        assertEquals("v2.5.0+build.129", SelfUpdateLauncher.ensurePayload(plan));
+    }
+
+    @Test
+    void missingStablePayloadFallsBackToTheNativePackage() throws Exception {
+        var plan = packagedPlan("v2.5.0-unstable.129");
+        SelfUpdateLauncher.ensurePayload(plan);
+        SelfUpdateInstaller.writeCurrent(plan.currentFile(), "v2.4.0+build.128");
+
+        assertEquals("v2.5.0-unstable.129", SelfUpdateLauncher.ensurePayload(plan));
+    }
+
+    private SelfUpdateLauncher.PayloadPlan packagedPlan(String version) throws Exception {
+        Path packaged = tempDir.resolve("package-" + version);
+        Files.createDirectories(packaged);
+        int code = ReleaseVersion.parse(version).orElseThrow().legacyCode();
+        writeVersionJar(packaged.resolve("MeshApp.jar"), version, code);
+        return new SelfUpdateLauncher.PayloadPlan(tempDir.resolve("root"), tempDir.resolve("staging"),
+                packaged, version, code, "MeshApp");
+    }
+
+    private void installStablePayload(SelfUpdateLauncher.PayloadPlan plan) throws Exception {
+        String version = "v2.4.0+build.128";
+        Path jar = tempDir.resolve("stable.jar");
+        writeVersionJar(jar, version, ReleaseVersion.parse(version).orElseThrow().legacyCode());
+        Path archive = tempDir.resolve("stable.zip");
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(archive))) {
+            zip.putNextEntry(new ZipEntry("lib/MeshApp.jar"));
+            Files.copy(jar, zip);
+            zip.closeEntry();
+        }
+        new SelfUpdateInstaller().apply(new SelfUpdateInstaller.Request(plan.root(), archive, version,
+                SelfUpdateInstaller.sha256(archive), 0, null, SelfUpdateEnvironment.Layout.MANAGED));
     }
 
     private static void writeVersionJar(Path jar, String version, int versionCode) throws Exception {

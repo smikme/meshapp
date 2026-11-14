@@ -177,6 +177,7 @@ public final class ApplicationSettingsPanelFactory {
             createMqttDownlinkFilterSettingRow(),
             createLuaCurlSecuritySettingRow(),
             checkUpdatesCb,
+            createUpdateChannelSettingRow(),
             jfrDiagnosticsCb,
             diagnosticsNote
         );
@@ -527,6 +528,40 @@ public final class ApplicationSettingsPanelFactory {
             languageBox,
             restartLabel
         );
+    }
+
+    private static VBox createUpdateChannelSettingRow() {
+        Label titleLabel = new Label(I18n.t("settings.updates.channel.title"));
+        titleLabel.getStyleClass().add("item-title");
+
+        Label descriptionLabel = new Label(I18n.t("settings.updates.channel.description"));
+        descriptionLabel.getStyleClass().add("muted-note-label");
+        descriptionLabel.setWrapText(true);
+
+        ComboBox<AppPreferences.UpdateChannel> channelBox = new ComboBox<>(
+                FXCollections.observableArrayList(AppPreferences.UpdateChannel.values()));
+        channelBox.setId("update-channel");
+        channelBox.setButtonCell(createUpdateChannelCell());
+        channelBox.setCellFactory(_ -> createUpdateChannelCell());
+        channelBox.getSelectionModel().select(AppPreferences.getUpdateChannel());
+        channelBox.valueProperty().addListener((_, _, newValue) -> {
+            if (newValue != null) {
+                AppPreferences.setUpdateChannel(newValue);
+            }
+        });
+        titleLabel.setLabelFor(channelBox);
+
+        return new VBox(6, titleLabel, descriptionLabel, channelBox);
+    }
+
+    private static ListCell<AppPreferences.UpdateChannel> createUpdateChannelCell() {
+        return new ListCell<>() {
+            @Override
+            protected void updateItem(AppPreferences.UpdateChannel item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : I18n.t(item.displayKey()));
+            }
+        };
     }
 
     private static VBox createMqttDownlinkFilterSettingRow() {

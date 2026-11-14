@@ -7,6 +7,8 @@ import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.platform.OsDetect.OsType;
 import com.meshtastic.client.platform.OsDetect.PackageFormat;
 import com.meshtastic.client.update.ReleaseVersion;
+import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.AppPreferences.UpdateChannel;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +23,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 /**
- * Checks for application updates at startup.
+ * Checks for application updates at startup and on request.
  * <p>
- * Compares release versions and build numbers in the installed release's channels,
+ * Compares release versions and build numbers in the user's selected update channels,
  * retaining integer-code compatibility with older manifests. The callback runs on JavaFX.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -38,7 +40,7 @@ public final class UpdateCheckService {
     private UpdateCheckService() {}
 
     /**
-     * Checks for updates asynchronously. When a newer version is available, the
+     * Checks for updates asynchronously. When an eligible release is available, the
      * callback is invoked on the JavaFX application thread.
      */
     public static void checkAsync(Consumer<UpdateInfo> onUpdateAvailable) {
@@ -58,7 +60,8 @@ public final class UpdateCheckService {
 
     /**
      * Checks for updates asynchronously and completes with update information when
-     * the remote manifest contains a newer version.
+     * the remote manifest contains a newer version or a requested transition to stable.
+     * The preference applies to both startup and manual checks without restarting.
      */
     public static CompletableFuture<Optional<UpdateInfo>> checkForUpdateAsync() {
         HttpClient client = HttpClient.newBuilder()
@@ -72,9 +75,10 @@ public final class UpdateCheckService {
     static CompletableFuture<Optional<UpdateInfo>> checkForUpdateAsync(
             HttpClient client, URI root, String localVersion, int localCode) {
         if (localCode <= 0) return CompletableFuture.completedFuture(Optional.empty());
-        var stable = fetchChannel(client, root, "stable", localVersion, localCode);
-        if (!ReleaseVersion.parse(localVersion).map(ReleaseVersion::unstable).orElse(false)) return stable;
-        var unstable = fetchChannel(client, root, "unstable", localVersion, localCode);
+        UpdateChannel selectedChannel = AppPreferences.getUpdateChannel();
+        var stable = fetchChannel(client, root, "stable", localVersion, localCode, selectedChannel);
+        if (selectedChannel != UpdateChannel.UNSTABLE) return stable;
+        var unstable = fetchChannel(client, root, "unstable", localVersion, localCode, selectedChannel);
         return stable.thenCombine(unstable, (a, b) -> {
             if (a.isEmpty()) return b;
             if (b.isEmpty()) return a;
@@ -84,7 +88,8 @@ public final class UpdateCheckService {
     }
 
     private static CompletableFuture<Optional<UpdateInfo>> fetchChannel(
-            HttpClient client, URI root, String channel, String localVersion, int localCode) {
+            HttpClient client, URI root, String channel, String localVersion, int localCode,
+            UpdateChannel selectedChannel) {
         HttpRequest request = buildRequest(
                 root.resolve(channel + "/meshapp.json"),
                 OsDetect.current(),
@@ -102,17 +107,23 @@ public final class UpdateCheckService {
                         log.warn("Update check: HTTP {}", response.statusCode());
                         throw new IllegalStateException("HTTP " + response.statusCode());
                     }
-                    return availableUpdate(response.body(), localVersion, localCode, channel);
+                    return availableUpdate(response.body(), localVersion, localCode, channel, selectedChannel);
                 });
     }
 
-    static Optional<UpdateInfo> availableUpdate(String body, String localVersion, int localVersionCode, String channel) {
+    static Optional<UpdateInfo> availableUpdate(String body, String localVersion, int localVersionCode,
+                                               String channel, UpdateChannel selectedChannel) {
         UpdateInfo info = GSON.fromJson(body, UpdateInfo.class);
         if (info != null && (info.hasInconsistentVersionMetadata() || !channel.equals(info.getChannel()))) {
             throw new IllegalArgumentException("Update manifest version/channel metadata does not match its feed");
         }
-        if (info != null && info.getVersionCode() > 0 && ReleaseVersion.compare(info.getVersion(), info.getVersionCode(),
-                localVersion, localVersionCode) > 0) {
+        // Selecting Stable means leaving an installed test build, even for an older base version.
+        boolean returnToStable = selectedChannel == UpdateChannel.STABLE
+                && ReleaseVersion.parse(localVersion).map(ReleaseVersion::unstable).orElse(false)
+                && info != null
+                && ReleaseVersion.parse(info.getVersion()).map(version -> !version.unstable()).orElse(false);
+        if (info != null && info.getVersionCode() > 0 && (returnToStable
+                || ReleaseVersion.compare(info.getVersion(), info.getVersionCode(), localVersion, localVersionCode) > 0)) {
             log.info("Update available: {} (code {}), current code {}",
                     info.getVersion(), info.getVersionCode(), localVersionCode);
             return Optional.of(info);

@@ -115,10 +115,15 @@ public final class SelfUpdateLauncher {
         Files.createDirectories(plan.versionsDir());
         Files.createDirectories(plan.stagingDir());
 
+        boolean bundledUnchanged = readCurrent(plan.bundledVersionFile())
+                .filter(plan.bundledVersion()::equals).isPresent();
         Optional<String> current = readCurrent(plan.currentFile());
         if (current.isPresent()) {
             Path currentDir = plan.versionDir(current.get());
-            if (Files.isDirectory(currentDir) && isCurrentPayloadAtLeastBundled(currentDir, current.get(), plan)) {
+            if (Files.isDirectory(currentDir) && shouldKeepCurrentPayload(currentDir, current.get(), plan, bundledUnchanged)) {
+                if (!bundledUnchanged) {
+                    SelfUpdateInstaller.writeCurrent(plan.bundledVersionFile(), plan.bundledVersion());
+                }
                 return current.get();
             }
         }
@@ -134,6 +139,7 @@ public final class SelfUpdateLauncher {
         }
 
         SelfUpdateInstaller.writeCurrent(plan.currentFile(), plan.bundledVersion());
+        SelfUpdateInstaller.writeCurrent(plan.bundledVersionFile(), plan.bundledVersion());
         return plan.bundledVersion();
     }
 
@@ -367,10 +373,19 @@ public final class SelfUpdateLauncher {
         }
     }
 
-    private static boolean isCurrentPayloadAtLeastBundled(Path currentDir,
-                                                          String currentVersion,
-                                                          PayloadPlan plan) {
+    private static boolean shouldKeepCurrentPayload(Path currentDir,
+                                                    String currentVersion,
+                                                    PayloadPlan plan,
+                                                    boolean bundledUnchanged) {
         Optional<VersionInfo> currentInfo = payloadVersionInfo(currentDir);
+        // An accepted Unstable -> Stable installation must survive later starts of the
+        // same native package. A different native package still uses normal version ordering.
+        if (bundledUnchanged
+                && ReleaseVersion.parse(plan.bundledVersion()).map(ReleaseVersion::unstable).orElse(false)
+                && ReleaseVersion.parse(currentInfo.map(VersionInfo::version).orElse(currentVersion))
+                        .map(version -> !version.unstable()).orElse(false)) {
+            return true;
+        }
         if (currentInfo.isPresent() && currentInfo.get().versionCode() > 0) {
             return ReleaseVersion.compare(currentInfo.get().version(), currentInfo.get().versionCode(),
                     plan.bundledVersion(), plan.bundledVersionCode()) >= 0;
@@ -684,5 +699,6 @@ public final class SelfUpdateLauncher {
         Path versionsDir() { return root.resolve("versions"); }
         Path versionDir(String version) { return versionsDir().resolve(version); }
         Path currentFile() { return root.resolve("current"); }
+        Path bundledVersionFile() { return root.resolve("bundled-version"); }
     }
 }
