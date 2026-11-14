@@ -3,6 +3,10 @@ package com.meshtastic.client.utils;
 import com.meshtastic.client.model.ConnectionEntry;
 import com.meshtastic.client.platform.OsDetect;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.prefs.BackingStoreException;
 import java.util.prefs.Preferences;
 import javafx.beans.property.ReadOnlyBooleanProperty;
@@ -941,8 +945,18 @@ public class AppPreferences {
         return state().node(NODE_CHAT_SELECTION);
     }
 
+    /** Preserves existing short keys while fitting full MeshCore identities into Preferences. */
     private static String composeChatScrollKey(String ownerId, String chatId) {
-        return (ownerId != null ? ownerId : "") + "|" + (chatId != null ? chatId : "");
+        String key = (ownerId != null ? ownerId : "") + "|" + (chatId != null ? chatId : "");
+        if (key.length() <= Preferences.MAX_KEY_LENGTH) {
+            return key;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(key.getBytes(StandardCharsets.UTF_8));
+            return "sha256:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
 }
