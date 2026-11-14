@@ -1378,12 +1378,17 @@ abstract class FormChatMessages extends FormChatUi {
         if (scrollState != null) {
             String chatId = chatScrollStateKey(selectedChat);
             savedChatScrollStates.put(chatScrollCacheKey(selectedChat), scrollState);
-            AppPreferences.saveChatScrollState(
-                    currentOwnerNodeId(),
-                    chatId,
-                    scrollState.anchorDbId(),
-                    scrollState.anchorOffset(),
-                    scrollState.atBottom());
+            try {
+                AppPreferences.saveChatScrollState(
+                        currentOwnerNodeId(),
+                        chatId,
+                        scrollState.anchorDbId(),
+                        scrollState.anchorOffset(),
+                        scrollState.atBottom());
+            } catch (RuntimeException e) {
+                // A failed preference write must not prevent leaving the chat or closing the form.
+                log.warn("Failed to persist chat scroll position; keeping it in memory", e);
+            }
         }
     }
 
