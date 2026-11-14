@@ -19,9 +19,7 @@ case "$arch" in
     ;;
 esac
 
-sudo apt-get update
-sudo apt-get install -y build-essential cmake pkg-config libsystemd-dev fakeroot \
-  libgtk-3-0 libasound2 xvfb flatpak dbus-daemon
+bash "$(dirname "${BASH_SOURCE[0]}")/install-linux-dependencies.sh" fakeroot flatpak dbus-daemon
 flatpak --user remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak --user install -y flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
 # Ubuntu 22.04 ships Builder 1.2, whose appstream-compose was removed from

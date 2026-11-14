@@ -829,7 +829,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
         if (fromNodeNum == request.targetNodeNum()) {
             return true;
         }
-        return pendingTraceroutes.size() == 1;
+        return pendingTraceroutes.values().stream().filter(pending -> !pending.completed.get()).count() == 1;
     }
 
     private void completeTraceroute(String requestId,
@@ -837,7 +837,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
                                     String status,
                                     MeshProtos.RouteDiscovery route,
                                     String error) {
-        PendingTraceroute pending = pendingTraceroutes.remove(requestId);
+        PendingTraceroute pending = pendingTraceroutes.get(requestId);
         if (pending == null || !pending.completed.compareAndSet(false, true)) {
             return;
         }
@@ -848,8 +848,15 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             pending.timeoutFuture.cancel(false);
         }
         try {
-            executor.execute(() -> callTraceroute(pending.request, responseFromNodeNum, status, route, error));
+            // A fast radio reply can arrive before the initiating Lua callback returns.
+            // Keep it pending until the result callback starts, so finishIfIdle cannot
+            // close the session while the result is still queued on the executor.
+            executor.execute(() -> {
+                pendingTraceroutes.remove(requestId, pending);
+                callTraceroute(pending.request, responseFromNodeNum, status, route, error);
+            });
         } catch (RejectedExecutionException ignored) {
+            pendingTraceroutes.remove(requestId, pending);
             // Session is stopping.
         }
     }
@@ -935,7 +942,7 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
     }
 
     private void completeNodeInfo(String requestId, String status, NodeData node, String error) {
-        PendingNodeInfo pending = pendingNodeInfos.remove(requestId);
+        PendingNodeInfo pending = pendingNodeInfos.get(requestId);
         if (pending == null || !pending.completed.compareAndSet(false, true)) {
             return;
         }
@@ -946,8 +953,13 @@ final class LuaRuntimeSession implements LuaUiBridge, LuaTracerouteBridge, LuaNo
             pending.timeoutFuture.cancel(false);
         }
         try {
-            executor.execute(() -> callNodeInfo(pending.request, status, node, error));
+            // As with traceroute, queued results still count as pending async work.
+            executor.execute(() -> {
+                pendingNodeInfos.remove(requestId, pending);
+                callNodeInfo(pending.request, status, node, error);
+            });
         } catch (RejectedExecutionException ignored) {
+            pendingNodeInfos.remove(requestId, pending);
             // Session is stopping.
         }
     }

@@ -778,6 +778,10 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	testLogging {
+		// Keep the first JavaFX startup failure visible in CI, including its native cause.
+		exceptionFormat = 'full'
+	}
 	// Do not configure native access statically: regular OpenJDK loads JavaFX from the classpath,
 	// while Liberica Full JDK contains javafx.graphics in its runtime image as a named module.
 	def testJavaLauncher = javaToolchains.launcherFor {
@@ -788,6 +792,15 @@ tasks.named('test') {
 	def testPreferencesDir = layout.buildDirectory.dir('test-java-preferences').get().asFile
 	systemProperty 'java.util.prefs.userRoot', testPreferencesDir.absolutePath
 	systemProperty 'java.util.prefs.systemRoot', new File(testPreferencesDir, 'system').absolutePath
+	if (OperatingSystem.current().isMacOsX()
+			&& System.getenv('GITHUB_ACTIONS') == 'true'
+			&& System.getenv('RUNNER_ARCH') == 'X64') {
+		// Hosted Intel Macs cannot reliably initialize Metal or ES2. The Headless Glass
+		// backend keeps UI tests independent of native windows and the VM's GPU driver.
+		systemProperty 'glass.platform', 'Headless'
+		systemProperty 'prism.order', 'sw'
+		systemProperty 'java.awt.headless', 'true'
+	}
 	doFirst {
 		testPreferencesDir.mkdirs()
 		new File(testPreferencesDir, 'system').mkdirs()
@@ -2333,6 +2346,10 @@ tasks.register('jpackage') {
 
 		if (!os.isWindows() && !macBuild) {
 			args << '--linux-shortcut'
+			if (normalizeArtifactArch() == 'aarch64') {
+				// JavaFX natives live inside JARs, beyond jpackage's ELF dependency scan.
+				args += ['--linux-package-deps', 'libc6 (>= 2.38)']
+			}
 			if (linuxResourceDir != null) {
 				args << '--resource-dir'
 				args << linuxResourceDir.absolutePath

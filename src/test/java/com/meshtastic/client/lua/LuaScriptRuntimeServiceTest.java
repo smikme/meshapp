@@ -19,6 +19,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -830,6 +832,9 @@ class LuaScriptRuntimeServiceTest {
 
         awaitCondition(() -> "!0000beef".equals(scriptService.getKv(automation.getId(), "selection_node")),
                 "Lua node selection callback did not run");
+        // The callback writes its result before finishIfIdle closes the session.
+        awaitCondition(() -> !runtimeService.isRunning(automation.getId()),
+                "Lua node selection automation did not finish");
 
         assertEquals("selected", scriptService.getKv(automation.getId(), "selection_status"));
         assertEquals("ui_result", scriptService.getKv(automation.getId(), "selection_type"));
@@ -837,7 +842,7 @@ class LuaScriptRuntimeServiceTest {
         assertEquals("pick_target", scriptService.getKv(automation.getId(), "selection_name"));
         assertEquals(request.requestId(), scriptService.getKv(automation.getId(), "selection_request_id"));
         assertEquals("dm:!abcdef01", scriptService.getKv(automation.getId(), "selection_chat"));
-        assertFalse(runtimeService.isRunning(automation.getId()));
+        assertEquals("FINISHED", scriptService.findScript(automation.getId()).orElseThrow().getLastStatus());
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
     }
 
@@ -917,6 +922,68 @@ class LuaScriptRuntimeServiceTest {
                 .loadLast("channel", "0", 10, "")
                 .isEmpty());
         assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"traceroute,on_traceroute", "nodeinfo,on_node_info"})
+    void immediateRadioReplyIsDeliveredBeforeAutomationFinishes(String api, String callback) {
+        LuaScript automation = scriptService.createScript("immediate-" + api, """
+                function on_command(command)
+                    mesh.%s.request({ node_num = 48879 }, {
+                        chat_type = command.chat_type, chat_key = command.chat_key
+                    })
+                    mesh.log('wait-for-reply')
+                end
+                function %s(event)
+                    mesh.kv.set('callbacks', tostring(tonumber(mesh.kv.get('callbacks') or '0') + 1))
+                    mesh.chat.bot_message(event.chat_type, event.chat_key, 'radio result: ' .. event.status)
+                end
+                """.formatted(api, callback), true, "", LuaScript.BotType.AUTOMATION_BOT, "@replybot");
+        DeviceState state = new DeviceState();
+        state.setMyNodeNum(0x12345678);
+        state.getNodeDb().put(0xBEEF, new NodeData(0xBEEF));
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Bot host").build());
+        FakeTransportConnection transport = new FakeTransportConnection();
+        CountDownLatch replyDelivered = new CountDownLatch(1);
+        transport.onWrite = _ -> {
+            for (int reply = 0; reply < 2; reply++) {
+                if ("traceroute".equals(api)) {
+                    state.fireTracerouteListeners(0xBEEF, MeshProtos.RouteDiscovery.newBuilder()
+                            .addRoute(0xCAFE).build());
+                } else {
+                    state.fireNodeUpdateListeners(0xBEEF);
+                }
+            }
+            replyDelivered.countDown();
+        };
+        ProtocolHandler handler = new ProtocolHandler(transport);
+        AtomicBoolean closed = new AtomicBoolean();
+        LuaRuntimeSession session = new LuaRuntimeSession(automation,
+                new LuaScriptRuntimeService.RuntimeTarget("test", state, handler, null, "!12345678"),
+                scriptService, Set.of(), false,
+                new LuaAutomationCommand("channel", "0", "@replybot", "@replybot", "", List.of(), "reply-command"),
+                event -> {
+                    events.add(event);
+                    // ProtocolHandler sends asynchronously. Hold on_command until the
+                    // reply has queued its callback, then let its idle check run first.
+                    if (event.type() == LuaScriptEvent.Type.OUTPUT && "wait-for-reply".equals(event.message())) {
+                        awaitCondition(() -> replyDelivered.getCount() == 0, "Radio reply was not delivered");
+                    }
+                }, _ -> fail("Node picker must not be requested"), null, () -> closed.set(true));
+        try {
+            session.start();
+            awaitCondition(closed::get, "Automation did not finish after its immediate reply");
+            assertEquals("1", scriptService.getKv(automation.getId(), "callbacks"));
+            assertEquals("FINISHED", scriptService.findScript(automation.getId()).orElseThrow().getLastStatus());
+            assertTrue(MessageDbService.getInstance().loadLast("channel", "0", 10, "!12345678").stream()
+                    .anyMatch(message -> "radio result: ok".equals(message.getText()) && message.isSystemMessage()));
+            assertEquals(1, transport.writeCount(), "Bot output must stay in the local chat");
+            assertFalse(events.stream().anyMatch(event -> event.type() == LuaScriptEvent.Type.ERROR));
+        } finally {
+            session.stop();
+            handler.shutdown();
+            state.shutdown();
+        }
     }
 
     @Test
@@ -1074,6 +1141,7 @@ class LuaScriptRuntimeServiceTest {
                 "@infobot");
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Bot host").build());
         FakeTransportConnection transport = new FakeTransportConnection();
         ProtocolHandler handler = new ProtocolHandler(transport);
         AtomicBoolean closed = new AtomicBoolean(false);
@@ -1179,6 +1247,7 @@ class LuaScriptRuntimeServiceTest {
                 "@infobot");
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x12345678);
+        state.setOwnerInfo(MeshProtos.User.newBuilder().setLongName("Bot host").build());
         NodeData cached = state.getOrCreateNode(0x0000BEEF);
         cached.setLongName("Alpha Cached");
         FakeTransportConnection transport = new FakeTransportConnection();
@@ -1733,6 +1802,7 @@ class LuaScriptRuntimeServiceTest {
 
     private static final class FakeTransportConnection implements TransportConnection {
         private final BlockingQueue<byte[]> writes = new LinkedBlockingQueue<>();
+        private Consumer<byte[]> onWrite = _ -> {};
         private volatile Consumer<byte[]> dataListener;
         private volatile ConnectionListener connectionListener;
         private volatile boolean connected = true;
@@ -1761,6 +1831,7 @@ class LuaScriptRuntimeServiceTest {
         @Override
         public void sendBytes(byte[] data) {
             writes.add(data);
+            onWrite.accept(data);
         }
 
         @Override

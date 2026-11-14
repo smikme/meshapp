@@ -547,6 +547,7 @@ meshapp/
 MeshApp wird mit `jpackage` gebaut. Für Linux werden zusätzlich AppImage und Flatpak unterstützt.
 
 Linux-Pakete werden für x86_64 und ARM64 (`aarch64`) gebaut. Für einen lokalen Build gelten dieselben Befehle auf der Zielarchitektur mit passendem JDK 25 und appimagetool.
+DEB- und AppImage-Pakete für ARM64 benötigen glibc 2.38 oder neuer (zum Beispiel Ubuntu 24.04); das mitgelieferte JavaFX unterstützt Ubuntu 22.04 ARM64 nicht.
 
 | Plattform | Format | Befehl |
 |----------|--------|---------|
