@@ -32,21 +32,36 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class FirmwareOtaSignalInterferenceTest {
     @Test
     void cancellationSurvivesAnIgnoredNativeIoSignal(@TempDir Path temp) throws Exception {
+        runProbe(temp, "ota", "Confirmed: OTA cancellation survives ignored native signal");
+    }
+
+    @Test
+    void ignoredNativeIoSignalStallsBlockingRead(@TempDir Path temp) throws Exception {
+        runProbe(temp, "blocking", "Confirmed: ignored native signal stalls blocking I/O");
+    }
+
+    /** Each probe owns a JVM so a deliberately stuck control cannot prevent the OTA check. */
+    private static void runProbe(Path temp, String probe, String confirmation) throws Exception {
         assumeTrue(Platform.isLinux() || Platform.isMac());
         String classpath = String.join(File.pathSeparator,
                 classpathEntry(SignalProbe.class), classpathEntry(FirmwareOtaTcpUploader.class),
                 classpathEntry(Native.class), classpathEntry(LoggerFactory.class));
-        Path output = temp.resolve("signal-probe.log");
+        Path output = temp.resolve(probe + "-signal-probe.log");
         Process child = new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "--enable-native-access=ALL-UNNAMED", "-cp", classpath, SignalProbe.class.getName())
+                "--enable-native-access=ALL-UNNAMED", "-cp", classpath, SignalProbe.class.getName(), probe)
                 .redirectErrorStream(true).redirectOutput(output.toFile()).start();
         try {
             assertTrue(child.waitFor(20, TimeUnit.SECONDS), () -> "Signal probe stalled: " + readOutput(output));
             assertEquals(0, child.exitValue(), () -> readOutput(output));
-            System.out.print(readOutput(output));
+            String log = readOutput(output);
+            assertTrue(log.contains(confirmation), () -> "Missing probe confirmation: " + log);
+            System.out.print(log);
         } finally {
-            if (child.isAlive()) child.destroyForcibly();
+            if (child.isAlive()) {
+                child.destroyForcibly();
+                assertTrue(child.waitFor(3, TimeUnit.SECONDS), "Signal probe process did not terminate");
+            }
         }
     }
 
@@ -62,10 +77,11 @@ class FirmwareOtaSignalInterferenceTest {
     /**
      * jSerialComm 2.11.4 ignores SIGIO, used by macOS OpenJDK to wake blocking socket I/O.
      * Linux uses SIGRTMAX-2 instead, so disable that equivalent signal to reproduce the
-     * same failure locally. First verify that blocking I/O really stalls, then test OTA.
+     * same failure locally. The blocking control and OTA regression run in separate JVMs:
+     * only the OTA worker is expected to recover and release its own resources.
      */
     public static final class SignalProbe {
-        static void main() throws Exception {
+        static void main(String[] args) throws Exception {
             // Install OpenJDK's native I/O handler before replacing it, as happens when
             // serial discovery loads jSerialComm after the JVM has already used sockets.
             try (ServerSocket server = new ServerSocket(0);
@@ -81,39 +97,44 @@ class FirmwareOtaSignalInterferenceTest {
                 Pointer previous = signalFunction.invokePointer(new Object[]{signal, new Pointer(1)}); // SIG_IGN
                 if (Pointer.nativeValue(previous) == -1) throw new AssertionError("Could not disable native I/O signal");
                 try {
-                    verifyBlockingReadStalls();
-                    verifyOtaReadCancels();
+                    switch (args[0]) {
+                        case "blocking" -> verifyBlockingReadStalls();
+                        case "ota" -> verifyOtaReadCancels();
+                        default -> throw new IllegalArgumentException("Unknown signal probe: " + args[0]);
+                    }
                 } finally {
                     signalFunction.invokePointer(new Object[]{signal, previous});
                 }
             }
         }
 
+        /**
+         * Confirms the injected failure, then halts this disposable control JVM. Once the
+         * native wakeup signal is ignored, neither another interrupt nor peer EOF is a
+         * portable way to release the stuck read. The OS reclaims its sockets on exit.
+         */
         private static void verifyBlockingReadStalls() throws Exception {
             try (ServerSocket server = new ServerSocket(0);
                  SocketChannel channel = SocketChannel.open(); Socket socket = channel.socket()) {
                 socket.connect(new InetSocketAddress("127.0.0.1", server.getLocalPort()));
                 socket.setSoTimeout(60_000);
-                try (Socket peer = server.accept()) {
+                try (Socket _ = server.accept()) {
                     FutureTask<Integer> read = new FutureTask<>(() -> socket.getInputStream().read());
                     Thread worker = new Thread(read, "blocking-signal-probe");
                     worker.setDaemon(true);
                     worker.start();
+                    awaitNativePoll(worker);
+                    worker.interrupt();
                     try {
-                        awaitNativePoll(worker);
-                        worker.interrupt();
-                        try {
-                            read.get(250, TimeUnit.MILLISECONDS);
-                            throw new AssertionError("Blocking read unexpectedly completed");
-                        } catch (TimeoutException expected) {
-                            System.out.println("Confirmed: ignored native signal stalls blocking I/O");
-                        }
-                    } finally {
-                        // Network EOF, not another interrupt, releases the deliberately stuck read.
-                        peer.shutdownOutput();
-                        worker.join(5000);
+                        read.get(250, TimeUnit.MILLISECONDS);
+                        throw new AssertionError("Blocking read unexpectedly completed");
+                    } catch (TimeoutException expected) {
+                        System.out.println("Confirmed: ignored native signal stalls blocking I/O");
+                        System.out.flush();
+                        // Success for this control is a stuck worker. Do not run Java cleanup
+                        // or shutdown hooks that could depend on that worker completing.
+                        Runtime.getRuntime().halt(0);
                     }
-                    if (worker.isAlive()) throw new AssertionError("Blocking probe cleanup failed");
                 }
             }
         }
