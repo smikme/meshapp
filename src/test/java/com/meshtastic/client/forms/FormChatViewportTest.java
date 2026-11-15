@@ -15,6 +15,11 @@ import com.meshtastic.client.rpc.RpcTransportListener;
 import com.meshtastic.client.service.MessageDbService;
 import com.meshtastic.client.service.ChatHistoryLoader;
 import com.meshtastic.client.service.DatabaseProvider;
+import com.meshtastic.client.themes.AppearancePreferences;
+import com.meshtastic.client.themes.ChatBackground;
+import com.meshtastic.client.themes.ChatBackgroundView;
+import com.meshtastic.client.themes.ThemeManager;
+import com.meshtastic.client.themes.ThemePalette;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.control.TextField;
@@ -704,6 +709,46 @@ class FormChatViewportTest {
 
     private void pulse() throws Exception {
         for (int i = 0; i < 12; i++) fx(() -> { form.applyCss(); form.layout(); });
+    }
+
+    @Test
+    void wallpaperAndPaletteChangesPreserveMessagesAndReadingPosition() throws Exception {
+        seed(120);
+        fx(() -> {
+            ThemeManager.applyTheme(stage.getScene(), false);
+            form.openChat(channel(0));
+        });
+        drain();
+        fx(() -> form.messageScrollPane.setVvalue(.5));
+        pulse();
+        FormChatBase.ChatScrollState[] anchor = new FormChatBase.ChatScrollState[1];
+        List<Long> ids = new ArrayList<>();
+        var rows = new java.util.HashMap<Long, javafx.scene.layout.HBox>();
+        fx(() -> {
+            anchor[0] = form.captureViewportAnchor();
+            ids.addAll(form.loadedMessages.stream().map(MeshMessage::getDbId).toList());
+            rows.putAll(form.loadedMessageRows);
+            AppearancePreferences.setGlobalBackground(new ChatBackground(ChatBackground.Kind.GRID,
+                    "#123456", null, "", .2, 8, false));
+        });
+        pulse();
+        fx(() -> {
+            assertEquals(anchor[0].anchorOffset(), anchorOffset(anchor[0].anchorDbId()), 1);
+            assertEquals(ids, form.loadedMessages.stream().map(MeshMessage::getDbId).toList());
+            assertEquals(rows, form.loadedMessageRows, "a wallpaper change must not rebuild message rows");
+            var background = (ChatBackgroundView) form.messageArea.getChildren().getFirst();
+            assertEquals(ChatBackground.Kind.GRID, background.configuration().kind());
+            assertTrue(background.isMouseTransparent());
+            AppearancePreferences.setPalette(ThemePalette.GREEN);
+            com.meshtastic.client.utils.AppPreferences.setDarkMode(true);
+            ThemeManager.applyTheme(stage.getScene(), true);
+        });
+        pulse();
+        fx(() -> {
+            assertEquals(anchor[0].anchorOffset(), anchorOffset(anchor[0].anchorDbId()), 1);
+            assertEquals(ids, form.loadedMessages.stream().map(MeshMessage::getDbId).toList());
+            ThemeManager.unregisterScene(stage.getScene());
+        });
     }
 
     private void seed(int count) {

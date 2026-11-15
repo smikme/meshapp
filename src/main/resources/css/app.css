@@ -1,10 +1,22 @@
 /* MeshApp — кастомные стили поверх AtlantaFX Cupertino */
 
+/* Keep a standard -fx- property first so IDEs recognize JavaFX CSS. */
 /* Footer */
 .main-footer {
     -fx-min-height: 30;
     -fx-max-height: 30;
     -fx-background-color: -color-bg-subtle;
+}
+
+/* Default chat palette; appearance.css overrides these for selected palettes. */
+.root {
+    -chat-incoming-bg: -color-bg-subtle;
+    -chat-outgoing-bg: -color-bg-subtle;
+    -chat-selection-bg: #3a3a3c;
+    -chat-muted-fg: -color-fg-muted;
+}
+.root.light-theme {
+    -chat-selection-bg: #d1d1d6;
 }
 
 .footer-label {
@@ -2039,13 +2051,13 @@
 }
 
 .chat-list-view .virtual-flow .clipped-container .sheet .list-cell:selected {
-    -fx-background-color: #3A3A3C;
+    -fx-background-color: -chat-selection-bg;
     -fx-background-radius: 0;
     -fx-border-color: transparent;
 }
 
 .light-theme .chat-list-view .virtual-flow .clipped-container .sheet .list-cell:selected {
-    -fx-background-color: #D1D1D6;
+    -fx-background-color: -chat-selection-bg;
 }
 
 .chat-list-view .list-cell:selected .chat-name-label {
@@ -2335,12 +2347,12 @@
 }
 
 .chat-message-row-selected {
-    -fx-background-color: rgba(88, 166, 255, 0.12);
+    -fx-background-color: -color-accent-subtle;
     -fx-background-radius: 10;
 }
 
 .light-theme .chat-message-row-selected {
-    -fx-background-color: rgba(9, 105, 218, 0.12);
+    -fx-background-color: -color-accent-subtle;
 }
 
 /* Область сообщений */
@@ -2441,14 +2453,14 @@
 
 /* Пузыри сообщений — входящее (используем lookup-цвет, авто-адаптация light/dark) */
 .chat-bubble-incoming {
-    -fx-background-color: -color-bg-subtle;
+    -fx-background-color: -chat-incoming-bg;
     -fx-background-radius: 12 12 12 4;
     -fx-padding: 8 12;
 }
 
-/* Пузыри — исходящее (серый фон, как входящее) */
+/* Пузыри — исходящее; цвет задаёт выбранная палитра */
 .chat-bubble-outgoing {
-    -fx-background-color: -color-bg-subtle;
+    -fx-background-color: -chat-outgoing-bg;
     -fx-background-radius: 12 12 4 12;
     -fx-padding: 8 12;
 }
@@ -2530,13 +2542,13 @@
 
 /* Текстовые элементы пузырей */
 .chat-bubble-sender {
-    -fx-text-fill: -color-accent-emphasis;
+    -fx-text-fill: -color-accent-fg;
     -fx-font-size: 0.9231em;
     -fx-font-weight: bold;
 }
 
 .chat-bubble-quote {
-    -fx-text-fill: -color-fg-muted;
+    -fx-text-fill: -chat-muted-fg;
     -fx-font-size: 0.9231em;
     -fx-font-style: italic;
     -fx-border-color: -color-border-default;
@@ -2733,17 +2745,17 @@
 
 /* Время и хопы — lookup-цвет, авто-адаптация */
 .chat-bubble-time {
-    -fx-text-fill: -color-fg-muted;
+    -fx-text-fill: -chat-muted-fg;
     -fx-font-size: 0.7692em;
 }
 
 .chat-bubble-hops {
-    -fx-text-fill: -color-fg-muted;
+    -fx-text-fill: -chat-muted-fg;
     -fx-font-size: 0.7692em;
 }
 
 .chat-bubble-status {
-    -fx-text-fill: -color-fg-muted;
+    -fx-text-fill: -chat-muted-fg;
     -fx-font-size: 0.8462em;
 }
 
@@ -3155,14 +3167,14 @@
 
 /* Текст цитаты */
 .chat-bubble-quote-node {
-    -fx-fill: -color-fg-muted;
+    -fx-fill: -chat-muted-fg;
     -fx-font-family: 'Roboto';
     -fx-font-size: 0.9231em;
     -fx-font-style: italic;
 }
 
 .chat-bubble-url-node {
-    -fx-fill: -color-accent-emphasis;
+    -fx-fill: -color-accent-fg;
     -fx-underline: true;
 }
 

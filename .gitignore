@@ -24,6 +24,7 @@ bin/
 
 ### IntelliJ IDEA ###
 /.idea/*
+!/.idea/cssdialects.xml
 !/.idea/inspectionProfiles/
 /.idea/inspectionProfiles/*
 !/.idea/inspectionProfiles/Project_Default.xml

@@ -305,6 +305,10 @@ API documentation: [docs/lua-api.md](docs/lua-api.md).
 
 The interface includes dark and light AtlantaFX Cupertino themes, a sidebar, a system tray/status item, toast notifications, and quick switches for theme and notifications. Windows 11 uses Mica, and macOS uses vibrancy. Window size and position, as well as splitter positions, are saved between sessions.
 
+In application settings, the Appearance section includes **Themes and chat backgrounds**. Choose the standard, blue, or green palette in light or dark mode, and a solid color, gradient, pattern, or PNG/JPEG wallpaper. Backgrounds support dimming and blur. Changes stay in the preview until **Apply** is pressed and take effect without restarting.
+
+Use **Change chat background** in the chat list context menu or conversation header menu for an individual channel or direct chat. **Use the background for all chats** restores inheritance. Images up to 20 MB and 80 megapixels are copied to `~/.meshapp/wallpapers` and reduced to a maximum edge of 2048 pixels, so the original file can be moved afterwards. Appearance settings are stored locally.
+
 System notifications are shown for new messages if the corresponding chat is not open. Update checks on startup can be enabled or disabled in settings.
 
 Messages, reactions, unread chats, favorite and ignored nodes, telemetry, scripts, script data, route check history, and the LoRa packet log are stored locally.

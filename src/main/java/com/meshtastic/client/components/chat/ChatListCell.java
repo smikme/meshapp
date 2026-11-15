@@ -9,6 +9,7 @@ import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 import javafx.application.Platform;
+import javafx.event.Event;
 import javafx.scene.Cursor;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -59,8 +60,6 @@ public class ChatListCell extends ListCell<ChatItem> {
     private final Label muteIconLabel = new Label();
     private final Tooltip muteIconTooltip = new Tooltip(I18n.t("chat.notifications.tooltip"));
     private final EmojiTextFlow messagePreview = new EmojiTextFlow();
-    private final VBox metaBox = new VBox(4);
-    private final HBox timeBox = new HBox(6);
     private final Label timeLabel = new Label();
     private final Label unreadBadge = new Label();
     private final ContextMenu chatContextMenu;
@@ -75,7 +74,7 @@ public class ChatListCell extends ListCell<ChatItem> {
     public ChatListCell(Consumer<ChatItem> onDeleteChat,
                         Consumer<ChatItem> onShowProperties,
                         Consumer<ChatItem> onToggleMute) {
-        this(onDeleteChat, onShowProperties, onToggleMute, item -> {}, false);
+        this(onDeleteChat, onShowProperties, onToggleMute, _ -> {});
     }
 
     /**
@@ -101,7 +100,7 @@ public class ChatListCell extends ListCell<ChatItem> {
                         Consumer<ChatItem> onShowProperties,
                         Consumer<ChatItem> onToggleMute,
                         boolean compact) {
-        this(onDeleteChat, onShowProperties, onToggleMute, item -> {}, compact);
+        this(onDeleteChat, onShowProperties, onToggleMute, _ -> {}, compact);
     }
 
     /**
@@ -115,6 +114,28 @@ public class ChatListCell extends ListCell<ChatItem> {
                         Consumer<ChatItem> onShowProperties,
                         Consumer<ChatItem> onToggleMute,
                         Consumer<ChatItem> onClearHistory,
+                        boolean compact) {
+        this(onDeleteChat, onShowProperties, onToggleMute, onClearHistory, null, compact);
+    }
+
+    /**
+     * Creates a reusable chat-list cell with an optional wallpaper action in its context menu.
+     * Actions resolve the current cell item when invoked, so recycled cells target the
+     * chat they currently display. Construct on the JavaFX application thread.
+     *
+     * @param onDeleteChat callback used to delete or disable the current chat
+     * @param onShowProperties callback used to open channel properties
+     * @param onToggleMute callback used to toggle chat notifications
+     * @param onClearHistory callback used to clear chat history
+     * @param onChangeBackground callback used to edit the chat wallpaper, or {@code null}
+     *                           to hide that menu item
+     * @param compact whether the cell should show only the avatar and unread count
+     */
+    public ChatListCell(Consumer<ChatItem> onDeleteChat,
+                        Consumer<ChatItem> onShowProperties,
+                        Consumer<ChatItem> onToggleMute,
+                        Consumer<ChatItem> onClearHistory,
+                        Consumer<ChatItem> onChangeBackground,
                         boolean compact) {
         this.compact = compact;
         root.setAlignment(compact ? Pos.CENTER : Pos.CENTER_LEFT);
@@ -143,7 +164,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         muteIconLabel.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
         muteIconLabel.setTooltip(muteIconTooltip);
         muteIconLabel.setCursor(Cursor.HAND);
-        muteIconLabel.setOnMousePressed(ev -> ev.consume());
+        muteIconLabel.setOnMousePressed(Event::consume);
         muteIconLabel.setOnMouseClicked(ev -> {
             ChatItem chatItem = getItem();
             if (chatItem != null) {
@@ -168,17 +189,19 @@ public class ChatListCell extends ListCell<ChatItem> {
         nameLabel.maxWidthProperty().bind(textBox.widthProperty());
         messagePreview.prefWidthProperty().bind(textBox.widthProperty());
         messagePreview.maxWidthProperty().bind(textBox.widthProperty());
-        textBox.widthProperty().addListener((obs, oldWidth, newWidth) -> queuePreviewTextUpdate());
-        sceneProperty().addListener((obs, oldScene, newScene) -> queuePreviewTextUpdate());
+        textBox.widthProperty().addListener((_, _, _) -> queuePreviewTextUpdate());
+        sceneProperty().addListener((_, _, _) -> queuePreviewTextUpdate());
 
         timeLabel.getStyleClass().add("chat-time-label");
 
         unreadBadge.getStyleClass().add("chat-unread-badge");
         unreadBadge.setAlignment(Pos.CENTER);
 
+        HBox timeBox = new HBox(6);
         timeBox.setAlignment(Pos.CENTER_RIGHT);
         timeBox.getChildren().addAll(timeLabel, muteIconLabel);
 
+        VBox metaBox = new VBox(4);
         metaBox.setAlignment(Pos.TOP_RIGHT);
         metaBox.setMinWidth(Region.USE_PREF_SIZE);
         if (compact) {
@@ -198,7 +221,7 @@ public class ChatListCell extends ListCell<ChatItem> {
 
         // Context menu opened by right click.
         MenuItem propertiesItem = new MenuItem(I18n.t("chat.menu.properties"));
-        propertiesItem.setOnAction(ev -> {
+        propertiesItem.setOnAction(_ -> {
             ChatItem chatItem = getItem();
             if (chatItem != null) {
                 onShowProperties.accept(chatItem);
@@ -206,7 +229,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         });
 
         MenuItem notificationsItem = new MenuItem();
-        notificationsItem.setOnAction(ev -> {
+        notificationsItem.setOnAction(_ -> {
             ChatItem chatItem = getItem();
             if (chatItem != null) {
                 onToggleMute.accept(chatItem);
@@ -214,7 +237,7 @@ public class ChatListCell extends ListCell<ChatItem> {
         });
 
         MenuItem clearHistoryItem = new MenuItem(I18n.t("chat.menu.clearHistory"));
-        clearHistoryItem.setOnAction(ev -> {
+        clearHistoryItem.setOnAction(_ -> {
             ChatItem chatItem = getItem();
             if (chatItem != null) {
                 onClearHistory.accept(chatItem);
@@ -222,9 +245,15 @@ public class ChatListCell extends ListCell<ChatItem> {
         });
 
         MenuItem closeItem = new MenuItem(I18n.t("chat.menu.deleteLocal"));
+        MenuItem backgroundItem = new MenuItem(I18n.t("appearance.chatTitle"));
+        backgroundItem.setVisible(onChangeBackground != null);
+        backgroundItem.setOnAction(_ -> {
+            if (getItem() != null && onChangeBackground != null) onChangeBackground.accept(getItem());
+        });
         chatContextMenu = new ContextMenu(
                 propertiesItem,
                 notificationsItem,
+                backgroundItem,
                 new SeparatorMenuItem(),
                 clearHistoryItem,
                 closeItem);
@@ -239,16 +268,14 @@ public class ChatListCell extends ListCell<ChatItem> {
             }
             boolean isChannel = chatItem.getType() == ChatItem.ChatType.CHANNEL;
             propertiesItem.setVisible(isChannel);
-            if (chatItem != null) {
-                notificationsItem.setText(chatItem.isMuted()
-                        ? I18n.t("chat.menu.notificationsEnable")
-                        : I18n.t("chat.menu.notificationsDisable"));
-            }
+            notificationsItem.setText(chatItem.isMuted()
+                    ? I18n.t("chat.menu.notificationsEnable")
+                    : I18n.t("chat.menu.notificationsDisable"));
             clearHistoryItem.setText(I18n.t("chat.menu.clearHistory"));
             closeItem.setText(isChannel ? I18n.t("chat.menu.disableChannel") : I18n.t("chat.menu.deleteLocal"));
         });
 
-        closeItem.setOnAction(ev -> {
+        closeItem.setOnAction(_ -> {
             ChatItem chatItem = getItem();
             if (chatItem == null) {
                 return;

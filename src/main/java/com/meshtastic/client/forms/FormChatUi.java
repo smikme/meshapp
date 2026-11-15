@@ -28,12 +28,16 @@ import com.meshtastic.client.protocol.rpc.RemoteRpcState;
 import com.meshtastic.client.service.MessageService;
 import com.meshtastic.client.system.DrawerPane;
 import com.meshtastic.client.themes.TypographyManager;
+import com.meshtastic.client.themes.AppearanceDialog;
+import com.meshtastic.client.themes.AppearancePreferences;
+import com.meshtastic.client.themes.ChatBackgroundView;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.NodeUtils;
 import com.meshtastic.client.utils.UnicodeTextUtils;
 
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.css.PseudoClass;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -132,6 +136,8 @@ abstract class FormChatUi extends FormChatBase {
     private FormChatMessageSearchController messageSearchController;
     private StackPane imageViewerOverlay;
     private Runnable imageViewerCleanup;
+    private ChatBackgroundView chatBackground;
+    private final ChangeListener<Number> appearanceListener = (_, _, _) -> refreshChatBackground();
 
     /**
      * Creates the split layout and reusable controls for the active chat.
@@ -264,6 +270,7 @@ abstract class FormChatUi extends FormChatBase {
                 this::showChannelProperties,
                 this::toggleChatMute,
                 this::confirmClearChatHistory,
+                this::editChatBackground,
                 compact));
     }
 
@@ -619,7 +626,9 @@ abstract class FormChatUi extends FormChatBase {
             loadedRenderedMessageRows.values().removeIf(row -> row == rendered);
             bubbleFactory.disposeRendered(rendered);
         });
-        messageArea = new StackPane(messageScrollPane, scrollDownWrapper);
+        chatBackground = new ChatBackgroundView();
+        messageArea = new StackPane(chatBackground, messageScrollPane, scrollDownWrapper);
+        AppearancePreferences.revisionProperty().addListener(new WeakChangeListener<>(appearanceListener));
         registerMessageScrollListeners();
         chatInputBar = createChatInputBar();
         applyChatDetailGrowthConstraints();
@@ -675,6 +684,13 @@ abstract class FormChatUi extends FormChatBase {
 
         headerSpacer = new Region();
         Button quickScriptButton = createQuickScriptButton();
+        Button appearanceButton = FormChatUiSupport.createHeaderIconButton(
+                "/icons/more-vertical.svg", I18n.t("appearance.chatTitle"), "⋮");
+        appearanceButton.setOnAction(_ -> {
+            MenuItem background = new MenuItem(I18n.t("appearance.chatTitle"));
+            background.setOnAction(_ -> { if (selectedChat != null) editChatBackground(selectedChat); });
+            new ContextMenu(background).show(appearanceButton, javafx.geometry.Side.BOTTOM, 0, 4);
+        });
         messageSearchController = createMessageSearchController();
 
         chatHeader = new HBox(10,
@@ -684,6 +700,7 @@ abstract class FormChatUi extends FormChatBase {
                 headerSpacer,
                 quickScriptButton,
                 messageSearchController.searchButton(),
+                appearanceButton,
                 messageSearchController.controls());
         chatHeader.setAlignment(Pos.CENTER_LEFT);
         chatHeader.setPadding(new Insets(10, 15, 10, 15));
@@ -1509,6 +1526,7 @@ abstract class FormChatUi extends FormChatBase {
             hideChatImage();
             bubbleFactory.hideOpenReactionPopup();
             this.selectedChat = chat;
+            refreshChatBackground();
             rememberSelectedChatForBoundConnection();
 
             // Refresh the header.
@@ -1548,6 +1566,23 @@ abstract class FormChatUi extends FormChatBase {
         applyChatTypography();
         Optional.ofNullable(chatListView).ifPresent(ListView::refresh);
         Optional.ofNullable(selectedChat).ifPresent(_ -> refreshLoadedMessageRows(true));
+    }
+
+    /** Resolves the selected chat's wallpaper and updates only the layer behind its messages. */
+    private void refreshChatBackground() {
+        if (chatBackground == null || selectedChat == null) return;
+        chatBackground.setConfiguration(AppearancePreferences.backgroundFor(
+                currentOwnerNodeId(), ChatDbKey.from(selectedChat).preferenceId()));
+    }
+
+    /**
+     * Opens a wallpaper editor with the chat and owner identities captured at invocation.
+     *
+     * @param chat non-null channel or direct chat whose background should be edited
+     */
+    private void editChatBackground(ChatItem chat) {
+        AppearanceDialog.showChat(getScene() == null ? null : getScene().getWindow(),
+                currentOwnerNodeId(), ChatDbKey.from(chat).preferenceId());
     }
 
     protected void applyChatTypography() {
