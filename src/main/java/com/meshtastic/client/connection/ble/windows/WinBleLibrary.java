@@ -28,10 +28,6 @@ public interface WinBleLibrary extends Library {
         return Native.load(libraryPath.toAbsolutePath().toString(), WinBleLibrary.class);
     }
 
-    static WinBleLibrary loadShared() {
-        return Native.load("meshapp-ble", WinBleLibrary.class);
-    }
-
     // ==================== Initialization ====================
 
     /** Initializes the WinRT apartment. Call once. */
@@ -50,7 +46,11 @@ public interface WinBleLibrary extends Library {
 
     // ==================== Scanning ====================
 
-    /** Selects the BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
+    /**
+     * Selects the native profile before scanning or connecting.
+     *
+     * @param profile stable ABI code: 0=Meshtastic, 1=MeshCore, 2=ESP32 OTA, 3=Nordic legacy DFU
+     */
     void meshble_set_profile(int profile);
 
     /**
@@ -82,10 +82,20 @@ public interface WinBleLibrary extends Library {
     // ==================== Data Transfer ====================
 
     /**
-     * Writes protobuf bytes to the toRadio GATT characteristic.
+     * Writes raw protocol or firmware bytes to the active profile's outbound characteristic.
      * @return 0 on success, negative on error
      */
     int meshble_write_to_radio(byte[] data, int length);
+
+    /**
+     * Copies and writes a legacy Nordic DFU command on the WinRT worker with a GATT response.
+     * The DFU operation reply arrives separately through the data callback.
+     *
+     * @param data control-point opcode and parameters
+     * @param length number of bytes to copy from {@code data}
+     * @return zero on success, {@code -1} on invalid state, timeout or write failure
+     */
+    int meshble_write_firmware_control(byte[] data, int length);
 
     /**
      * Reads fromRadio for the polling fallback.

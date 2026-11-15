@@ -66,6 +66,7 @@ public final class ConnectionManager {
     private final Map<String, CompletableFuture<DeviceState>> configFutures = new ConcurrentHashMap<>();
     private final Map<String, Long> connectionGenerations = new ConcurrentHashMap<>();
     private final Set<String> userDisconnectedIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> firmwareUpdateIds = ConcurrentHashMap.newKeySet();
     private final Set<String> expectedDeviceRebootIds = ConcurrentHashMap.newKeySet();
     private final Map<String, String> userDisconnectReasons = new ConcurrentHashMap<>();
     private final List<Runnable> listeners = new CopyOnWriteArrayList<>();
@@ -232,6 +233,7 @@ public final class ConnectionManager {
         ConnectionEntry entry;
         TransportConnection conn;
         synchronized (connectionLock) {
+            if (firmwareUpdateIds.contains(id)) throw new ConnectionException("Firmware update is in progress");
             userDisconnectedIds.remove(id);
             userDisconnectReasons.remove(id);
             expectedDeviceRebootIds.remove(id);
@@ -352,10 +354,7 @@ public final class ConnectionManager {
             if (!conn.isConnected()) {
                 throw new ConnectionException(I18n.t("connection.error.noActiveTransport", entry.getName()));
             }
-        } catch (ConnectionException e) {
-            cleanupFailedConnect(id, conn);
-            throw e;
-        } catch (RuntimeException e) {
+        } catch (ConnectionException | RuntimeException e) {
             cleanupFailedConnect(id, conn);
             throw e;
         }
@@ -366,13 +365,8 @@ public final class ConnectionManager {
         boolean cancelledDuringConnect = false;
 
         try {
-            resolvedProtocolType = resolveProtocolType(id, entry, conn);
-        } catch (ConnectionException e) {
-            abortPendingConnection(id, conn);
-            conn.setConnectionListener(null);
-            conn.disconnect();
-            throw e;
-        } catch (RuntimeException e) {
+            resolvedProtocolType = resolveProtocolType(entry, conn);
+        } catch (ConnectionException | RuntimeException e) {
             abortPendingConnection(id, conn);
             conn.setConnectionListener(null);
             conn.disconnect();
@@ -451,7 +445,7 @@ public final class ConnectionManager {
             }
             LuaScriptRuntimeService.getInstance().autostartScriptsForNode(
                     readyNodeId,
-                    event -> fireChanged());
+                    _ -> fireChanged());
             fireChanged();
             return ignored;
         });
@@ -662,9 +656,45 @@ public final class ConnectionManager {
     }
 
     /**
+     * Reports whether a firmware operation has reserved this connection's transport.
+     *
+     * @param id connection profile identifier
+     * @return {@code true} while ordinary connection attempts must be deferred
+     */
+    public boolean isFirmwareUpdateActive(String id) { return firmwareUpdateIds.contains(id); }
+
+    /**
+     * Reserves a live session before reboot and cancels pending automatic reconnection.
+     * Handler identity is checked under the connection lock so a stale UI request cannot
+     * claim a replacement session. The caller must eventually invoke {@link #endFirmwareUpdate}.
+     *
+     * @param id connection profile identifier
+     * @param handler expected currently active protocol handler
+     * @throws IllegalStateException if the session changed, disconnected or is already reserved
+     */
+    public void beginFirmwareUpdate(String id, ProtocolHandler handler) {
+        synchronized (connectionLock) {
+            if (getProtocolHandler(id) != handler || !activeConnections.containsKey(id)
+                    || !firmwareUpdateIds.add(id)) throw new IllegalStateException("Device connection changed");
+        }
+        ReconnectService.getInstance().cancelReconnect(id);
+    }
+
+    /**
+     * Releases a firmware reservation and optionally starts reconnecting to the application.
+     * Release alone does not establish a connection or confirm that the firmware is running.
+     *
+     * @param id connection profile identifier previously reserved for the update
+     * @param reconnect whether bootloader handoff began and application reconnection is needed
+     */
+    public void endFirmwareUpdate(String id, boolean reconnect) {
+        firmwareUpdateIds.remove(id);
+        if (reconnect) ReconnectService.getInstance().startReconnectAfterDeviceReboot(id);
+    }
+
+    /**
      * Marks the next connection drop as an expected device reboot.
-     * Needed when firmware can close the transport by itself before the UI calls
-     * {@link #disconnectForDeviceReboot(String)}.
+     * The firmware can close its transport before the UI requests the handoff.
      */
     public void expectDeviceReboot(String id) {
         if (id == null || id.isBlank()) {
@@ -1018,10 +1048,8 @@ public final class ConnectionManager {
             boolean removedPending = pendingConnections.remove(id, expectedConnection);
             if (removedActive) {
                 cleanupRuntimeState(id);
-            } else if (!removedPending) {
-                return false;
             }
-            return true;
+            return removedActive || removedPending;
         }
     }
 
@@ -1125,7 +1153,7 @@ public final class ConnectionManager {
 
     private boolean isSelectableConnectionIdLocked(String id) {
         ConnectionEntry entry = findEntry(id);
-        return entry != null && isSelectableConnection(entry);
+        return isSelectableConnection(entry);
     }
 
     private boolean isSelectableConnection(ConnectionEntry entry) {
@@ -1189,7 +1217,7 @@ public final class ConnectionManager {
     /**
      * Creates a protocol runtime on top of an already open transport.
      */
-    private ProtocolType resolveProtocolType(String id, ConnectionEntry entry, TransportConnection conn) throws ConnectionException {
+    private ProtocolType resolveProtocolType(ConnectionEntry entry, TransportConnection conn) throws ConnectionException {
         ProtocolType requestedProtocol = entry.getEffectiveProtocol();
         validateProtocolTransportCombination(entry, requestedProtocol);
         configureFrameFormat(conn, requestedProtocol);

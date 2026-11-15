@@ -64,6 +64,19 @@ class ProtocolHandlerTest {
     }
 
     @Test
+    void deliversClientNotificationsToOperationListeners() throws Exception {
+        FakeConnection connection = new FakeConnection();
+        ProtocolHandler handler = track(new ProtocolHandler(connection));
+        var received = new java.util.concurrent.CompletableFuture<MeshProtos.ClientNotification>();
+        handler.addListener(new FromRadioListener() {
+            @Override public void onClientNotification(MeshProtos.ClientNotification notification) { received.complete(notification); }
+        });
+        var refusal = MeshProtos.ClientNotification.newBuilder().setMessage("Cannot start OTA: missing loader").build();
+        connection.emit(MeshProtos.FromRadio.newBuilder().setClientNotification(refusal).build().toByteArray());
+        assertEquals(refusal, received.get(2, TimeUnit.SECONDS));
+    }
+
+    @Test
     void trackedWriteReportsActualTransportCompletionAndFailure() throws Exception {
         var entered = new CountDownLatch(1);
         var transportResult = new java.util.concurrent.CompletableFuture<Void>();

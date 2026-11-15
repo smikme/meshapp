@@ -1,7 +1,7 @@
 package com.meshtastic.client.service;
 
 /**
- * User-selectable device firmware update entry mode.
+ * User-selectable firmware transfer mode.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
@@ -12,19 +12,24 @@ public enum FirmwareUpdateMode {
     AUTO("settings.firmware.mode.auto"),
 
     /**
-     * Reboot an ESP32 device into the BLE OTA loader.
+     * Update an ESP32 device through the BLE OTA loader.
      */
     OTA_BLE("settings.firmware.mode.otaBle"),
 
     /**
-     * Reboot an ESP32 device into the Wi-Fi OTA loader.
+     * Update an ESP32 device through the Wi-Fi OTA loader.
      */
     OTA_WIFI("settings.firmware.mode.otaWifi"),
 
     /**
-     * Reboot a UF2-capable device into DFU mode.
+     * Update through Nordic BLE DFU or a USB UF2 volume.
      */
-    DFU("settings.firmware.mode.dfu");
+    DFU("settings.firmware.mode.dfu"),
+
+    /**
+     * Write an ESP application through the selected serial port using external esptool.
+     */
+    SERIAL("settings.firmware.mode.serial");
 
     private final String labelKey;
 

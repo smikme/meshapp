@@ -23,6 +23,8 @@
 
 [Установка](#установка) · [Запуск из командной строки](#запуск-из-командной-строки)
 
+[Прошивка устройств: способы, требования и ограничения](docs/firmware-update.md)
+
 <div align="right">
 
 <strong>Русский</strong> | <a href="README.md">English</a> | <a href="README.de.md">Deutsch</a>

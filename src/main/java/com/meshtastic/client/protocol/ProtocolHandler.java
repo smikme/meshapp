@@ -523,6 +523,7 @@ public class ProtocolHandler {
                         proxyMessage.getTopic(), proxyMessage.getPayloadVariantCase(), proxyMessage.getRetained());
                 notifyListeners(l -> l.onMqttClientProxyMessage(proxyMessage));
             }
+            case CLIENTNOTIFICATION -> notifyListeners(l -> l.onClientNotification(fromRadio.getClientNotification()));
             case LOG_RECORD -> {
                 log.trace("Received LogRecord: {}", fromRadio.getLogRecord().getMessage());
                 notifyListeners(l -> l.onLogRecord(fromRadio.getLogRecord()));

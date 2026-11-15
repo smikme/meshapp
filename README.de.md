@@ -23,6 +23,8 @@
 
 [Installation](#installation) · [Start über die Kommandozeile](#start-über-die-kommandozeile)
 
+[Geräte-Firmware aktualisieren](docs/firmware-update.md)
+
 <div align="right">
 
 <a href="README.md">English</a> | <a href="README.ru.md">Русский</a> | <strong>Deutsch</strong>

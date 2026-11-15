@@ -85,6 +85,7 @@ public final class ReconnectService {
     }
 
     private void startReconnect(String id, boolean afterDeviceReboot) {
+        if (ConnectionManager.getInstance().isFirmwareUpdateActive(id)) return;
         ScheduledFuture<?> pending = pendingReconnects.get(id);
         if (pending != null) {
             if (afterDeviceReboot && !deviceRebootReconnects.contains(id) && !pending.isDone()) {
@@ -192,7 +193,7 @@ public final class ReconnectService {
 
             AppUi.showStatus(AppUi.StatusType.SUCCESS, I18n.t("connection.reconnect.connected", entry.getName()));
 
-            handlePostReconnectConfigExchange(id, entry);
+            handlePostReconnectConfigExchange(id);
 
         } catch (ConnectionException e) {
             log.warn("Reconnect failed for '{}': {}", entry.getName(), e.getMessage());
@@ -218,6 +219,7 @@ public final class ReconnectService {
      * This helps platform backends refresh discovery and system caches, reducing
      * false "device not found" errors immediately after reboot.
      */
+    @SuppressWarnings("BusyWait") // A bounded scan warmup samples discovery callbacks before reconnecting.
     private void prepareBleReconnect(ConnectionEntry entry) {
         if (entry.getEffectiveType() != ConnectionType.BLE) {
             return;
@@ -260,13 +262,12 @@ public final class ReconnectService {
         }
     }
 
-    @SuppressWarnings("PMD.UnusedFormalParameter") // entry kept for future use / consistent API
-    private void handlePostReconnectConfigExchange(String id, ConnectionEntry entry) {
+    private void handlePostReconnectConfigExchange(String id) {
         CompletableFuture<DeviceState> future = ConnectionManager.getInstance().getConfigFuture(id);
         if (future == null) {
             return;
         }
-        future.whenComplete((state, ex) -> {
+        future.whenComplete((state, _) -> {
             if (state != null) {
                 NodeData myNode = state.getNodeDb().get(state.getMyNodeNum());
                 if (myNode != null) {

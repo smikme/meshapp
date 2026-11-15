@@ -58,6 +58,9 @@ public final class FirmwareUpdateController {
     private ProgressBar progressBar;
     private Button chooseFileButton;
     private Button startButton;
+    private Button cancelButton;
+    private long validationGeneration;
+    private boolean validating;
     private Path selectedPath;
     private FirmwareValidationResult lastValidation;
 
@@ -89,9 +92,13 @@ public final class FirmwareUpdateController {
 
         startButton = new Button(I18n.t("settings.firmware.action.prepare"));
         startButton.getStyleClass().add("accent");
-        startButton.setOnAction(e -> requestStart());
+        startButton.setOnAction(_ -> requestStart());
 
-        HBox actionRow = new HBox(8, startButton);
+        cancelButton = new Button(I18n.t("common.cancel"));
+        cancelButton.setVisible(false);
+        cancelButton.setManaged(false);
+        cancelButton.setOnAction(_ -> { service.cancel(); cancelButton.setDisable(true); });
+        HBox actionRow = new HBox(8, cancelButton, startButton);
         actionRow.setAlignment(Pos.CENTER_RIGHT);
 
         panel
@@ -114,7 +121,7 @@ public final class FirmwareUpdateController {
      * connection. Safe to call before the panel is created.
      */
     public void reload() {
-        if (panel == null) {
+        if (panel == null || (cancelButton != null && cancelButton.isVisible())) {
             return;
         }
         ConnectionContext context = currentContext();
@@ -161,7 +168,7 @@ public final class FirmwareUpdateController {
         chooseFileButton.setTooltip(
             new Tooltip(I18n.t("settings.firmware.file.choose.tooltip"))
         );
-        chooseFileButton.setOnAction(e -> chooseFirmwareFile());
+        chooseFileButton.setOnAction(_ -> chooseFirmwareFile());
 
         return new HBox(8, fileField, chooseFileButton);
     }
@@ -185,7 +192,7 @@ public final class FirmwareUpdateController {
         modeComboBox.getSelectionModel().select(FirmwareUpdateMode.AUTO);
         modeComboBox
             .valueProperty()
-            .addListener((obs, oldMode, newMode) -> updateValidation(currentContext()));
+            .addListener((_, _, _) -> updateValidation(currentContext()));
         HBox row = new HBox(8, modeLabel, modeComboBox);
         row.setAlignment(Pos.CENTER_LEFT);
         return row;
@@ -238,8 +245,7 @@ public final class FirmwareUpdateController {
 
     private void requestStart() {
         ConnectionContext context = currentContext();
-        updateValidation(context);
-        if (lastValidation == null || !lastValidation.valid()) {
+        if (validating || lastValidation == null || !lastValidation.valid()) {
             statusLabel.setText(I18n.t("settings.firmware.status.fixErrors"));
             return;
         }
@@ -256,7 +262,9 @@ public final class FirmwareUpdateController {
             context.state(),
             context.handler(),
             image,
-            requestedMode
+            requestedMode,
+            this::selectUf2Volume,
+            this::selectBleBootloader
         );
         List<String> warnings = confirmationWarnings(
             lastValidation,
@@ -300,6 +308,11 @@ public final class FirmwareUpdateController {
     }
 
     private void start(FirmwareUpdateRequest request) {
+        validationGeneration++;
+        statusLabel.setText("");
+        cancelButton.setVisible(true);
+        cancelButton.setManaged(true);
+        cancelButton.setDisable(false);
         setControlsDisabled(true);
         progressBar.setVisible(true);
         progressBar.setProgress(ProgressBar.INDETERMINATE_PROGRESS);
@@ -320,6 +333,8 @@ public final class FirmwareUpdateController {
     }
 
     private void finish(FirmwareUpdateResult result, Throwable throwable) {
+        cancelButton.setVisible(false);
+        cancelButton.setManaged(false);
         setControlsDisabled(false);
         progressBar.setVisible(result != null && result.success());
         if (throwable != null) {
@@ -347,7 +362,7 @@ public final class FirmwareUpdateController {
                 I18n.t("settings.firmware.toast.failed")
             );
         }
-        updateValidation(currentContext());
+        reload();
     }
 
     private void updateDeviceSummary(ConnectionContext context) {
@@ -373,22 +388,71 @@ public final class FirmwareUpdateController {
         );
     }
 
+    /**
+     * Starts file validation off the FX thread and publishes only the latest selection's result.
+     * The generation counter prevents a slow, stale validation from enabling the Start button
+     * after the user changes the file, mode or device. Must be called on the FX thread.
+     */
     private void updateValidation(ConnectionContext context) {
-        FirmwareUpdateMode mode = modeComboBox != null
-            ? modeComboBox.getValue()
-            : FirmwareUpdateMode.AUTO;
-        lastValidation = service.validate(
-            selectedPath,
-            mode,
-            context.entry(),
-            context.state()
-        );
-        renderValidation(lastValidation);
-        startButton.setDisable(
-            service.isRunning() ||
-            lastValidation == null ||
-            !lastValidation.valid()
-        );
+        if (service.isRunning()) { startButton.setDisable(true); return; }
+        long generation = ++validationGeneration;
+        Path path = selectedPath;
+        FirmwareUpdateMode mode = modeComboBox.getValue();
+        validating = true;
+        startButton.setDisable(true);
+        validationLabel.setText(I18n.t("settings.firmware.status.validating"));
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> service.validate(path, mode, context.entry(), context.state()))
+            .whenComplete((result, error) -> Platform.runLater(() -> {
+                if (generation != validationGeneration) return;
+                validating = false;
+                lastValidation = error == null ? result : new FirmwareValidationResult(null, List.of(errorDetail(error)), List.of());
+                renderValidation(lastValidation);
+                startButton.setDisable(service.isRunning() || !lastValidation.valid());
+            }));
+    }
+
+    /**
+     * Bridges the firmware worker to a directory chooser on the FX thread.
+     * Even a single discovered volume is only an initial location and requires user selection.
+     *
+     * @param volumes suggested mounted bootloader roots
+     * @return selected root, {@code null} on cancellation, or an exceptional future on UI failure
+     */
+    private java.util.concurrent.CompletableFuture<Path> selectUf2Volume(List<Path> volumes) {
+        var result = new java.util.concurrent.CompletableFuture<Path>();
+        Platform.runLater(() -> {
+            try {
+                javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+                chooser.setTitle(I18n.t("settings.firmware.selectUf2"));
+                if (volumes.size() == 1) chooser.setInitialDirectory(volumes.getFirst().toFile());
+                File directory = chooser.showDialog(panel.getScene().getWindow());
+                result.complete(directory == null ? null : directory.toPath());
+            } catch (Exception e) { result.completeExceptionally(e); }
+        });
+        return result;
+    }
+
+    /**
+     * Requests explicit selection when the bootloader cannot be matched by address.
+     * Dialog creation runs on the FX thread; the firmware worker waits on the returned future.
+     *
+     * @param devices discovered devices advertising the requested bootloader service
+     * @return selected candidate, {@code null} on cancellation, or an exceptional future on UI failure
+     */
+    private java.util.concurrent.CompletableFuture<com.meshtastic.client.connection.ble.BleDevice> selectBleBootloader(
+            List<com.meshtastic.client.connection.ble.BleDevice> devices) {
+        var result = new java.util.concurrent.CompletableFuture<com.meshtastic.client.connection.ble.BleDevice>();
+        Platform.runLater(() -> {
+            try {
+                var choices = devices.stream().map(d -> d.displayName() + " (" + d.address() + ")").toList();
+                var dialog = new javafx.scene.control.ChoiceDialog<>(choices.getFirst(), choices);
+                dialog.initOwner(panel.getScene().getWindow());
+                dialog.setTitle(I18n.t("settings.firmware.selectBle"));
+                dialog.setHeaderText(I18n.t("settings.firmware.selectBle"));
+                result.complete(dialog.showAndWait().map(s -> devices.get(choices.indexOf(s))).orElse(null));
+            } catch (Exception e) { result.completeExceptionally(e); }
+        });
+        return result;
     }
 
     private void renderValidation(FirmwareValidationResult validation) {

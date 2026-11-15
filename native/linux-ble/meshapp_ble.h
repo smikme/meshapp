@@ -43,8 +43,10 @@ MESHBLE_API int meshble_get_adapter_state(void);
 /* ==================== Scanning ==================== */
 
 /**
- * Select BLE profile for subsequent scanning/connection.
- * @param profile 0=Meshtastic, 1=MeshCore Companion
+ * Select BLE profile before scanning/connecting; do not change it during a session.
+ * Codes are a stable ABI shared with Java BleProtocolProfile and the Windows backend.
+ * Firmware profiles require inbound notifications and do not fall back to polling.
+ * @param profile 0=Meshtastic, 1=MeshCore Companion, 2=ESP32 OTA, 3=Nordic legacy DFU
  */
 MESHBLE_API void meshble_set_profile(int profile);
 
@@ -89,12 +91,25 @@ MESHBLE_API int meshble_is_connected(void);
 /* ==================== Data Transfer ==================== */
 
 /**
- * Write protobuf payload to the toRadio GATT characteristic.
- * @param data    raw protobuf bytes (no serial framing)
+ * Write raw bytes to the active profile's outbound GATT characteristic.
+ * Nordic DFU packet writes use Write Without Response; the Java uploader checks receipts.
+ * @param data    protocol/firmware bytes without serial framing; valid until return
  * @param length  number of bytes
  * @return 0 on success, -4 when the BLE bond is not authenticated/MITM, otherwise negative on error
  */
 MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length);
+
+/**
+ * Write a Nordic legacy DFU opcode and parameters to its control point with response.
+ * Requires a connected profile 3 session. Image/init packets use meshble_write_to_radio().
+ * This blocks on the sd-bus worker; success acknowledges GATT delivery only. The DFU
+ * operation result arrives separately through the inbound data callback.
+ * @param data    command bytes owned by the caller and valid until return
+ * @param length  positive number of command bytes
+ * @return 0 on success, -1 for invalid state/arguments or worker dispatch failure,
+ *         otherwise a negative D-Bus write error
+ */
+MESHBLE_API int meshble_write_firmware_control(const unsigned char* data, int length);
 
 /**
  * Read fromRadio GATT characteristic (for polling fallback).
@@ -106,8 +121,9 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length);
 MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int* out_len);
 
 /**
- * Callback for incoming FromRadio data.
- * @param data    protobuf bytes
+ * Callback for incoming payloads from the active profile's inbound characteristic.
+ * For OTA/DFU this delivers raw loader responses, without protobuf decoding.
+ * @param data    borrowed payload bytes; copy before returning if needed later
  * @param length  number of bytes
  */
 typedef void (*meshble_data_cb)(const unsigned char* data, int length);

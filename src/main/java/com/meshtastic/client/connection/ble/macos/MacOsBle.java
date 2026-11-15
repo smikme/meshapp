@@ -28,7 +28,7 @@ import static com.meshtastic.client.connection.ble.macos.ObjCRuntime.*;
  * Each MacOsBle instance is associated with its delegate through a static map
  * keyed by the delegate pointer.
  *
- * <h3>CBManagerState</h3>
+ * <h2>CBManagerState</h2>
  * 0=Unknown, 1=Resetting, 2=Unsupported, 3=Unauthorized, 4=PoweredOff, 5=PoweredOn
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
@@ -52,15 +52,25 @@ public class MacOsBle implements BlePlatform {
     private static long peripheralDelegateClass;
 
     // Static JNA callbacks so GC cannot collect methods added to static Objective-C classes.
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidUpdateState;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidDiscover;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidConnect;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidDisconnect;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidFailToConnect;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidDiscoverServices;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidDiscoverCharacteristics;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidUpdateValue;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidWriteValue;
+    @SuppressWarnings("FieldCanBeLocal") // Objective-C keeps only the native function pointer.
     private static Callback cbDidUpdateNotificationState;
 
     /** Map from delegate pointer to MacOsBle instance, used by static callbacks. */
@@ -101,6 +111,7 @@ public class MacOsBle implements BlePlatform {
     private volatile CountDownLatch serviceDiscoveryLatch;
     private volatile CountDownLatch characteristicDiscoveryLatch;
     private volatile CountDownLatch notifyLatch;
+    private volatile String firmwareNotifyError;
     private volatile CountDownLatch drainLatch;
     private volatile CountDownLatch writeLatch;
     private volatile boolean connectInProgress;
@@ -330,19 +341,29 @@ public class MacOsBle implements BlePlatform {
                 drainInProgress.set(true);
                 drainLatch = new CountDownLatch(1);
                 drainFromRadio();
-                drainLatch.await(3, TimeUnit.SECONDS);
+                boolean drained = drainLatch.await(3, TimeUnit.SECONDS);
                 failIfConnectErrored();
-                log.info("[BLE] Step 6 done: initial drain complete");
+                if (drained) {
+                    log.info("[BLE] Step 6 done: initial drain complete");
+                } else {
+                    log.warn("[BLE] Initial drain timed out; periodic polling will continue draining");
+                }
 
                 // Step 7: start periodic polling of fromRadio.
                 startPolling();
                 failIfConnectErrored();
             } else {
                 log.info("[BLE] Step 5: subscribe to inbound notifications...");
+                firmwareNotifyError = null;
                 notifyLatch = new CountDownLatch(1);
                 setNotify(peripheral, true, fromRadioCharacteristic);
                 if (!notifyLatch.await(5, TimeUnit.SECONDS)) {
                     log.warn("[BLE] inbound notification subscription timeout");
+                    firmwareNotifyError = "Notification subscription timed out";
+                }
+                if (profile.nativeCode() >= 2 && firmwareNotifyError != null) {
+                    disconnect();
+                    throw new ConnectionException(firmwareNotifyError);
                 }
                 failIfConnectErrored();
             }
@@ -398,11 +419,25 @@ public class MacOsBle implements BlePlatform {
 
     @Override
     public boolean writeToRadio(byte[] protobufPayload) {
+        return writeCharacteristic(protobufPayload, false);
+    }
+
+    @Override
+    public boolean writeFirmwareControl(byte[] data) {
+        return writeCharacteristic(data, true);
+    }
+
+    /**
+     * Serializes GATT writes and routes Nordic commands to the control point. Nordic packet
+     * writes use WriteWithoutResponse and complete locally; their delivery is confirmed by
+     * DFU receipt notifications, since CoreBluetooth does not call the write-response delegate.
+     */
+    private boolean writeCharacteristic(byte[] protobufPayload, boolean control) {
         synchronized (writeResponseLock) {
             CountDownLatch latch = new CountDownLatch(1);
             synchronized (connectionIoLock) {
                 long peripheral = connectedPeripheral;
-                long characteristic = toRadioCharacteristic;
+                long characteristic = control ? fromRadioCharacteristic : toRadioCharacteristic;
                 if (!connected || peripheral == 0 || characteristic == 0) {
                     log.warn("Cannot write: BLE not connected or toRadio characteristic missing");
                     return false;
@@ -418,7 +453,9 @@ public class MacOsBle implements BlePlatform {
                 writeLatch = latch;
                 long nsData = nsData(protobufPayload);
                 try {
-                    writeValueForCharacteristic(peripheral, nsData, characteristic, CB_WRITE_WITH_RESPONSE);
+                    boolean withoutResponse = profile == BleProtocolProfile.NORDIC_DFU && !control;
+                    writeValueForCharacteristic(peripheral, nsData, characteristic, withoutResponse ? 1 : CB_WRITE_WITH_RESPONSE);
+                    if (withoutResponse) latch.countDown();
                 } finally {
                     release(nsData);
                 }
@@ -609,8 +646,7 @@ public class MacOsBle implements BlePlatform {
 
     private void tearDownLocalSessionAfterCentralManagerLoss(long state) {
         String message = "CoreBluetooth manager became " + coreBluetoothStateName(state);
-        boolean shouldNotifyDisconnected = false;
-        boolean shouldNotifyError = false;
+        boolean shouldNotifyDisconnected;
 
         synchronized (connectionIoLock) {
             boolean hadSession = connected
@@ -652,7 +688,6 @@ public class MacOsBle implements BlePlatform {
                 countDown(serviceDiscoveryLatch);
                 countDown(characteristicDiscoveryLatch);
                 countDown(notifyLatch);
-                shouldNotifyError = !hadSession;
             }
 
             CountDownLatch pendingWrite = writeLatch;
@@ -670,7 +705,7 @@ public class MacOsBle implements BlePlatform {
         }
         if (shouldNotifyDisconnected) {
             listener.accept(new BleState.Disconnected());
-        } else if (shouldNotifyError) {
+        } else {
             listener.accept(new BleState.Error(message, null));
         }
     }
@@ -704,12 +739,12 @@ public class MacOsBle implements BlePlatform {
         if (address == null || address.isBlank() || peripheral == 0) {
             return;
         }
-        discoveredPeripherals.compute(address, (key, existing) -> {
+        discoveredPeripherals.compute(address, (_, existing) -> {
             if (existing != null && existing == peripheral) {
                 return existing;
             }
             msgSend(peripheral, "retain");
-            if (existing != null && existing != peripheral) {
+            if (existing != null) {
                 msgSend(existing, "release");
                 log.info("[BLE] Replaced cached peripheral for {}", address);
             }
@@ -947,7 +982,7 @@ public class MacOsBle implements BlePlatform {
         long cls = createClass("MeshCentralDelegate", "NSObject");
         addProtocol(cls, "CBCentralManagerDelegate");
 
-        cbDidUpdateState = (CentralDidUpdateStateCallback) (self, cmd, central) -> {
+        cbDidUpdateState = (CentralDidUpdateStateCallback) (self, _, central) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             long state = msgSend(central, "state");
@@ -956,8 +991,8 @@ public class MacOsBle implements BlePlatform {
         };
         addMethod(cls, "centralManagerDidUpdateState:", cbDidUpdateState, "v@:@");
 
-        cbDidDiscover = (CentralDidDiscoverCallback) (self, cmd, central,
-                                                      peripheral, advertisementData, rssi) -> {
+        cbDidDiscover = (CentralDidDiscoverCallback) (self, _, _,
+                                                      peripheral, _, rssi) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
 
@@ -984,7 +1019,7 @@ public class MacOsBle implements BlePlatform {
         addMethod(cls, "centralManager:didDiscoverPeripheral:advertisementData:RSSI:",
                 cbDidDiscover, "v@:@@@@");
 
-        cbDidConnect = (CentralDidConnectCallback) (self, cmd, central, peripheral) -> {
+        cbDidConnect = (CentralDidConnectCallback) (self, _, _, _) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             log.info("CBCentralManager: didConnectPeripheral");
@@ -993,7 +1028,7 @@ public class MacOsBle implements BlePlatform {
         };
         addMethod(cls, "centralManager:didConnectPeripheral:", cbDidConnect, "v@:@@");
 
-        cbDidDisconnect = (CentralDidDisconnectCallback) (self, cmd, central, peripheral, error) -> {
+        cbDidDisconnect = (CentralDidDisconnectCallback) (self, _, _, peripheral, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             log.info("CBCentralManager: didDisconnectPeripheral");
@@ -1045,7 +1080,7 @@ public class MacOsBle implements BlePlatform {
         };
         addMethod(cls, "centralManager:didDisconnectPeripheral:error:", cbDidDisconnect, "v@:@@@");
 
-        cbDidFailToConnect = (CentralDidDisconnectCallback) (self, cmd, central, peripheral, error) -> {
+        cbDidFailToConnect = (CentralDidDisconnectCallback) (self, _, _, _, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             String msg = localizedError(error, "Failed to connect");
@@ -1069,7 +1104,7 @@ public class MacOsBle implements BlePlatform {
         long cls = createClass("MeshPeripheralDelegate", "NSObject");
         addProtocol(cls, "CBPeripheralDelegate");
 
-        cbDidDiscoverServices = (PeripheralDelegateCallback) (self, cmd, peripheral, arg) -> {
+        cbDidDiscoverServices = (PeripheralDelegateCallback) (self, _, peripheral, arg) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             if (arg != 0) {
@@ -1086,7 +1121,7 @@ public class MacOsBle implements BlePlatform {
         addMethod(cls, "peripheral:didDiscoverServices:", cbDidDiscoverServices, "v@:@@");
 
         cbDidDiscoverCharacteristics = (PeripheralServiceDelegateWithErrorCallback)
-                (self, cmd, peripheral, service, error) -> {
+                (self, _, _, service, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             // This selector has five native arguments; using a 4-arg callback here corrupts the
@@ -1132,7 +1167,7 @@ public class MacOsBle implements BlePlatform {
                 cbDidDiscoverCharacteristics, "v@:@@@");
 
         cbDidUpdateValue = (PeripheralDelegateWithErrorCallback)
-                (self, cmd, peripheral, characteristic, error) -> {
+                (self, _, _, characteristic, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             if (error != 0) {
@@ -1180,7 +1215,7 @@ public class MacOsBle implements BlePlatform {
                 cbDidUpdateValue, "v@:@@@");
 
         cbDidWriteValue = (PeripheralDelegateWithErrorCallback)
-                (self, cmd, peripheral, characteristic, error) -> {
+                (self, _, _, _, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             if (error != 0) {
@@ -1197,13 +1232,14 @@ public class MacOsBle implements BlePlatform {
                 cbDidWriteValue, "v@:@@@");
 
         cbDidUpdateNotificationState = (PeripheralDelegateWithErrorCallback)
-                (self, cmd, peripheral, characteristic, error) -> {
+                (self, _, _, characteristic, error) -> {
             MacOsBle me = resolve(self);
             if (me == null) { return; }
             long uuid = msgSend(characteristic, "UUID");
             long uuidStr = msgSend(uuid, "UUIDString");
             if (error != 0) {
                 long desc = msgSend(error, "localizedDescription");
+                me.firmwareNotifyError = toJavaString(desc);
                 log.error("[BLE] Notification subscription error for {}: {}",
                         toJavaString(uuidStr), toJavaString(desc));
             } else {

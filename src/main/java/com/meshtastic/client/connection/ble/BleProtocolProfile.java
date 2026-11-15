@@ -23,6 +23,19 @@ public enum BleProtocolProfile {
             BleConstants.FROM_NUM_UUID,
             true
     ),
+    /** ESP32 Unified OTA service: raw outbound bytes and direct, line-oriented reply notifications. */
+    ESP32_OTA(2, ProtocolType.MESHTASTIC, "ESP32 OTA",
+            List.of("4fafc201-1fb5-459e-8fcc-c5c9c331914b"),
+            "62ec0272-3ec5-11eb-b378-0242ac130003",
+            "62ec0272-3ec5-11eb-b378-0242ac130005", null, false),
+    /**
+     * Legacy Nordic DFU service. Inbound is the notifying control point, also written via
+     * {@link BlePlatform#writeFirmwareControl(byte[])}; outbound is the packet characteristic.
+     */
+    NORDIC_DFU(3, ProtocolType.MESHTASTIC, "Nordic DFU",
+            List.of("00001530-1212-efde-1523-785feabcd123"),
+            "00001531-1212-efde-1523-785feabcd123",
+            "00001532-1212-efde-1523-785feabcd123", null, false),
     MESHCORE_COMPANION(
             1,
             ProtocolType.MESHCORE_COMPANION,
@@ -62,9 +75,10 @@ public enum BleProtocolProfile {
     }
 
     /**
-     * Returns the profile code used by native BLE backends.
+     * Returns the stable ABI code shared with native BLE backends and Windows helper IPC.
+     * This value is independent of enum order and must not be replaced with {@link #ordinal()}.
      *
-     * @return {@code 0} for Meshtastic, {@code 1} for MeshCore Companion
+     * @return stable native profile code: Meshtastic 0, MeshCore 1, ESP32 OTA 2, Nordic DFU 3
      */
     public int nativeCode() {
         return nativeCode;
@@ -89,21 +103,12 @@ public enum BleProtocolProfile {
     }
 
     /**
-     * Returns BLE service UUIDs used for scanning and connecting.
-     *
-     * @return immutable list of UUID strings
-     */
-    public List<String> serviceUuids() {
-        return serviceUuids;
-    }
-
-    /**
      * Returns the primary service UUID for this profile.
      *
      * @return first service UUID, or {@code null} when the profile has no fixed service
      */
     public String primaryServiceUuid() {
-        return serviceUuids.isEmpty() ? null : serviceUuids.get(0);
+        return serviceUuids.isEmpty() ? null : serviceUuids.getFirst();
     }
 
     /**
@@ -149,15 +154,6 @@ public enum BleProtocolProfile {
      */
     public boolean usesSerialFramePayload() {
         return serialFramePayload;
-    }
-
-    /**
-     * Returns whether inbound data arrives directly through notifications.
-     *
-     * @return {@code true} when no separate notify trigger is used
-     */
-    public boolean usesDirectInboundNotifications() {
-        return !hasNotifyTriggerCharacteristic();
     }
 
     /**
