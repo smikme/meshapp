@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,9 +17,11 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -110,7 +113,7 @@ class FirmwareOtaTcpUploaderTest {
             });
             Thread thread = new Thread(task); thread.setDaemon(true); thread.start();
             var uploader = new FirmwareOtaTcpUploader("127.0.0.1", server.getLocalPort());
-            Exception error = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+            Exception error = assertThrows(IOException.class,
                     () -> new FirmwareUpdateService().uploadWifi(image, uploader, null));
             assertFalse(error instanceof FirmwareOtaTcpUploader.ConnectFailedException);
             assertEquals(1, task.get(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -133,53 +136,70 @@ class FirmwareOtaTcpUploaderTest {
             });
             Thread thread = new Thread(task); thread.setDaemon(true); thread.start();
             var uploader = new FirmwareOtaTcpUploader("127.0.0.1", server.getLocalPort());
-            Exception error = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+            Exception error = assertThrows(IOException.class,
                     () -> new FirmwareUpdateService().uploadWifi(FirmwareImage.analyze(file), uploader, null));
             assertEquals("No Partition", error.getMessage());
             task.get(5, java.util.concurrent.TimeUnit.SECONDS);
         }
     }
 
-    @Test
+    @RepeatedTest(10)
     void interruptClosesSocketWhileWaitingForBootloaderResponse() throws Exception {
+        assertReadCancelled(FirmwareUpdateStage.CONNECTING_UPLOADER);
+    }
+
+    @RepeatedTest(10)
+    void interruptClosesSocketWhileWaitingForVerification() throws Exception {
+        assertReadCancelled(FirmwareUpdateStage.VERIFYING);
+    }
+
+    /** Checks cancellation after protocol setup, while the peer deliberately keeps the socket open. */
+    private void assertReadCancelled(FirmwareUpdateStage waitingStage) throws Exception {
         Path file = tempHome.resolve("firmware.bin");
-        Files.write(file, FirmwareTestImages.esp());
+        byte[] bytes = FirmwareTestImages.esp();
+        Files.write(file, bytes);
         FirmwareImage image = FirmwareImage.analyze(file);
-        CountDownLatch commandReceived = new CountDownLatch(1);
+        CountDownLatch awaitingReply = new CountDownLatch(1);
+        AtomicBoolean interruptPreserved = new AtomicBoolean();
         try (ServerSocket server = new ServerSocket(0)) {
-            server.setSoTimeout(3000);
-            FutureTask<Integer> serverTask = new FutureTask<>(() -> {
-                try (Socket socket = server.accept()) {
-                    socket.setSoTimeout(3000);
-                    readLine(socket.getInputStream());
-                    commandReceived.countDown();
-                    // Leave the uploader blocked awaiting OK; cancellation must close this socket.
-                    return socket.getInputStream().read();
-                }
-            });
-            Thread serverThread = new Thread(serverTask, "ota-cancel-server");
-            serverThread.setDaemon(true);
-            serverThread.start();
+            server.setSoTimeout(10_000);
             FutureTask<Void> upload = new FutureTask<>(() -> {
-                new FirmwareOtaTcpUploader("127.0.0.1", server.getLocalPort()).upload(image, null);
-                return null;
+                try {
+                    new FirmwareOtaTcpUploader("127.0.0.1", server.getLocalPort()).upload(image, progress -> {
+                        if (progress.stage() == waitingStage) awaitingReply.countDown();
+                    });
+                    return null;
+                } finally {
+                    interruptPreserved.set(Thread.currentThread().isInterrupted());
+                }
             });
             Thread worker = new Thread(upload, "ota-cancel-worker");
             worker.setDaemon(true);
             worker.start();
-            try {
-                assertTrue(commandReceived.await(3, TimeUnit.SECONDS));
+            try (Socket peer = server.accept()) {
+                // This deadline exceeds the cancellation assertion's deadline. A peer timeout
+                // must never close the socket and accidentally make cancellation appear to work.
+                peer.setSoTimeout(20_000);
+                assertEquals("OTA " + bytes.length + " " + image.sha256Hex(), readLine(peer.getInputStream()));
+                if (waitingStage == FirmwareUpdateStage.VERIFYING) {
+                    peer.getOutputStream().write("OK\n".getBytes(StandardCharsets.UTF_8));
+                    peer.getOutputStream().flush();
+                    assertArrayEquals(bytes, peer.getInputStream().readNBytes(bytes.length));
+                }
+                assertTrue(awaitingReply.await(10, TimeUnit.SECONDS));
                 worker.interrupt();
                 ExecutionException error = assertThrows(ExecutionException.class,
-                        () -> upload.get(3, TimeUnit.SECONDS));
-                assertInstanceOf(IOException.class, error.getCause());
-                assertEquals(-1, serverTask.get(3, TimeUnit.SECONDS));
-                worker.join(3000);
-                assertFalse(worker.isAlive());
+                        () -> upload.get(10, TimeUnit.SECONDS),
+                        () -> "Cancellation stalled at " + waitingStage + ": "
+                                + java.util.Arrays.toString(worker.getStackTrace()));
+                assertInstanceOf(ClosedByInterruptException.class, error.getCause());
+                assertTrue(interruptPreserved.get(), "Cleanup must preserve the worker interrupt");
+                assertEquals(-1, peer.getInputStream().read());
             } finally {
                 worker.interrupt();
-                worker.join(3000);
+                worker.join(10_000);
             }
+            assertFalse(worker.isAlive(), "Upload worker must terminate after cancellation");
         }
     }
 

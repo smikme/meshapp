@@ -8,6 +8,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Locale;
@@ -55,7 +56,8 @@ public final class FirmwareOtaTcpUploader {
 
     /**
      * Uploads a firmware image to the already-running OTA bootloader.
-     * A watchdog closes blocked socket operations on interruption or after fifteen minutes.
+     * Socket I/O uses an interruptible channel so cancellation closes the connection directly.
+     * A watchdog additionally closes blocked operations after fifteen minutes.
      * Failure after connection establishment must not be retried automatically because the
      * loader may have accepted bytes or completed flashing before its reply was lost.
      *
@@ -69,14 +71,16 @@ public final class FirmwareOtaTcpUploader {
         FirmwareImage image,
         Consumer<FirmwareUpdateProgress> progressConsumer
     ) throws IOException, InterruptedException {
-        Thread worker = Thread.currentThread();
-        try (Socket socket = new Socket();
+        // Channel-backed socket streams react directly to Thread.interrupt(), including when
+        // the interrupt arrives just before a read. Closing the socket also closes its channel.
+        try (SocketChannel channel = SocketChannel.open();
+             Socket socket = channel.socket();
              var watchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "firmware-socket-watchdog"); t.setDaemon(true); return t;
              })) {
             long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(15);
             watchdog.scheduleAtFixedRate(() -> {
-                if (worker.isInterrupted() || System.nanoTime() >= deadline) {
+                if (System.nanoTime() >= deadline) {
                     try { socket.close(); } catch (IOException ignored) { }
                 }
             }, 0, 100, TimeUnit.MILLISECONDS);
