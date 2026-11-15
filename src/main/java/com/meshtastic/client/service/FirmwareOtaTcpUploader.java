@@ -1,19 +1,22 @@
 package com.meshtastic.client.service;
 
 import com.meshtastic.client.i18n.I18n;
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
+import java.nio.channels.ClosedByInterruptException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import org.intellij.lang.annotations.MagicConstant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +34,6 @@ public final class FirmwareOtaTcpUploader {
         FirmwareOtaTcpUploader.class
     );
     private static final int CONNECT_TIMEOUT_MS = 5_000;
-    private static final int COMMAND_READ_TIMEOUT_MS = 10_000;
     private static final int ERASING_READ_TIMEOUT_MS = 120_000;
     private static final int VERIFY_READ_TIMEOUT_MS = 180_000;
     private static final int CHUNK_SIZE = 1024;
@@ -56,51 +58,34 @@ public final class FirmwareOtaTcpUploader {
 
     /**
      * Uploads a firmware image to the already-running OTA bootloader.
-     * Socket I/O uses an interruptible channel so cancellation closes the connection directly.
-     * A watchdog additionally closes blocked operations after fifteen minutes.
+     * Network operations use a non-blocking channel and bounded selector waits. Cancellation
+     * is checked explicitly between waits, so it does not depend on interrupting a native
+     * socket read. The entire upload has a fifteen-minute deadline.
      * Failure after connection establishment must not be retried automatically because the
      * loader may have accepted bytes or completed flashing before its reply was lost.
      *
      * @param image firmware image metadata
      * @param progressConsumer optional callback invoked on the uploading thread
      * @throws IOException when connection, command exchange, transfer or verification fails,
-     *                     including a socket operation closed by the watchdog
+     *                     including cancellation or an expired operation deadline
      * @throws InterruptedException when the upload delay is interrupted
      */
     public void upload(
         FirmwareImage image,
         Consumer<FirmwareUpdateProgress> progressConsumer
     ) throws IOException, InterruptedException {
-        // Channel-backed socket streams react directly to Thread.interrupt(), including when
-        // the interrupt arrives just before a read. Closing the socket also closes its channel.
-        try (SocketChannel channel = SocketChannel.open();
-             Socket socket = channel.socket();
-             var watchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread t = new Thread(r, "firmware-socket-watchdog"); t.setDaemon(true); return t;
-             })) {
-            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(15);
-            watchdog.scheduleAtFixedRate(() -> {
-                if (System.nanoTime() >= deadline) {
-                    try { socket.close(); } catch (IOException ignored) { }
-                }
-            }, 0, 100, TimeUnit.MILLISECONDS);
+        try (SocketChannel channel = SocketChannel.open(); Selector selector = Selector.open()) {
+            var connection = new OtaConnection(channel, selector);
             try {
-                socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+                connection.connect(new InetSocketAddress(host, port));
+            } catch (ClosedByInterruptException e) {
+                throw e;
             } catch (IOException e) {
                 throw new ConnectFailedException(e);
             }
-            socket.setSoTimeout(COMMAND_READ_TIMEOUT_MS);
-            OutputStream output = socket.getOutputStream();
-            BufferedReader reader = new BufferedReader(
-                new InputStreamReader(
-                    socket.getInputStream(),
-                    StandardCharsets.UTF_8
-                )
-            );
-
-            startOta(image, socket, output, reader, progressConsumer);
-            streamFirmware(image, output, progressConsumer);
-            waitForVerification(socket, reader, progressConsumer);
+            startOta(image, connection, progressConsumer);
+            streamFirmware(image, connection, progressConsumer);
+            waitForVerification(connection, progressConsumer);
         }
     }
 
@@ -115,9 +100,7 @@ public final class FirmwareOtaTcpUploader {
 
     private void startOta(
         FirmwareImage image,
-        Socket socket,
-        OutputStream output,
-        BufferedReader reader,
+        OtaConnection connection,
         Consumer<FirmwareUpdateProgress> progressConsumer
     ) throws IOException {
         String command = String.format(
@@ -126,8 +109,7 @@ public final class FirmwareOtaTcpUploader {
             image.sizeBytes(),
             image.sha256Hex()
         );
-        output.write(command.getBytes(StandardCharsets.UTF_8));
-        output.flush();
+        connection.write(ByteBuffer.wrap(command.getBytes(StandardCharsets.UTF_8)));
 
         emit(
             progressConsumer,
@@ -136,11 +118,10 @@ public final class FirmwareOtaTcpUploader {
             I18n.t("settings.firmware.status.startingOta")
         );
 
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ERASING_READ_TIMEOUT_MS);
+        long deadline = connection.deadlineAfter(ERASING_READ_TIMEOUT_MS);
         boolean complete = false;
         while (!complete) {
-            if (System.nanoTime() >= deadline) throw new IOException("OTA handshake timed out");
-            String line = readLine(socket, reader, ERASING_READ_TIMEOUT_MS);
+            String line = readLine(connection, deadline);
             FirmwareOtaResponse response = FirmwareOtaResponse.parse(line);
             switch (response.kind()) {
                 case OK -> complete = true;
@@ -158,7 +139,7 @@ public final class FirmwareOtaTcpUploader {
 
     private void streamFirmware(
         FirmwareImage image,
-        OutputStream output,
+        OtaConnection connection,
         Consumer<FirmwareUpdateProgress> progressConsumer
     ) throws IOException, InterruptedException {
         long totalBytes = image.sizeBytes();
@@ -170,8 +151,7 @@ public final class FirmwareOtaTcpUploader {
                 if (read == 0) {
                     continue;
                 }
-                output.write(buffer, 0, read);
-                output.flush();
+                connection.write(ByteBuffer.wrap(buffer, 0, read));
                 sentBytes += read;
                 double transferProgress = totalBytes > 0
                     ? (double) sentBytes / (double) totalBytes
@@ -192,8 +172,7 @@ public final class FirmwareOtaTcpUploader {
     }
 
     private void waitForVerification(
-        Socket socket,
-        BufferedReader reader,
+        OtaConnection connection,
         Consumer<FirmwareUpdateProgress> progressConsumer
     ) throws IOException {
         emit(
@@ -202,11 +181,10 @@ public final class FirmwareOtaTcpUploader {
             0.95,
             I18n.t("settings.firmware.status.verifying")
         );
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(VERIFY_READ_TIMEOUT_MS);
+        long deadline = connection.deadlineAfter(VERIFY_READ_TIMEOUT_MS);
         boolean complete = false;
         while (!complete) {
-            if (System.nanoTime() >= deadline) throw new IOException("OTA verification timed out");
-            String line = readLine(socket, reader, VERIFY_READ_TIMEOUT_MS);
+            String line = readLine(connection, deadline);
             FirmwareOtaResponse response = FirmwareOtaResponse.parse(line);
             switch (response.kind()) {
                 case OK -> complete = true;
@@ -237,17 +215,105 @@ public final class FirmwareOtaTcpUploader {
         return new IOException(detail);
     }
 
-    private String readLine(Socket socket, BufferedReader reader, int timeoutMs)
-        throws IOException {
-        socket.setSoTimeout(timeoutMs);
-        String line = reader.readLine();
-        if (line == null) {
-            throw new IOException(
-                I18n.t("settings.firmware.status.loaderClosed")
-            );
-        }
+    private String readLine(OtaConnection connection, long deadline) throws IOException {
+        String line = connection.readLine(deadline);
         log.debug("Wi-Fi OTA response: {}", line);
         return line;
+    }
+
+    /**
+     * Single-worker non-blocking OTA transport. The caller owns the channel and selector.
+     * Every native wait is limited to 100 ms, with interruption and absolute deadlines
+     * checked before and after waiting. No socket streams or timed blocking reads are used.
+     * On macOS, jSerialComm 2.11.4 replaces the SIGIO handler used to interrupt blocking
+     * socket I/O. Selector wakeups and bounded waits avoid relying on that signal handler.
+     */
+    static final class OtaConnection {
+        private static final int WAIT_SLICE_MS = 100;
+        private static final int MAX_RESPONSE_BYTES = 1024;
+        private final SocketChannel channel;
+        private final Selector selector;
+        private final SelectionKey key;
+        private final long uploadDeadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(15);
+        private final ByteBuffer inbound = ByteBuffer.allocate(MAX_RESPONSE_BYTES);
+
+        OtaConnection(SocketChannel channel, Selector selector) throws IOException {
+            this.channel = channel;
+            this.selector = selector;
+            channel.configureBlocking(false);
+            key = channel.register(selector, 0);
+            inbound.limit(0);
+        }
+
+        /** Connects without sending protocol bytes, under the separate connection deadline. */
+        void connect(InetSocketAddress address) throws IOException {
+            long deadline = deadlineAfter(CONNECT_TIMEOUT_MS);
+            checkActive(deadline);
+            if (!channel.connect(address)) {
+                while (!channel.finishConnect()) awaitReady(SelectionKey.OP_CONNECT, deadline);
+            }
+            checkActive(deadline);
+        }
+
+        /** Caps a phase deadline by the total upload deadline; replies never extend it. */
+        long deadlineAfter(int timeoutMs) {
+            return Math.min(uploadDeadline, System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs));
+        }
+
+        /** Drains a buffer, allowing cancellation even when the peer stops receiving data. */
+        void write(ByteBuffer data) throws IOException {
+            while (data.hasRemaining()) {
+                checkActive(uploadDeadline);
+                if (channel.write(data) == 0) awaitReady(SelectionKey.OP_WRITE, uploadDeadline);
+            }
+        }
+
+        /**
+         * Reads a complete LF-terminated response, retaining fragments and any following lines.
+         * CRLF is accepted. An incomplete line at EOF is a failure, not an acknowledgement.
+         */
+        String readLine(long deadline) throws IOException {
+            var line = new ByteArrayOutputStream();
+            while (true) {
+                checkActive(deadline);
+                while (inbound.hasRemaining()) {
+                    byte next = inbound.get();
+                    if (next == '\n') {
+                        String text = line.toString(StandardCharsets.UTF_8);
+                        return text.endsWith("\r") ? text.substring(0, text.length() - 1) : text;
+                    }
+                    if (line.size() >= MAX_RESPONSE_BYTES) throw new IOException("OTA response is too long");
+                    line.write(next);
+                }
+                inbound.clear();
+                int received = channel.read(inbound);
+                inbound.flip();
+                if (received < 0) throw new IOException(I18n.t("settings.firmware.status.loaderClosed"));
+                if (received == 0) awaitReady(SelectionKey.OP_READ, deadline);
+            }
+        }
+
+        /** Uses short waits as a fallback even if a platform fails to wake a selector on interrupt. */
+        private void awaitReady(
+            @MagicConstant(flagsFromClass = SelectionKey.class) int operation,
+            long deadline
+        ) throws IOException {
+            key.interestOps(operation);
+            while (true) {
+                checkActive(deadline);
+                long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                int ready = selector.select(Math.clamp(remainingMs, 1, WAIT_SLICE_MS));
+                checkActive(deadline);
+                selector.selectedKeys().clear();
+                if (ready > 0) return;
+            }
+        }
+
+        /** Preserves the interrupt flag while reporting cancellation as an I/O failure. */
+        private static void checkActive(long deadline) throws IOException {
+            if (Thread.currentThread().isInterrupted()) throw new ClosedByInterruptException();
+            if (System.nanoTime() >= deadline) throw new SocketTimeoutException("OTA operation timed out");
+        }
     }
 
     private void emit(
