@@ -306,6 +306,10 @@ API-Dokumentation: [docs/lua-api.de.md](docs/lua-api.de.md).
 
 Die Oberfläche enthält dunkle und helle AtlantaFX-Cupertino-Themes, eine Seitenleiste, Tray-/Statusleisten-Integration, Toast-Benachrichtigungen und Schnellschalter für Theme und Benachrichtigungen. Windows 11 nutzt Mica, macOS nutzt Vibrancy. Fenstergröße, Fensterposition und Splitterpositionen werden zwischen Sitzungen gespeichert.
 
+In den Anwendungseinstellungen öffnet **Designs und Chat-Hintergründe** die Auswahl der Standard-, blauen oder grünen Palette mit hellem und dunklem Modus. Als Chat-Hintergrund stehen eine Farbe, ein Farbverlauf, Muster und eigene PNG/JPEG-Bilder zur Verfügung. Hintergründe lassen sich abdunkeln und weichzeichnen. Änderungen bleiben bis zum Klick auf **Übernehmen** in der Vorschau und werden ohne Neustart angewendet.
+
+**Chat-Hintergrund ändern** im Kontextmenü der Chatliste oder im Menü der Chat-Kopfzeile legt einen eigenen Hintergrund für einen Kanal oder Direktchat fest. **Allgemeinen Chat-Hintergrund verwenden** stellt die Vererbung wieder her. Bilder bis zu 20 MB und 80 Megapixel werden nach `~/.meshapp/wallpapers` kopiert und auf höchstens 2048 Pixel an der längsten Seite verkleinert. Die Originaldatei kann anschließend verschoben werden. Die Einstellungen werden lokal gespeichert.
+
 Systembenachrichtigungen werden bei neuen Nachrichten angezeigt, wenn der entsprechende Chat nicht geöffnet ist. Update-Prüfungen beim Start können in den Einstellungen aktiviert oder deaktiviert werden.
 
 Nachrichten, Reaktionen, ungelesene Chats, Favoriten und ignorierte Knoten, Telemetrie, Skripte, Skriptdaten, Verlauf der Routenprüfungen und das LoRa-Paketlog werden lokal gespeichert.

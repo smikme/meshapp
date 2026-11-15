@@ -6,6 +6,7 @@ import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.service.RemoteRpcHostService;
 import com.meshtastic.client.themes.TypographyManager;
+import com.meshtastic.client.themes.AppearanceDialog;
 import com.meshtastic.client.utils.AppPreferences;
 import java.util.function.DoubleConsumer;
 import javafx.application.Platform;
@@ -54,6 +55,9 @@ public final class ApplicationSettingsPanelFactory {
 
         Label appearanceHeader = new Label(I18n.t("settings.appearance.title"));
         appearanceHeader.getStyleClass().add("section-title");
+        Button appearanceButton = new Button(I18n.t("appearance.title"));
+        appearanceButton.setOnAction(_ -> AppearanceDialog.showGlobal(
+                panel.getScene() == null ? null : panel.getScene().getWindow()));
 
         CheckBox enableEffectsCb = new CheckBox(
             I18n.t("settings.effects.enable")
@@ -122,6 +126,7 @@ public final class ApplicationSettingsPanelFactory {
         VBox appearanceGroup = new VBox(
             8,
             appearanceHeader,
+            appearanceButton,
             typographyGroup,
             createLanguageSettingRow(),
             createCyrillicCompactionSetting(),

@@ -1,0 +1,139 @@
+/* Keep a standard -fx- property first so IDEs recognize JavaFX CSS. */
+.chat-wallpaper-base {
+    -fx-background-color: -color-bg-default;
+}
+
+/* Palette tokens affect all application scenes. The preview defines its own mode. */
+.root, .appearance-preview {
+    -chat-incoming-bg: -color-bg-subtle;
+    -chat-outgoing-bg: -color-bg-subtle;
+    -chat-selection-bg: #3a3a3c;
+    -chat-muted-fg: -color-fg-muted;
+}
+.root.light-theme, .appearance-preview.light-theme {
+    -chat-selection-bg: #d1d1d6;
+}
+.appearance-preview.light-theme {
+    -color-bg-default: #ffffff;
+    -color-bg-subtle: #f2f2f7;
+    -color-fg-default: #1c1c1e;
+    -color-fg-muted: #636366;
+    -color-border-default: #d1d1d6;
+}
+.appearance-preview.dark-theme {
+    -color-bg-default: #1c1c1e;
+    -color-bg-subtle: #2c2c2e;
+    -color-fg-default: #f2f2f7;
+    -color-fg-muted: #aeaeb2;
+    -color-border-default: #48484a;
+}
+.root.palette-blue, .appearance-preview.palette-blue {
+    -color-accent-0: #dceeff;
+    -color-accent-1: #bddfff;
+    -color-accent-2: #93c9f7;
+    -color-accent-3: #6ab3eb;
+    -color-accent-4: #4299da;
+    -color-accent-5: #237bb8;
+    -color-accent-6: #1e6ba1;
+    -color-accent-7: #195b89;
+    -color-accent-8: #154b71;
+    -color-accent-9: #103b59;
+    -color-accent-emphasis: #237bb8;
+}
+.root.palette-blue.light-theme, .appearance-preview.palette-blue.light-theme {
+    -color-bg-default: #f4f8fc;
+    -color-bg-subtle: #e8f0f8;
+    -color-bg-inset: #e8f0f8;
+    -color-bg-overlay: #f4f8fc;
+    -color-accent-fg: #195b89;
+    -color-accent-muted: #b7d6ee;
+    -color-accent-subtle: #e0eef9;
+    -chat-incoming-bg: #e8f0f8;
+    -chat-outgoing-bg: #cce5f8;
+    -chat-selection-bg: #c2dbee;
+}
+.root.palette-blue.dark-theme, .appearance-preview.palette-blue.dark-theme {
+    -color-bg-default: #162330;
+    -color-bg-subtle: #213447;
+    -color-bg-inset: #162330;
+    -color-bg-overlay: #213447;
+    -color-accent-fg: #a0d5fa;
+    -color-accent-muted: #345d7e;
+    -color-accent-subtle: #243e55;
+    -chat-incoming-bg: #253a4e;
+    -chat-outgoing-bg: #285474;
+    -chat-selection-bg: #34556f;
+    -chat-muted-fg: #c7d5e3;
+}
+.root.palette-green, .appearance-preview.palette-green {
+    -color-accent-0: #d9f2e3;
+    -color-accent-1: #b6e4ca;
+    -color-accent-2: #8fd2ac;
+    -color-accent-3: #68bd8e;
+    -color-accent-4: #46a474;
+    -color-accent-5: #2c855d;
+    -color-accent-6: #257450;
+    -color-accent-7: #1e6344;
+    -color-accent-8: #185237;
+    -color-accent-9: #12412b;
+    -color-accent-emphasis: #2c855d;
+}
+.root.palette-green.light-theme, .appearance-preview.palette-green.light-theme {
+    -color-bg-default: #f5faf7;
+    -color-bg-subtle: #e8f2ec;
+    -color-bg-inset: #e8f2ec;
+    -color-bg-overlay: #f5faf7;
+    -color-accent-fg: #1e6344;
+    -color-accent-muted: #b4dbc4;
+    -color-accent-subtle: #e0f2e7;
+    -chat-incoming-bg: #e8f2ec;
+    -chat-outgoing-bg: #ccead7;
+    -chat-selection-bg: #bfddcc;
+}
+.root.palette-green.dark-theme, .appearance-preview.palette-green.dark-theme {
+    -color-bg-default: #172820;
+    -color-bg-subtle: #233a2f;
+    -color-bg-inset: #172820;
+    -color-bg-overlay: #233a2f;
+    -color-accent-fg: #a7e5c5;
+    -color-accent-muted: #396b50;
+    -color-accent-subtle: #264b38;
+    -chat-incoming-bg: #294237;
+    -chat-outgoing-bg: #32664c;
+    -chat-selection-bg: #385e49;
+    -chat-muted-fg: #d0e0d6;
+}
+.appearance-card {
+    -fx-padding: 8;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-width: 2;
+    -fx-border-color: transparent;
+    -fx-font-size: 0.923em;
+}
+.appearance-card:selected {
+    -fx-border-color: -color-accent-fg;
+}
+.appearance-preview {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-font-size: 13px;
+    -fx-min-height: 280;
+}
+.appearance-preview .appearance-preview-header {
+    -fx-background-color: -color-bg-subtle;
+    -fx-text-fill: -color-fg-default;
+    -fx-padding: 16;
+}
+.appearance-preview .appearance-preview-message {
+    -fx-text-fill: -color-fg-default;
+}
+.appearance-preview .appearance-preview-detail {
+    -fx-text-fill: -color-fg-muted;
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 8;
+    -fx-padding: 6 10;
+}
+.appearance-status {
+    -fx-text-fill: -color-fg-muted;
+}

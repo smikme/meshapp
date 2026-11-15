@@ -1,6 +1,8 @@
 package com.meshtastic.client.system;
 
 import javafx.geometry.Orientation;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.WeakChangeListener;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
@@ -29,6 +31,7 @@ import com.meshtastic.client.i18n.I18n;
 import com.meshtastic.client.menu.MyDrawerBuilder;
 import com.meshtastic.client.platform.OsDetect;
 import com.meshtastic.client.themes.ThemeManager;
+import com.meshtastic.client.themes.AppearancePreferences;
 import com.meshtastic.client.utils.AppPreferences;
 import com.meshtastic.client.utils.SvgIconLoader;
 import com.meshtastic.client.utils.UnicodeTextUtils;
@@ -57,11 +60,18 @@ public class DrawerPane extends StackPane {
 
     private final ToolBar toolBar;
     private final Button themeButton;
-    private final Button notifButton;
     private final Set<Class<?>> navigationBlockedItemClasses = new HashSet<>();
     private Object selectedItemKey;
     private Circle chatBadgeDot;
     private boolean chatUnreadDotVisible;
+    // WeakChangeListener needs a strong reference for the lifetime of this pane.
+    @SuppressWarnings("FieldCanBeLocal")
+    private final ChangeListener<Number> appearanceListener = (_, _, _) -> refreshAppearance();
+
+    private void refreshAppearance() {
+        updateThemeIcon(themeButton, AppPreferences.isDarkMode());
+        updateMonochromeIconColors();
+    }
 
     public DrawerPane() {
         getStyleClass().add("drawer-pane");
@@ -77,8 +87,9 @@ public class DrawerPane extends StackPane {
         toolBar.getStyleClass().add("drawer-toolbar");
 
         // Notification and theme buttons are pinned to the bottom.
-        notifButton = createNotificationButton();
+        Button notifButton = createNotificationButton();
         themeButton = createThemeButton();
+        AppearancePreferences.revisionProperty().addListener(new WeakChangeListener<>(appearanceListener));
 
         StackPane menuContent = new StackPane(toolBar);
         menuContent.getStyleClass().add("drawer-toolbar-scroll-content");
@@ -104,6 +115,7 @@ public class DrawerPane extends StackPane {
         MyDrawerBuilder.init(this);
     }
 
+    @SuppressWarnings("unused") // Retain the header-update API used by other drawer layouts.
     public void updateHeader(String shortName, String longName, String nodeId) {
         // Toolbar mode does not show the header.
     }
@@ -152,7 +164,7 @@ public class DrawerPane extends StackPane {
                 btn = new Button();
                 btn.setGraphic(createMonochromeTextIcon(item.iconText()));
                 btn.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
-                btn.hoverProperty().addListener((obs, wasHover, isHover) -> updateMonochromeIconColor(btn));
+                btn.hoverProperty().addListener((_, _, _) -> updateMonochromeIconColor(btn));
             } else {
                 // Plain text icon fallback for non-extension dynamic entries.
                 btn = new Button(item.iconText() != null ? item.iconText() : "?");
@@ -170,7 +182,7 @@ public class DrawerPane extends StackPane {
         }
         updateMonochromeIconColor(btn);
         updateNavigationBlockState(btn);
-        btn.setOnAction(e -> {
+        btn.setOnAction(_ -> {
             if (item.action() != null) {
                 item.action().run();
             }
@@ -291,7 +303,7 @@ public class DrawerPane extends StackPane {
 
         // Preserve emoji interior detail: bright source pixels become stronger
         // monochrome pixels, dark strokes become transparent cuts in the mask.
-        double detailMask = Math.pow(Math.max(0.0, Math.min(1.0, luminance)), 0.85);
+        double detailMask = Math.pow(Math.clamp(luminance, 0.0, 1.0), 0.85);
         return sourceAlpha * targetColor.getOpacity() * detailMask;
     }
 
@@ -310,7 +322,7 @@ public class DrawerPane extends StackPane {
         btn.getStyleClass().add("drawer-toolbar-button");
         btn.setTooltip(new Tooltip(I18n.t("drawer.theme.toggle")));
         updateThemeIcon(btn, AppPreferences.isDarkMode());
-        btn.setOnAction(e -> {
+        btn.setOnAction(_ -> {
             boolean newDark = !AppPreferences.isDarkMode();
             AppPreferences.setDarkMode(newDark);
             if (MeshApp.getPrimaryStage() != null && MeshApp.getPrimaryStage().getScene() != null) {
@@ -340,7 +352,7 @@ public class DrawerPane extends StackPane {
         Button btn = new Button();
         btn.getStyleClass().add("drawer-toolbar-button");
         updateNotifIcon(btn, AppPreferences.isNotificationsEnabled());
-        btn.setOnAction(e -> {
+        btn.setOnAction(_ -> {
             boolean newState = !AppPreferences.isNotificationsEnabled();
             AppPreferences.setNotificationsEnabled(newState);
             updateNotifIcon(btn, newState);
@@ -429,6 +441,7 @@ public class DrawerPane extends StackPane {
         }
     }
 
+    @SuppressWarnings("unused") // Fixed-width toolbar keeps the DrawerManager compatibility hook.
     public void setCompact(boolean compact) {
         // no-op
     }
