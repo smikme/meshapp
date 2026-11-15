@@ -3,7 +3,6 @@ package com.meshtastic.client.connection.ble.windows;
 import com.google.gson.Gson;
 import com.meshtastic.client.connection.ConnectionException;
 import com.meshtastic.client.connection.ble.BleDevice;
-import com.meshtastic.client.connection.ble.BlePlatform;
 import com.meshtastic.client.connection.ble.BleProtocolProfile;
 import com.meshtastic.client.connection.ble.BleState;
 
@@ -45,7 +44,7 @@ public final class WinBleHelperMain {
     private WinBleHelperMain() {
     }
 
-    public static void main(String[] args) {
+    static void main() {
         int exitCode = new WinBleHelperMain().run();
         System.exit(exitCode);
     }
@@ -145,6 +144,10 @@ public final class WinBleHelperMain {
                             : new byte[0];
                     sendResponse(request.id, true, Map.of("value", platform.writeToRadio(data)));
                 }
+                case "firmware_control" -> {
+                    byte[] data = Base64.getDecoder().decode(request.data);
+                    sendResponse(request.id, true, Map.of("value", platform.writeFirmwareControl(data)));
+                }
                 case "adapter_state" -> sendResponse(request.id, true,
                         Map.of("adapterState", platform.getAdapterState().name()));
                 case "dispose" -> {
@@ -221,9 +224,9 @@ public final class WinBleHelperMain {
     }
 
     private static BleProtocolProfile profileFromNativeCode(int code) {
-        return code == BleProtocolProfile.MESHCORE_COMPANION.nativeCode()
-                ? BleProtocolProfile.MESHCORE_COMPANION
-                : BleProtocolProfile.MESHTASTIC;
+        return java.util.Arrays.stream(BleProtocolProfile.values())
+                .filter(p -> p.nativeCode() == code).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown BLE profile: " + code));
     }
 
     private static final class Request {

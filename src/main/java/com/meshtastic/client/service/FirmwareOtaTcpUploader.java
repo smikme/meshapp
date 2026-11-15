@@ -10,7 +10,6 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -32,8 +31,8 @@ public final class FirmwareOtaTcpUploader {
     );
     private static final int CONNECT_TIMEOUT_MS = 5_000;
     private static final int COMMAND_READ_TIMEOUT_MS = 10_000;
-    private static final int ERASING_READ_TIMEOUT_MS = 60_000;
-    private static final int VERIFY_READ_TIMEOUT_MS = 15_000;
+    private static final int ERASING_READ_TIMEOUT_MS = 120_000;
+    private static final int VERIFY_READ_TIMEOUT_MS = 180_000;
     private static final int CHUNK_SIZE = 1024;
     private static final long WRITE_DELAY_MS = 10;
 
@@ -56,18 +55,36 @@ public final class FirmwareOtaTcpUploader {
 
     /**
      * Uploads a firmware image to the already-running OTA bootloader.
+     * A watchdog closes blocked socket operations on interruption or after fifteen minutes.
+     * Failure after connection establishment must not be retried automatically because the
+     * loader may have accepted bytes or completed flashing before its reply was lost.
      *
      * @param image firmware image metadata
-     * @param progressConsumer progress callback for the UI
-     * @throws IOException when connection, command exchange, transfer, or verification fails
+     * @param progressConsumer optional callback invoked on the uploading thread
+     * @throws IOException when connection, command exchange, transfer or verification fails,
+     *                     including a socket operation closed by the watchdog
      * @throws InterruptedException when the upload delay is interrupted
      */
     public void upload(
         FirmwareImage image,
         Consumer<FirmwareUpdateProgress> progressConsumer
     ) throws IOException, InterruptedException {
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+        Thread worker = Thread.currentThread();
+        try (Socket socket = new Socket();
+             var watchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "firmware-socket-watchdog"); t.setDaemon(true); return t;
+             })) {
+            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(15);
+            watchdog.scheduleAtFixedRate(() -> {
+                if (worker.isInterrupted() || System.nanoTime() >= deadline) {
+                    try { socket.close(); } catch (IOException ignored) { }
+                }
+            }, 0, 100, TimeUnit.MILLISECONDS);
+            try {
+                socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
+            } catch (IOException e) {
+                throw new ConnectFailedException(e);
+            }
             socket.setSoTimeout(COMMAND_READ_TIMEOUT_MS);
             OutputStream output = socket.getOutputStream();
             BufferedReader reader = new BufferedReader(
@@ -83,6 +100,15 @@ public final class FirmwareOtaTcpUploader {
         }
     }
 
+    /**
+     * Marks connection failure before any OTA command bytes were sent. Only this failure
+     * permits the service to retry automatically; an established session may already have
+     * modified flash even when its final acknowledgement is lost.
+     */
+    static final class ConnectFailedException extends IOException {
+        ConnectFailedException(IOException cause) { super(cause.getMessage(), cause); }
+    }
+
     private void startOta(
         FirmwareImage image,
         Socket socket,
@@ -92,7 +118,7 @@ public final class FirmwareOtaTcpUploader {
     ) throws IOException {
         String command = String.format(
             Locale.ROOT,
-            "OTA %d %s%n",
+            "OTA %d %s\n",
             image.sizeBytes(),
             image.sha256Hex()
         );
@@ -106,8 +132,10 @@ public final class FirmwareOtaTcpUploader {
             I18n.t("settings.firmware.status.startingOta")
         );
 
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ERASING_READ_TIMEOUT_MS);
         boolean complete = false;
         while (!complete) {
+            if (System.nanoTime() >= deadline) throw new IOException("OTA handshake timed out");
             String line = readLine(socket, reader, ERASING_READ_TIMEOUT_MS);
             FirmwareOtaResponse response = FirmwareOtaResponse.parse(line);
             switch (response.kind()) {
@@ -170,8 +198,10 @@ public final class FirmwareOtaTcpUploader {
             0.95,
             I18n.t("settings.firmware.status.verifying")
         );
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(VERIFY_READ_TIMEOUT_MS);
         boolean complete = false;
         while (!complete) {
+            if (System.nanoTime() >= deadline) throw new IOException("OTA verification timed out");
             String line = readLine(socket, reader, VERIFY_READ_TIMEOUT_MS);
             FirmwareOtaResponse response = FirmwareOtaResponse.parse(line);
             switch (response.kind()) {
@@ -247,25 +277,13 @@ public final class FirmwareOtaTcpUploader {
             if (trimmed.equals("OK") || trimmed.startsWith("OK ")) {
                 return new FirmwareOtaResponse(Kind.OK, trimmed);
             }
-            if (trimmed.equals("ERASING")) {
-                return new FirmwareOtaResponse(Kind.ERASING, trimmed);
-            }
-            if (trimmed.equals("ACK")) {
-                return new FirmwareOtaResponse(Kind.ACK, trimmed);
-            }
-            if (trimmed.equals("ERR")) {
-                return new FirmwareOtaResponse(Kind.ERROR, "Unknown error");
-            }
-            if (trimmed.startsWith("ERR ")) {
-                return new FirmwareOtaResponse(
-                    Kind.ERROR,
-                    trimmed.substring(4)
-                );
-            }
-            return new FirmwareOtaResponse(
-                Kind.ERROR,
-                "Unknown response: " + trimmed
-            );
+            return switch (trimmed) {
+                case "ERASING" -> new FirmwareOtaResponse(Kind.ERASING, trimmed);
+                case "ACK" -> new FirmwareOtaResponse(Kind.ACK, trimmed);
+                case "ERR" -> new FirmwareOtaResponse(Kind.ERROR, "Unknown error");
+                default -> new FirmwareOtaResponse(Kind.ERROR,
+                        trimmed.startsWith("ERR ") ? trimmed.substring(4) : "Unknown response: " + trimmed);
+            };
         }
     }
 }

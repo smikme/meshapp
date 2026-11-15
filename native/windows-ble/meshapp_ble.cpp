@@ -104,9 +104,11 @@ static uint64_t string_to_mac(const char* str) {
 
 /* ==================== BLE State (heap-allocated, no static WinRT) ==================== */
 
-// BLE UUIDs — plain GUID structs, safe as statics
+// Stable Java/JNA and helper-IPC codes; keep aligned with BleProtocolProfile.nativeCode().
 static constexpr int PROFILE_MESHTASTIC = 0;
 static constexpr int PROFILE_MESHCORE = 1;
+static constexpr int PROFILE_ESP32_OTA = 2;
+static constexpr int PROFILE_NORDIC_DFU = 3;
 
 static const GUID SVC_UUID  = {0x6ba1b218,0x15a8,0x461f,{0x9f,0xa8,0x5d,0xca,0xe2,0x73,0xea,0xfd}};
 static const GUID FR_UUID   = {0x2c55e69e,0x4993,0x11ed,{0xb8,0x78,0x02,0x42,0xac,0x12,0x00,0x02}};
@@ -116,6 +118,17 @@ static const GUID FN_UUID   = {0xed9da18c,0xa800,0x4f66,{0xa6,0x70,0xaa,0x75,0x4
 static const GUID MC_SVC_UUID = {0x6e400001,0xb5a3,0xf393,{0xe0,0xa9,0xe5,0x0e,0x24,0xdc,0xca,0x9e}};
 static const GUID MC_RX_UUID  = {0x6e400002,0xb5a3,0xf393,{0xe0,0xa9,0xe5,0x0e,0x24,0xdc,0xca,0x9e}};
 static const GUID MC_TX_UUID  = {0x6e400003,0xb5a3,0xf393,{0xe0,0xa9,0xe5,0x0e,0x24,0xdc,0xca,0x9e}};
+
+// Loader UUIDs are plain GUIDs, safe before WinRT initialization. TX/RX are named
+// from the peripheral's perspective: TX notifies Java, RX accepts firmware bytes.
+static const GUID OTA_SVC_UUID = {0x4fafc201,0x1fb5,0x459e,{0x8f,0xcc,0xc5,0xc9,0xc3,0x31,0x91,0x4b}};
+static const GUID OTA_TX_UUID = {0x62ec0272,0x3ec5,0x11eb,{0xb3,0x78,0x02,0x42,0xac,0x13,0x00,0x03}};
+static const GUID OTA_RX_UUID = {0x62ec0272,0x3ec5,0x11eb,{0xb3,0x78,0x02,0x42,0xac,0x13,0x00,0x05}};
+// Legacy Nordic DFU has a notifying/writable control point plus a write-only packet
+// characteristic. These are distinct from Nordic Secure DFU services.
+static const GUID DFU_SVC_UUID = {0x00001530,0x1212,0xefde,{0x15,0x23,0x78,0x5f,0xea,0xbc,0xd1,0x23}};
+static const GUID DFU_CTRL_UUID = {0x00001531,0x1212,0xefde,{0x15,0x23,0x78,0x5f,0xea,0xbc,0xd1,0x23}};
+static const GUID DFU_DATA_UUID = {0x00001532,0x1212,0xefde,{0x15,0x23,0x78,0x5f,0xea,0xbc,0xd1,0x23}};
 
 static inline guid to_guid(const GUID& g) {
     return *reinterpret_cast<const guid*>(&g);
@@ -170,10 +183,13 @@ static std::unordered_map<uint64_t, std::string> g_scan_names;
 static std::unordered_set<uint64_t> g_scan_matched_addresses;
 
 static int active_profile() {
-    return g_profile.load() == PROFILE_MESHCORE ? PROFILE_MESHCORE : PROFILE_MESHTASTIC;
+    int p = g_profile.load();
+    return p >= 0 && p <= PROFILE_NORDIC_DFU ? p : PROFILE_MESHTASTIC;
 }
 
 static guid active_service_uuid() {
+    if (active_profile() == PROFILE_ESP32_OTA) return to_guid(OTA_SVC_UUID);
+    if (active_profile() == PROFILE_NORDIC_DFU) return to_guid(DFU_SVC_UUID);
     return active_profile() == PROFILE_MESHCORE ? to_guid(MC_SVC_UUID) : to_guid(SVC_UUID);
 }
 
@@ -253,16 +269,22 @@ static bool is_better_scan_name(std::string const& candidate, std::string const&
     return candidate.size() > current.size();
 }
 
+// Inbound/outbound select roles within the current profile. Nordic's inbound
+// control point is also used by meshble_write_firmware_control().
 static guid active_inbound_uuid() {
+    if (active_profile() == PROFILE_ESP32_OTA) return to_guid(OTA_TX_UUID);
+    if (active_profile() == PROFILE_NORDIC_DFU) return to_guid(DFU_CTRL_UUID);
     return active_profile() == PROFILE_MESHCORE ? to_guid(MC_TX_UUID) : to_guid(FR_UUID);
 }
 
 static guid active_outbound_uuid() {
+    if (active_profile() == PROFILE_ESP32_OTA) return to_guid(OTA_RX_UUID);
+    if (active_profile() == PROFILE_NORDIC_DFU) return to_guid(DFU_DATA_UUID);
     return active_profile() == PROFILE_MESHCORE ? to_guid(MC_RX_UUID) : to_guid(TR_UUID);
 }
 
 static bool active_has_notify_trigger() {
-    return active_profile() != PROFILE_MESHCORE;
+    return active_profile() == PROFILE_MESHTASTIC;
 }
 
 static const char* active_profile_name() {
@@ -829,7 +851,7 @@ MESHBLE_API int meshble_get_adapter_state(void) {
 }
 
 MESHBLE_API void meshble_set_profile(int profile) {
-    if (profile == PROFILE_MESHCORE) {
+    if (profile >= 0 && profile <= PROFILE_NORDIC_DFU) {
         g_profile = profile;
     } else {
         g_profile = PROFILE_MESHTASTIC;
@@ -972,7 +994,9 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                     return -2;
                 }
 
-                if (!ensure_paired(dev, addr, pairing_timeout)) {
+                // Loader services may use a new address and do not require application
+                // pairing. Do not block their brief advertising window on a passkey dialog.
+                if (active_profile() < PROFILE_ESP32_OTA && !ensure_paired(dev, addr, pairing_timeout)) {
                     set_last_error("BLE pairing not completed or rejected for " + addr);
                     try { dev.Close(); } catch (...) {}
                     do_disconnect();
@@ -1054,6 +1078,12 @@ MESHBLE_API int meshble_connect(const char* address, int timeout_ms) {
                         log_msg("[meshble] inbound: using notifications");
                     } else {
                         g_notifications_active = false;
+                        if (active_profile() >= PROFILE_ESP32_OTA) {
+                            // OTA/DFU replies are transient protocol events. Polling cannot
+                            // replace them, so report failed setup before sending any image.
+                            set_last_error("Firmware transfer requires notifications");
+                            do_disconnect(); return -3;
+                        }
                         log_msg("[meshble] inbound notifications unavailable; Java polling fallback");
                     }
                 }
@@ -1129,7 +1159,10 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
                     }
                 }
                 auto buf = bytes_to_buffer(copy.data(), (int)copy.size());
-                int opt = g_write_option.load();
+                // The Nordic packet characteristic requires WriteWithoutResponse. Java
+                // paces these packets and verifies receipt counts; adaptive probing is
+                // reserved for application profiles and the ESP OTA characteristic.
+                int opt = active_profile() == PROFILE_NORDIC_DFU ? 1 : g_write_option.load();
 
                 if (opt <= 0) {
                     // Try WriteWithResponse first (or if already known to work)
@@ -1191,6 +1224,26 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
                 log_msg("[meshble] writeToRadio unknown exception");
                 return -1;
             }
+        });
+    } catch (...) { return -1; }
+}
+
+MESHBLE_API int meshble_write_firmware_control(const unsigned char* data, int length) {
+    if (!g_connected || active_profile() != PROFILE_NORDIC_DFU || !data || length <= 0) return -1;
+    // Capture owned bytes before dispatching to the WinRT worker; never retain a JNA
+    // buffer in queued work. The control point must acknowledge writes at the GATT level.
+    std::vector<unsigned char> copy(data, data + length);
+    try {
+        return run_on_worker([copy]() -> int {
+            if (!g_connected || !g_ble || g_ble->from_radio == nullptr) return -1;
+            try {
+                // A bounded GATT write confirms transport only. Java separately waits
+                // for the DFU response notification identifying the command and status.
+                auto result = await_async_result(g_ble->from_radio.WriteValueAsync(
+                    bytes_to_buffer(copy.data(), (int)copy.size()), GattWriteOption::WriteWithResponse),
+                    GATT_WRITE_TIMEOUT, "DFU control write");
+                return result == GattCommunicationStatus::Success ? 0 : -1;
+            } catch (...) { return -1; }
         });
     } catch (...) { return -1; }
 }

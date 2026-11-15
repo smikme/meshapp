@@ -3,10 +3,10 @@ package com.meshtastic.client.service;
 import org.meshtastic.proto.MeshProtos;
 
 /**
- * Outcome of asking a device to enter a firmware update bootloader.
+ * Outcome of transferring firmware and observing the application reconnect.
  *
- * @param success {@code true} when the command flow reached reboot handoff
- * @param resolvedMode actual OTA/DFU mode used after automatic resolution
+ * @param success {@code true} when transfer completed and the original node reconnected
+ * @param resolvedMode actual transfer mode on success; failures may retain the requested mode
  * @param ackReceived {@code true} when a routing ACK was received before timeout
  * @param reconnectHandoffStarted {@code true} when the connection manager accepted the reboot handoff
  * @param routingError routing error returned by the device, or {@code null} when unavailable

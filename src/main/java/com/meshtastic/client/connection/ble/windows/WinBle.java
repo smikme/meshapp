@@ -12,6 +12,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Windows BLE implementation backed by WinRT through {@code meshapp-ble.dll}
@@ -40,10 +41,14 @@ public class WinBle implements BlePlatform {
     private final WinBleLibrary lib;
 
     // Instance callbacks must stay strongly reachable while this isolated DLL copy is loaded.
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
     private WinBleLibrary.DeviceCallback scanCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
     private WinBleLibrary.DataCallback dataCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
     private WinBleLibrary.StateCallback stateCallback;
-    private WinBleLibrary.PasskeyRequestCallback passkeyCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
+    private final WinBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
@@ -61,7 +66,7 @@ public class WinBle implements BlePlatform {
             });
     private volatile ScheduledFuture<?> pollFuture;
     private volatile boolean drainInProgress;
-    private volatile int consecutiveWriteFailures;
+    private final AtomicInteger consecutiveWriteFailures = new AtomicInteger();
 
     public WinBle() {
         try {
@@ -100,7 +105,7 @@ public class WinBle implements BlePlatform {
         this.scanConsumer = onDeviceFound;
         lib.meshble_set_profile(profile.nativeCode());
 
-        // Static callback — prevent GC
+        // Retain the callback for as long as native scanning can invoke it.
         scanCallback = (addressPtr, namePtr, rssi) -> {
             try {
                 Consumer<BleDevice> consumer = scanConsumer;
@@ -143,7 +148,7 @@ public class WinBle implements BlePlatform {
         log.info("Подключение к BLE устройству: {}", address);
         lib.meshble_set_profile(profile.nativeCode());
 
-        // Setup data callback (static, prevent GC)
+        // Retain the data callback for the lifetime of this native session.
         dataCallback = (dataPtr, length) -> {
             try {
                 Consumer<byte[]> listener = fromRadioListener;
@@ -156,7 +161,7 @@ public class WinBle implements BlePlatform {
             }
         };
 
-        // Setup state callback (static, prevent GC)
+        // Retain the state callback for the lifetime of this native session.
         stateCallback = (state, errorMsg) -> {
             try {
                 Consumer<BleState> sl = stateListener;
@@ -277,7 +282,7 @@ public class WinBle implements BlePlatform {
                 log.error("writeToRadio: AccessDenied after {} ms on thread {}", durationMs, threadName);
                 return false;
             }
-            int failures = ++consecutiveWriteFailures;
+            int failures = consecutiveWriteFailures.incrementAndGet();
             if (failures == 5) {
                 log.warn("writeToRadio: {} consecutive failures (lastDuration={} ms, thread={})",
                         failures, durationMs, threadName);
@@ -287,7 +292,7 @@ public class WinBle implements BlePlatform {
             }
             return false;
         } else {
-            consecutiveWriteFailures = 0;
+            consecutiveWriteFailures.set(0);
             if (durationMs >= WRITE_WARN_THRESHOLD_MS) {
                 log.warn("writeToRadio: slow success in {} ms ({} bytes, thread={})",
                         durationMs, protobufPayload.length, threadName);
@@ -298,6 +303,11 @@ public class WinBle implements BlePlatform {
             }
             return true;
         }
+    }
+
+    @Override
+    public boolean writeFirmwareControl(byte[] data) {
+        return isConnected() && lib.meshble_write_firmware_control(data, data.length) == 0;
     }
 
     @Override

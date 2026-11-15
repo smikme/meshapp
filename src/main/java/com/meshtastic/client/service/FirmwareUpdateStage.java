@@ -1,13 +1,13 @@
 package com.meshtastic.client.service;
 
 /**
- * Firmware update preparation stages exposed to the settings UI.
+ * Firmware update lifecycle stages exposed to the settings UI.
  *
  * @author Konstantin A. Smirnov (ks@privatepractice.app)
  */
 public enum FirmwareUpdateStage {
     /**
-     * No firmware update preparation is running.
+     * No firmware update is running.
      */
     IDLE,
 
@@ -42,17 +42,17 @@ public enum FirmwareUpdateStage {
     UPLOADING,
 
     /**
-     * The bootloader is verifying the uploaded image.
+     * The bootloader is verifying the image or the app is awaiting the original node's return.
      */
     VERIFYING,
 
     /**
-     * The bootloader command flow completed.
+     * Transfer completed and the original node reconnected with application metadata.
      */
     COMPLETE,
 
     /**
-     * The bootloader command flow failed before completion.
+     * Validation, transfer or reconnection failed, or the operation was cancelled.
      */
     FAILED
 }

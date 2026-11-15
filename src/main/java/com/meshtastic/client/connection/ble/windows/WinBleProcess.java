@@ -55,7 +55,7 @@ public final class WinBleProcess implements BlePlatform {
     private static final String SESSION_LOG_DISABLED_PROPERTY =
             "meshapp.sessionLog.disabled";
     private static final Duration START_TIMEOUT =
-            configuredPositiveDuration(START_TIMEOUT_SECONDS_PROPERTY, Duration.ofSeconds(45));
+            configuredStartTimeout(Duration.ofSeconds(45));
     private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration CONNECT_TIMEOUT = Duration.ofMinutes(3);
     private static final Duration WRITE_TIMEOUT = Duration.ofSeconds(15);
@@ -177,6 +177,17 @@ public final class WinBleProcess implements BlePlatform {
             log.warn("Windows BLE helper write failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * {@inheritDoc}
+     * The helper IPC uses a distinct command so DFU control bytes cannot be routed to
+     * the outbound packet characteristic; Base64 preserves the binary opcode payload.
+     */
+    @Override
+    public boolean writeFirmwareControl(byte[] data) {
+        Message response = call("firmware_control", Map.of("data", Base64.getEncoder().encodeToString(data)), COMMAND_TIMEOUT);
+        return Boolean.TRUE.equals(response.value);
     }
 
     @Override
@@ -558,8 +569,8 @@ public final class WinBleProcess implements BlePlatform {
                 : fallback;
     }
 
-    private static Duration configuredPositiveDuration(String propertyName, Duration fallback) {
-        String raw = System.getProperty(propertyName);
+    private static Duration configuredStartTimeout(Duration fallback) {
+        String raw = System.getProperty(START_TIMEOUT_SECONDS_PROPERTY);
         if (raw == null || raw.isBlank()) {
             return fallback;
         }

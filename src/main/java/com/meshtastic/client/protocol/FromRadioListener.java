@@ -51,6 +51,14 @@ public interface FromRadioListener {
     /** Receives one device log record. */
     default void onLogRecord(MeshProtos.LogRecord logRecord) {}
 
+    /**
+     * Receives a device-side operation refusal or informational notification.
+     * These messages are independent of routing ACKs; an ACK does not rule out an OTA refusal.
+     *
+     * @param notification client notification decoded from the device's FromRadio envelope
+     */
+    default void onClientNotification(MeshProtos.ClientNotification notification) {}
+
     /** Receives the device transmit queue status. */
     default void onQueueStatus(MeshProtos.QueueStatus queueStatus) {}
 

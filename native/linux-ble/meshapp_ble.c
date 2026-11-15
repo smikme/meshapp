@@ -34,8 +34,12 @@
 #define PROPS_IFACE        "org.freedesktop.DBus.Properties"
 #define OBJMGR_IFACE       "org.freedesktop.DBus.ObjectManager"
 
+/* Stable Java/JNA ABI codes, shared with BleProtocolProfile and the Windows backend.
+ * Firmware profiles use raw loader packets rather than the application protobuf service. */
 #define PROFILE_MESHTASTIC 0
 #define PROFILE_MESHCORE   1
+#define PROFILE_ESP32_OTA  2
+#define PROFILE_NORDIC_DFU 3
 
 #define SERVICE_UUID       "6ba1b218-15a8-461f-9fa8-5dcae273eafd"
 #define FROM_RADIO_UUID    "2c55e69e-4993-11ed-b878-0242ac120002"
@@ -179,23 +183,31 @@ static sd_bus_slot* g_agent_slot = NULL;
 
 static int active_profile(void) {
     int profile = atomic_load(&g_profile);
-    return profile == PROFILE_MESHCORE ? PROFILE_MESHCORE : PROFILE_MESHTASTIC;
+    return profile >= 0 && profile <= PROFILE_NORDIC_DFU ? profile : PROFILE_MESHTASTIC;
 }
 
 static const char* active_service_uuid(void) {
+    if (active_profile() == PROFILE_ESP32_OTA) return "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    if (active_profile() == PROFILE_NORDIC_DFU) return "00001530-1212-efde-1523-785feabcd123";
     return active_profile() == PROFILE_MESHCORE ? MESHCORE_SERVICE_UUID : SERVICE_UUID;
 }
 
+/* For Nordic DFU, the inbound characteristic is also the writable control point.
+ * Its replies are notifications; image/init bytes go to the separate outbound packet UUID. */
 static const char* active_inbound_uuid(void) {
+    if (active_profile() == PROFILE_ESP32_OTA) return "62ec0272-3ec5-11eb-b378-0242ac130003";
+    if (active_profile() == PROFILE_NORDIC_DFU) return "00001531-1212-efde-1523-785feabcd123";
     return active_profile() == PROFILE_MESHCORE ? MESHCORE_TX_UUID : FROM_RADIO_UUID;
 }
 
 static const char* active_outbound_uuid(void) {
+    if (active_profile() == PROFILE_ESP32_OTA) return "62ec0272-3ec5-11eb-b378-0242ac130005";
+    if (active_profile() == PROFILE_NORDIC_DFU) return "00001532-1212-efde-1523-785feabcd123";
     return active_profile() == PROFILE_MESHCORE ? MESHCORE_RX_UUID : TO_RADIO_UUID;
 }
 
 static const char* active_notify_trigger_uuid(void) {
-    return active_profile() == PROFILE_MESHCORE ? NULL : FROM_NUM_UUID;
+    return active_profile() == PROFILE_MESHTASTIC ? FROM_NUM_UUID : NULL;
 }
 
 static void process_tasks(void);
@@ -582,13 +594,15 @@ static int dbus_write_value_once(sd_bus* bus, const char* char_path,
     r = sd_bus_message_append_array(m, 'y', data, length);
     if (r < 0) { sd_bus_message_unref(m); return r; }
 
-    /* Options dict: {"type": "request"} for write-with-response */
+    /* Nordic packet writes require "command" (Write Without Response); the loader's
+     * receipt notifications provide flow control. Control-point writes use "request"
+     * so GATT acknowledges the command before Java waits for the DFU operation reply. */
     r = sd_bus_message_open_container(m, 'a', "{sv}");
     if (r < 0) { sd_bus_message_unref(m); return r; }
     sd_bus_message_open_container(m, 'e', "sv");
     sd_bus_message_append(m, "s", "type");
     sd_bus_message_open_container(m, 'v', "s");
-    sd_bus_message_append(m, "s", "request");
+    sd_bus_message_append(m, "s", active_profile() == PROFILE_NORDIC_DFU && strcmp(char_path, g_to_radio_char_path) == 0 ? "command" : "request");
     sd_bus_message_close_container(m);
     sd_bus_message_close_container(m);
     sd_bus_message_close_container(m);
@@ -1313,6 +1327,8 @@ static void do_connect(void* arg) {
     set_bool_prop(g_bus, g_device_path, DEVICE_IFACE, "Trusted", 1);
 
     const char* trigger_uuid = active_notify_trigger_uuid();
+    /* Only the Meshtastic application profile uses authenticated fromNum/read access.
+     * Firmware loaders advertise separate services and must not wait for application pairing. */
     if (trigger_uuid) {
         int pair_result = ensure_device_paired(g_bus, g_device_path, ctx->timeout_ms);
         if (pair_result < 0) {
@@ -1533,7 +1549,8 @@ static void do_connect(void* arg) {
             log_msg("[meshble] Connected (write=WriteValue, read=ReadValue polling)");
         }
     } else {
-        /* MeshCore Companion TX: prefer notifications on the inbound characteristic. */
+        /* MeshCore and firmware loaders deliver payloads directly on the inbound
+         * characteristic, without Meshtastic's separate fromNum/read trigger. */
         sd_bus_match_signal(g_bus, &g_from_radio_notify_slot,
                             BLUEZ_BUS, g_from_radio_char_path,
                             PROPS_IFACE, "PropertiesChanged",
@@ -1550,6 +1567,13 @@ static void do_connect(void* arg) {
             atomic_store(&g_notifications_active, true);
             log_msg("[meshble] Connected (write=WriteValue, read=StartNotify)");
         } else {
+            if (active_profile() >= PROFILE_ESP32_OTA) {
+                /* Reading the characteristic cannot recover transient OTA/DFU replies.
+                 * Fail discovery instead of returning a connection that cannot transfer. */
+                log_msg("[meshble] Firmware transfer requires notifications");
+                if (connect_slot) sd_bus_slot_unref(connect_slot);
+                do_disconnect(); ctx->result = -3; return;
+            }
             log_msg("[meshble] Notifications unavailable; falling back to ReadValue");
             atomic_store(&g_use_dbus_read, true);
             g_from_radio_fd = -1;
@@ -1892,7 +1916,7 @@ MESHBLE_API int meshble_get_adapter_state(void) {
 }
 
 MESHBLE_API void meshble_set_profile(int profile) {
-    if (profile == PROFILE_MESHCORE) {
+    if (profile >= 0 && profile <= PROFILE_NORDIC_DFU) {
         atomic_store(&g_profile, profile);
     } else {
         atomic_store(&g_profile, PROFILE_MESHTASTIC);
@@ -1941,6 +1965,7 @@ typedef struct {
     const unsigned char* data;
     int length;
     int result;
+    bool control; /* Nordic control point (inbound path); false selects outbound data. */
 } write_ctx_t;
 
 static void do_write_to_radio(void* arg) {
@@ -1957,7 +1982,9 @@ static void do_write_to_radio(void* arg) {
             return;
         }
     }
-    ctx->result = dbus_write_value(g_bus, g_to_radio_char_path, ctx->data, ctx->length);
+    /* The historical fromRadio/toRadio path names describe roles in the active profile,
+     * not fixed Meshtastic UUIDs. Nordic's notifying control point is writable as well. */
+    ctx->result = dbus_write_value(g_bus, ctx->control ? g_from_radio_char_path : g_to_radio_char_path, ctx->data, ctx->length);
 }
 
 typedef struct {
@@ -1992,6 +2019,15 @@ MESHBLE_API int meshble_write_to_radio(const unsigned char* data, int length) {
         return -1;
     }
     return 0;
+}
+
+MESHBLE_API int meshble_write_firmware_control(const unsigned char* data, int length) {
+    if (!atomic_load(&g_connected) || active_profile() != PROFILE_NORDIC_DFU || !data || length <= 0) return -1;
+    /* sd-bus is confined to its worker. run_on_worker waits for completion, so the
+     * stack context and the caller's JNA buffer remain valid throughout the write. */
+    write_ctx_t ctx = { .data = data, .length = length, .result = 0, .control = true };
+    if (!run_on_worker(do_write_to_radio, &ctx)) return -1;
+    return ctx.result;
 }
 
 MESHBLE_API int meshble_read_from_radio(unsigned char* buffer, int buf_size, int* out_len) {

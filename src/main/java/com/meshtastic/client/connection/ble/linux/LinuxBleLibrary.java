@@ -29,10 +29,6 @@ public interface LinuxBleLibrary extends Library {
         return Native.load(libraryPath.toAbsolutePath().toString(), LinuxBleLibrary.class);
     }
 
-    static LinuxBleLibrary loadShared() {
-        return Native.load("meshapp-ble", LinuxBleLibrary.class);
-    }
-
     // ==================== Initialization ====================
 
     /** Initializes sd-bus and BlueZ. Call once. */
@@ -51,7 +47,11 @@ public interface LinuxBleLibrary extends Library {
 
     // ==================== Scanning ====================
 
-    /** Selects the BLE profile: 0=Meshtastic, 1=MeshCore Companion. */
+    /**
+     * Selects the native profile before scanning or connecting.
+     *
+     * @param profile stable ABI code: 0=Meshtastic, 1=MeshCore, 2=ESP32 OTA, 3=Nordic legacy DFU
+     */
     void meshble_set_profile(int profile);
 
     /**
@@ -81,10 +81,20 @@ public interface LinuxBleLibrary extends Library {
     // ==================== Data Transfer ====================
 
     /**
-     * Writes protobuf bytes to the toRadio GATT characteristic.
+     * Writes raw protocol or firmware bytes to the active profile's outbound characteristic.
      * @return 0 on success, -4 if BLE bonding failed authentication/MITM, otherwise negative on error
      */
     int meshble_write_to_radio(byte[] data, int length);
+
+    /**
+     * Writes the legacy Nordic DFU control point through the sd-bus worker.
+     * GATT success is separate from the DFU operation reply delivered by the data callback.
+     *
+     * @param data opcode and parameters; must remain unchanged until this call returns
+     * @param length number of bytes to write from {@code data}
+     * @return zero on success, negative on invalid state, dispatch or write failure
+     */
+    int meshble_write_firmware_control(byte[] data, int length);
 
     /**
      * Reads fromRadio for the polling fallback.

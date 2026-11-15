@@ -2,6 +2,7 @@ package com.meshtastic.client.service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
@@ -10,8 +11,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * Local firmware image metadata collected before asking a device to reboot into
@@ -93,21 +92,12 @@ public record FirmwareImage(
     }
 
     /**
-     * Checks whether sampled ZIP entries contain a binary firmware image.
-     *
-     * @return {@code true} when a sampled ZIP entry ends with {@code .bin}
-     */
-    public boolean zipContainsBin() {
-        return zipEntries.stream().anyMatch(entry -> hasExtension(entry, ".bin"));
-    }
-
-    /**
      * Checks whether sampled ZIP entries contain a UF2 firmware image.
      *
      * @return {@code true} when a sampled ZIP entry ends with {@code .uf2}
      */
     public boolean zipContainsUf2() {
-        return zipEntries.stream().anyMatch(entry -> hasExtension(entry, ".uf2"));
+        return zipEntries.stream().anyMatch(entry -> entry.toLowerCase(Locale.ROOT).endsWith(".uf2"));
     }
 
     /**
@@ -136,7 +126,7 @@ public record FirmwareImage(
                     digest
                 )
             ) {
-                digestInput.transferTo(OutputStreamSink.INSTANCE);
+                digestInput.transferTo(OutputStream.nullOutputStream());
             }
             return digest.digest();
         } catch (NoSuchAlgorithmException e) {
@@ -162,34 +152,13 @@ public record FirmwareImage(
 
     private static List<String> readZipEntries(Path path) throws IOException {
         java.util.ArrayList<String> entries = new java.util.ArrayList<>();
-        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(path))) {
-            ZipEntry entry;
-            while (
-                entries.size() < MAX_ZIP_ENTRIES_TO_KEEP &&
-                (entry = zip.getNextEntry()) != null
-            ) {
-                if (!entry.isDirectory()) {
-                    entries.add(entry.getName());
-                }
-                zip.closeEntry();
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(path.toFile())) {
+            var members = zip.entries();
+            while (entries.size() < MAX_ZIP_ENTRIES_TO_KEEP && members.hasMoreElements()) {
+                var entry = members.nextElement();
+                if (!entry.isDirectory()) entries.add(entry.getName());
             }
         }
         return entries;
-    }
-
-    private static boolean hasExtension(String entry, String extension) {
-        return entry != null &&
-            entry.toLowerCase(Locale.ROOT).endsWith(extension);
-    }
-
-    private static final class OutputStreamSink extends java.io.OutputStream {
-
-        private static final OutputStreamSink INSTANCE = new OutputStreamSink();
-
-        @Override
-        public void write(int b) {}
-
-        @Override
-        public void write(byte[] b, int off, int len) {}
     }
 }

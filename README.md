@@ -23,6 +23,8 @@
 
 [Installation](#installation) · [Command-Line Launch](#command-line-launch)
 
+[Device firmware updates](docs/firmware-update.md)
+
 <div align="right">
 
 <strong>English</strong> | <a href="README.ru.md">Русский</a> | <a href="README.de.md">Deutsch</a>

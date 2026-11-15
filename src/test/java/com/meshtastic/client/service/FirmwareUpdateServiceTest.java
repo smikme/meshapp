@@ -42,7 +42,7 @@ class FirmwareUpdateServiceTest {
         DeviceState state = connectedState();
         try {
             Path firmware = tempHome.resolve("firmware.bin");
-            Files.write(firmware, new byte[] { 1, 2, 3, 4 });
+            Files.write(firmware, FirmwareTestImages.esp());
 
             FirmwareValidationResult result = service.validate(
                 firmware,
@@ -82,12 +82,12 @@ class FirmwareUpdateServiceTest {
     }
 
     @Test
-    void validateRejectsBleOtaUntilOneClickUploaderExists() throws Exception {
+    void validateAcceptsBleOta() throws Exception {
         FirmwareUpdateService service = new FirmwareUpdateService();
         DeviceState state = connectedState();
         try {
             Path firmware = tempHome.resolve("firmware.bin");
-            Files.write(firmware, new byte[] { 1, 2, 3, 4 });
+            Files.write(firmware, FirmwareTestImages.esp());
 
             FirmwareValidationResult result = service.validate(
                 firmware,
@@ -96,15 +96,15 @@ class FirmwareUpdateServiceTest {
                 state
             );
 
-            assertFalse(result.valid());
-            assertFalse(result.errors().isEmpty());
+            assertTrue(result.valid(), result.errors().toString());
+            assertTrue(result.errors().isEmpty());
         } finally {
             state.shutdown();
         }
     }
 
     @Test
-    void validateRejectsDfuModeUntilOneClickUploaderExists() throws Exception {
+    void validateRejectsMalformedUf2InsideArchive() throws Exception {
         FirmwareUpdateService service = new FirmwareUpdateService();
         DeviceState state = connectedState();
         try {
@@ -131,6 +131,60 @@ class FirmwareUpdateServiceTest {
         }
     }
 
+    @Test
+    void autoSelectsSerialAndAllowsUpdatingOldFirmwareOverUsb() throws Exception {
+        DeviceState state = connectedState();
+        try {
+            state.setDeviceMetadata(state.getDeviceMetadata().toBuilder().setFirmwareVersion("2.5.0").build());
+            Path path = tempHome.resolve("firmware.bin"); Files.write(path, FirmwareTestImages.esp());
+            var entry = new ConnectionEntry("usb", "/dev/test", 115200, ConnectionType.SERIAL);
+            entry.setConnected(true);
+            var service = new FirmwareUpdateService();
+            assertEquals(FirmwareUpdateMode.SERIAL, service.resolveMode(FirmwareImage.analyze(path), FirmwareUpdateMode.AUTO, entry, state));
+            assertTrue(service.validate(path, FirmwareUpdateMode.AUTO, entry, state).valid());
+            assertFalse(service.validate(path, FirmwareUpdateMode.OTA_WIFI, connectedEntry(), state).valid());
+        } finally { state.shutdown(); }
+    }
+
+    @Test
+    void rejectsInvalidBinAndIncompatibleOtaDevice() throws Exception {
+        DeviceState state = connectedState();
+        try {
+            Path path = tempHome.resolve("firmware.bin"); Files.write(path, new byte[]{1,2,3,4});
+            var service = new FirmwareUpdateService();
+            assertFalse(service.validate(path, FirmwareUpdateMode.AUTO, connectedEntry(), state).valid());
+            Files.write(path, FirmwareTestImages.esp());
+            state.setDeviceMetadata(state.getDeviceMetadata().toBuilder().setHasWifi(false).build());
+            assertFalse(service.validate(path, FirmwareUpdateMode.AUTO, connectedEntry(), state).valid());
+        } finally { state.shutdown(); }
+    }
+
+    @Test
+    void acceptsNordicPackageOverBleAndUf2OverUsb() throws Exception {
+        DeviceState state = connectedState();
+        try {
+            state.setDeviceMetadata(state.getDeviceMetadata().toBuilder()
+                    .setHwModel(org.meshtastic.proto.MeshProtos.HardwareModel.RAK4631).setHasWifi(false).build());
+            Path zip = FirmwareTestImages.nordic(tempHome.resolve("nordic.zip"));
+            var service = new FirmwareUpdateService();
+            assertTrue(service.validate(zip, FirmwareUpdateMode.AUTO, connectedBleEntry(), state).valid());
+            assertEquals(FirmwareUpdateMode.DFU, service.resolveMode(FirmwareImage.analyze(zip), FirmwareUpdateMode.AUTO, connectedBleEntry(), state));
+            var usb = new ConnectionEntry("usb", "/dev/test", 115200, ConnectionType.SERIAL); usb.setConnected(true);
+            Path uf2 = tempHome.resolve("nordic.uf2"); Files.write(uf2, FirmwareTestImages.uf2());
+            assertTrue(service.validate(uf2, FirmwareUpdateMode.AUTO, usb, state).valid());
+            assertFalse(service.validate(uf2, FirmwareUpdateMode.AUTO, connectedBleEntry(), state).valid());
+        } finally { state.shutdown(); }
+    }
+
+    @Test
+    void distinguishesOtaRefusalsFromRebootNotification() {
+        var notification = org.meshtastic.proto.MeshProtos.ClientNotification.newBuilder()
+                .setLevel(org.meshtastic.proto.MeshProtos.LogRecord.Level.WARNING);
+        assertTrue(FirmwareUpdateService.isOtaRefusal(notification.setMessage("Cannot start OTA: Cannot find OTA Loader partition.").build()));
+        assertTrue(FirmwareUpdateService.isOtaRefusal(notification.setMessage("OTA Loader does not support WiFi").build()));
+        assertFalse(FirmwareUpdateService.isOtaRefusal(notification.setMessage("Rebooting to WiFi OTA").build()));
+    }
+
     private static ConnectionEntry connectedEntry() {
         ConnectionEntry entry = new ConnectionEntry("test", "localhost", 4403);
         entry.setConnected(true);
@@ -151,6 +205,9 @@ class FirmwareUpdateServiceTest {
     private static DeviceState connectedState() {
         DeviceState state = new DeviceState();
         state.setMyNodeNum(0x04c5b420);
+        state.setDeviceMetadata(org.meshtastic.proto.MeshProtos.DeviceMetadata.newBuilder()
+                .setFirmwareVersion("2.7.18").setHasWifi(true).setHasBluetooth(true)
+                .setHwModel(org.meshtastic.proto.MeshProtos.HardwareModel.HELTEC_V3).build());
         return state;
     }
 }

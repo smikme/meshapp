@@ -40,11 +40,15 @@ public class LinuxBle implements BlePlatform {
     private final LinuxBleLibrary lib;
 
     // Instance callbacks must stay strongly reachable while this isolated SO copy is loaded.
-    private LinuxBleLibrary.LogCallback logCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
+    private final LinuxBleLibrary.LogCallback logCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
     private LinuxBleLibrary.DeviceCallback scanCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
     private LinuxBleLibrary.DataCallback dataCallback;
+    @SuppressWarnings("FieldCanBeLocal") // Native code retains a function pointer, not a Java reference.
     private LinuxBleLibrary.StateCallback stateCallback;
-    private LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
+    private final LinuxBleLibrary.PasskeyRequestCallback passkeyCallback;
 
     private volatile Consumer<BleDevice> scanConsumer;
     private volatile Consumer<byte[]> fromRadioListener;
@@ -112,7 +116,7 @@ public class LinuxBle implements BlePlatform {
         this.scanConsumer = onDeviceFound;
         lib.meshble_set_profile(profile.nativeCode());
 
-        // Static callback — prevent GC
+        // Retain the callback for as long as native scanning can invoke it.
         scanCallback = (address, name, rssi) -> {
             Consumer<BleDevice> consumer = scanConsumer;
             if (consumer != null && address != null) {
@@ -145,7 +149,7 @@ public class LinuxBle implements BlePlatform {
         log.info("Подключение к BLE устройству: {}", address);
         lib.meshble_set_profile(profile.nativeCode());
 
-        // Setup data callback (static, prevent GC)
+        // Retain the data callback for the lifetime of this native session.
         dataCallback = (dataPtr, length) -> {
             Consumer<byte[]> listener = fromRadioListener;
             if (listener != null && dataPtr != null && length > 0) {
@@ -155,7 +159,7 @@ public class LinuxBle implements BlePlatform {
         };
         lib.meshble_set_from_radio_listener(dataCallback);
 
-        // Setup state callback (static, prevent GC)
+        // Retain the state callback for the lifetime of this native session.
         stateCallback = (state, errorMsg) -> {
             Consumer<BleState> sl = stateListener;
             switch (state) {
@@ -246,9 +250,14 @@ public class LinuxBle implements BlePlatform {
             return false;
         } else {
             log.debug("Отправлено {} байт в toRadio", protobufPayload.length);
-            scheduleDrainAfterWrite();
+            if (profile.hasNotifyTriggerCharacteristic()) scheduleDrainAfterWrite();
             return true;
         }
+    }
+
+    @Override
+    public boolean writeFirmwareControl(byte[] data) {
+        return isConnected() && lib.meshble_write_firmware_control(data, data.length) == 0;
     }
 
     @Override

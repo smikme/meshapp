@@ -76,6 +76,68 @@ class ConnectionManagerTest {
     }
 
     @Test
+    void firmwareRefusalStopsBeforeReleasingTransport() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
+            server.otaRefusal = "Cannot start OTA: Cannot find OTA Loader partition.";
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("firmware-refusal", "127.0.0.1", server.port());
+            manager.addEntry(entry); manager.connect(entry.getId());
+            DeviceState state = manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+            state.setSessionPasskey(com.google.protobuf.ByteString.copyFrom(new byte[]{1,2,3,4}));
+            state.setDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder().setFirmwareVersion("2.7.18")
+                    .setHasWifi(true).setHwModel(MeshProtos.HardwareModel.HELTEC_V3).build());
+            Path file = tempHome.resolve("update.bin"); java.nio.file.Files.write(file, FirmwareTestImages.esp());
+            var request = new FirmwareUpdateRequest(entry, state, manager.getProtocolHandler(entry.getId()),
+                    FirmwareImage.analyze(file), FirmwareUpdateMode.OTA_WIFI);
+            var service = new FirmwareUpdateService();
+            var result = service.start(request, null).get(5, TimeUnit.SECONDS);
+            assertFalse(result.success()); assertTrue(result.message().contains(server.otaRefusal));
+            assertTrue(entry.isConnected()); assertFalse(manager.isFirmwareUpdateActive(entry.getId()));
+            assertFalse(service.isRunning()); manager.disconnect(entry.getId());
+        }
+    }
+
+    @Test
+    void cancellationReleasesFirmwareReservationAndCompletesFuture() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("firmware-cancel", "127.0.0.1", server.port());
+            manager.addEntry(entry); manager.connect(entry.getId());
+            DeviceState state = manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+            state.setSessionPasskey(com.google.protobuf.ByteString.copyFrom(new byte[]{1,2,3,4}));
+            state.setDeviceMetadata(MeshProtos.DeviceMetadata.newBuilder().setFirmwareVersion("2.7.18")
+                    .setHasWifi(true).setHwModel(MeshProtos.HardwareModel.HELTEC_V3).build());
+            Path file = tempHome.resolve("update.bin"); java.nio.file.Files.write(file, FirmwareTestImages.esp());
+            var request = new FirmwareUpdateRequest(entry,state,manager.getProtocolHandler(entry.getId()),
+                    FirmwareImage.analyze(file),FirmwareUpdateMode.OTA_WIFI);
+            var service = new FirmwareUpdateService();
+            var result = service.start(request,null);
+            assertTrue(server.otaReceived.await(5,TimeUnit.SECONDS));
+            assertFalse(new FirmwareUpdateService().start(request,null).get(1,TimeUnit.SECONDS).success());
+            service.cancel();
+            assertFalse(result.get(5,TimeUnit.SECONDS).success());
+            assertFalse(manager.isFirmwareUpdateActive(entry.getId()));
+            assertFalse(service.isRunning()); manager.disconnect(entry.getId());
+        }
+    }
+
+    @Test
+    void firmwareReservationBlocksReconnectUntilReleased() throws Exception {
+        try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
+            ConnectionManager manager = ConnectionManager.getInstance();
+            ConnectionEntry entry = new ConnectionEntry("firmware", "127.0.0.1", server.port());
+            manager.addEntry(entry); manager.connect(entry.getId());
+            manager.getConfigFuture(entry.getId()).get(5, TimeUnit.SECONDS);
+            manager.beginFirmwareUpdate(entry.getId(), manager.getProtocolHandler(entry.getId()));
+            assertTrue(manager.isFirmwareUpdateActive(entry.getId()));
+            manager.disconnect(entry.getId());
+            assertThrows(ConnectionException.class, () -> manager.connect(entry.getId()));
+            manager.endFirmwareUpdate(entry.getId(), false);
+            assertFalse(manager.isFirmwareUpdateActive(entry.getId()));
+        }
+    }
+
+    @Test
     void connectCompletesConfigExchangeAndDisconnectCleansRuntimeState() throws Exception {
         try (TcpMeshtasticStubServer server = new TcpMeshtasticStubServer(0x1234ABCD)) {
             ConnectionManager manager = ConnectionManager.getInstance();
@@ -1145,6 +1207,8 @@ class ConnectionManagerTest {
         private volatile OutputStream clientOutput;
         private final CountDownLatch outputReady = new CountDownLatch(1);
         private volatile boolean running = true;
+        private volatile String otaRefusal;
+        private final CountDownLatch otaReceived = new CountDownLatch(1);
 
         private TcpMeshtasticStubServer(int myNodeNum) throws IOException {
             this.serverSocket = new ServerSocket(0);
@@ -1183,6 +1247,16 @@ class ConnectionManagerTest {
                             continue;
                         }
                         MeshProtos.ToRadio toRadio = MeshProtos.ToRadio.parseFrom(payload);
+                        if (toRadio.hasPacket() && toRadio.getPacket().hasDecoded()
+                                && toRadio.getPacket().getDecoded().getPortnum() == org.meshtastic.proto.Portnums.PortNum.ADMIN_APP) {
+                            var admin = org.meshtastic.proto.AdminProtos.AdminMessage.parseFrom(toRadio.getPacket().getDecoded().getPayload());
+                            if (admin.hasOtaRequest()) {
+                                otaReceived.countDown();
+                                if (otaRefusal != null) send(out, MeshProtos.FromRadio.newBuilder().setClientNotification(
+                                        MeshProtos.ClientNotification.newBuilder().setLevel(MeshProtos.LogRecord.Level.WARNING)
+                                                .setMessage(otaRefusal)).build());
+                            }
+                        }
                         if (toRadio.hasWantConfigId()) {
         // Minimal config-exchange happy path:
                             // MyNodeInfo + matching config_complete_id.

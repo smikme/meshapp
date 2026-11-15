@@ -69,10 +69,24 @@ public interface BlePlatform {
      * Writes payload to the current BLE profile's outbound GATT characteristic.
      * Data is sent without serial framing, i.e. without the 0x94 0xC3 header.
  *
-     * @param protobufPayload serialized protocol payload
+     * @param protobufPayload serialized protocol payload, or raw OTA/DFU data for a firmware profile
      * @return true on successful write, false on error
      */
     boolean writeToRadio(byte[] protobufPayload);
+
+    /**
+     * Writes a legacy Nordic DFU command to its control-point characteristic with a GATT response.
+     * The backend must be connected using {@link BleProtocolProfile#NORDIC_DFU}. Image and init
+     * packet bytes use {@link #writeToRadio(byte[])} instead. A successful GATT write does not
+     * imply DFU command acceptance; the caller must also inspect the control-point notification.
+     *
+     * @param data raw DFU opcode and parameters, without serial or protobuf framing
+     * @return {@code true} if the GATT write succeeded, {@code false} on a transport error
+     * @throws UnsupportedOperationException if this backend does not support DFU control writes
+     */
+    default boolean writeFirmwareControl(byte[] data) {
+        throw new UnsupportedOperationException("DFU control writes are unavailable");
+    }
 
     /**
      * Sets the listener for inbound characteristic payloads.
