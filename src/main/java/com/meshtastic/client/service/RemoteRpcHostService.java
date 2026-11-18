@@ -40,6 +40,7 @@ import com.meshtastic.client.rpc.ExternalRouterRpcHostClient;
 import com.meshtastic.client.rpc.RpcAccessKey;
 import com.meshtastic.client.rpc.RpcMethodRegistry;
 import com.meshtastic.client.utils.AppPreferences;
+import com.meshtastic.client.utils.MeshtasticPayloadLimits;
 import com.meshtastic.client.utils.NodeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1231,7 +1232,9 @@ public final class RemoteRpcHostService {
                     channelLastMessages.get(chatKey),
                     unreadCount(db, readCounts, "channel", chatKey, ownerId),
                     false);
-            items.add(chatItemToJson(item));
+            JsonObject json = chatItemToJson(item);
+            json.addProperty("maxTextBytes", chatTextLimit(active, "channel", chatKey));
+            items.add(json);
         }
 
         Set<String> dmPeers = new LinkedHashSet<>(db.getDistinctDmPeers(ownerId));
@@ -1243,7 +1246,9 @@ public final class RemoteRpcHostService {
                     dmLastMessages.get(peerNodeId),
                     unreadCount(db, readCounts, "dm", peerNodeId, ownerId),
                     false);
-            items.add(chatItemToJson(item));
+            JsonObject json = chatItemToJson(item);
+            json.addProperty("maxTextBytes", chatTextLimit(active, "dm", peerNodeId));
+            items.add(json);
         }
 
         JsonObject result = new JsonObject();
@@ -1290,8 +1295,46 @@ public final class RemoteRpcHostService {
         }
         JsonObject result = new JsonObject();
         result.addProperty("ownerNodeId", ownerId);
+        result.addProperty("maxTextBytes", chatTextLimit(active, chatType, chatKey));
         result.add("items", items);
         return result;
+    }
+
+    /**
+     * Returns the selected radio's UTF-8 text budget for an unquoted message.
+     * Mirrors the desktop composer, including MeshCore sender-name overhead.
+     * The MeshCore runtime is owned by ConnectionManager and must remain open
+     * after this request completes.
+     *
+     * @param active selected host session
+     * @param chatType channel or dm
+     * @param chatKey channel index or peer node ID
+     * @return available text bytes, excluding protocol and authentication bytes
+     */
+    @SuppressWarnings("resource")
+    private static int chatTextLimit(ActiveHostConnection active, String chatType, String chatKey) {
+        int protocolLimit = active.meshCoreRuntime() == null ? -1
+                : active.meshCoreRuntime().maxTextBytes("dm".equals(chatType));
+        return chatTextLimit(active.state(), chatType, chatKey, protocolLimit);
+    }
+
+    /**
+     * Resolves a protocol-specific limit or the Meshtastic authentication budget.
+     * Meshtastic replies must additionally reserve five bytes for reply_id.
+     *
+     * @param state current channel and firmware configuration
+     * @param chatType channel or dm
+     * @param chatKey channel index or peer node ID
+     * @param protocolLimit nonnegative protocol override, or -1 for Meshtastic
+     * @return maximum text bytes before any reply overhead
+     */
+    static int chatTextLimit(DeviceState state, String chatType, String chatKey, int protocolLimit) {
+        if (protocolLimit >= 0) {
+            return protocolLimit;
+        }
+        int authentication = "channel".equals(chatType)
+                ? MeshtasticPayloadLimits.channelAuthenticationOverhead(state, Integer.parseInt(chatKey)) : 0;
+        return Math.max(0, 228 - authentication);
     }
 
     // The MeshCore runtime belongs to ConnectionManager and must outlive this request.

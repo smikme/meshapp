@@ -545,6 +545,7 @@ Ergebnis:
 | `channelIndex` | number | Kanalindex oder `0`. |
 | `peerNodeId` | string | Knotenkennung des Gesprächspartners bei Direktnachrichten, sonst `""`. |
 | `muted` | boolean | Sind Benachrichtigungen für diesen Chat ausgeschaltet? |
+| `maxTextBytes` | number | Maximale UTF-8-Textbytes ohne Zitat nach Protokoll- und Authentifizierungsaufwand. Bei älteren Hosts optional. Meshtastic-Antworten benötigen weitere 5 Bytes. |
 
 ### `chat.messages`
 
@@ -566,6 +567,7 @@ Ergebnis:
 |------|-----|--------------|
 | `ownerNodeId` | string | Kennung des am Server angeschlossenen Funkgeräts. |
 | `items` | `Message[]` | Nachrichten. |
+| `maxTextBytes` | number | Maximale UTF-8-Textbytes ohne Zitat nach Protokoll- und Authentifizierungsaufwand. Bei älteren Hosts optional. Meshtastic-Antworten benötigen weitere 5 Bytes. |
 
 ### `chat.markRead`
 
