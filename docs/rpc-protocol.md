@@ -525,6 +525,7 @@ Result:
 | `channelIndex` | number | Channel index or `0`. |
 | `peerNodeId` | string | Peer node id for DM or `""`. |
 | `muted` | boolean | Muted flag. |
+| `maxTextBytes` | number | Maximum UTF-8 text bytes for an unquoted message, after protocol/authentication overhead. Optional on older hosts. Meshtastic replies reserve another 5 bytes. |
 
 ### `chat.messages`
 
@@ -546,6 +547,7 @@ Result:
 |-------|------|-------------|
 | `ownerNodeId` | string | Local node id. |
 | `items` | `Message[]` | Messages. |
+| `maxTextBytes` | number | Maximum UTF-8 text bytes for an unquoted message, after protocol/authentication overhead. Optional on older hosts. Meshtastic replies reserve another 5 bytes. |
 
 ### `chat.markRead`
 
