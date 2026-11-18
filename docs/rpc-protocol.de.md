@@ -27,6 +27,14 @@ Wichtige Quelldateien:
 | Übertragungsblock (Frame) | Eine Zeile der direkten TCP-Verbindung oder der Inhalt von `payload.frame` bei einer Router-Verbindung. Nach der Schlüsselprüfung enthält der Block eine verschlüsselte RPC-Nachricht. |
 | Raum (Room) | Eine Gruppe von Verbindungen auf dem Router. Anhand der gemeinsamen Kennung `roomId` ordnet der Router Client und Server einander zu. |
 
+## Verbindungs-QR-Code
+
+Unter **RPC → Verbindungs-QR-Code** in den Einstellungen lässt sich ein QR-Code anzeigen und als Bild oder Daten kopieren. Er wird lokal aus den aktuellen Einstellungsfeldern erzeugt und enthält den Zugangsschlüssel. Wenden Sie die RPC-Einstellungen an, bevor sich ein Client verbindet.
+
+Der QR-Code enthält UTF-8-JSON mit `type: "meshapp.rpc"`, `version: 1`, `mode`, `address` und `accessKey`. Bei aktiviertem **Cloud External RPC Router** werden `mode: "router"` und `address: "wss://cloud.meshapp.privatepractice.app"` verwendet. Die lokale Adresse und der lokale Port werden ausgelassen, auch wenn direktes RPC ebenfalls aktiviert ist. Es gilt der WSS-Standardport 443.
+
+Bei deaktiviertem Cloud External werden `mode: "direct"`, die Rechneradresse und ein numerisches Feld `port` verwendet. Im QR-Dialog kann die vom Client erreichbare Adresse geändert werden, ohne die Bind-Adresse des Servers zu ändern. Ersetzen Sie `0.0.0.0` oder `::` durch eine konkrete IP-Adresse oder einen Rechnernamen. IPv6-Adressen werden ohne eckige Klammern exportiert. Der QR-Code exportiert Verbindungsdaten; automatischer Import erfordert Unterstützung im Client.
+
 ## Verbindungsmodi
 
 <a id="direct-tcp"></a>

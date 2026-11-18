@@ -200,7 +200,14 @@ public final class ApplicationSettingsPanelFactory {
     }
 
     /**
-     * Creates the Remote RPC settings panel.
+     * Creates the Remote RPC settings panel from the saved application preferences.
+     *
+     * <p>The Apply action saves the fields and reconfigures the host service on a
+     * background thread. The QR action exports the current, possibly unsaved field
+     * values through {@link RpcConnectionQrDialog}; Cloud External takes precedence
+     * over the local address and port when its checkbox is selected.
+     *
+     * <p>Must be called on the JavaFX application thread.
      *
      * @return JavaFX panel for MeshApp Host RPC and External RPC Router settings
      */
@@ -221,6 +228,7 @@ public final class ApplicationSettingsPanelFactory {
         CheckBox enabledBox = new CheckBox(I18n.t("settings.remoteRpc.enabled"));
         enabledBox.setSelected(AppPreferences.isRemoteRpcServerEnabled());
         CheckBox routerEnabledBox = new CheckBox(I18n.t("settings.remoteRpc.router.enabled"));
+        routerEnabledBox.setId("remote-rpc-router-enabled");
         routerEnabledBox.setSelected(AppPreferences.isRemoteRpcRouterEnabled());
 
         TextField bindField = new TextField(AppPreferences.getRemoteRpcServerBindAddress());
@@ -303,7 +311,14 @@ public final class ApplicationSettingsPanelFactory {
         );
         routerRow.setAlignment(Pos.CENTER_LEFT);
 
-        HBox actionRow = new HBox(8, enabledBox, applyButton);
+        Button qrButton = new Button(I18n.t("settings.remoteRpc.qr.title"));
+        qrButton.setId("remote-rpc-qr");
+        qrButton.disableProperty().bind(applyButton.disableProperty());
+        qrButton.setOnAction(_ -> RpcConnectionQrDialog.show(
+                qrButton.getScene() == null ? null : qrButton.getScene().getWindow(),
+                routerEnabledBox.isSelected(), bindField.getText(), portField.getText(), keyField.getText()));
+
+        HBox actionRow = new HBox(8, enabledBox, applyButton, qrButton);
         actionRow.setAlignment(Pos.CENTER_LEFT);
 
         HBox statusRow = new HBox(8, statusIndicator, statusLabel);
