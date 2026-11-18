@@ -425,18 +425,18 @@
   },
   {
     "type": "file",
-    "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.86/bcprov-jdk18on-1.86.jar",
-    "sha512": "4502851281929ef645316ae96ad7d6db6a54d11ce024a66bec654c2eef62b80f174b67a2a15de86b2698f33b696459e21ecfec4a846350f4297394e9a331c43b",
-    "dest": "./offline-repository/org/bouncycastle/bcprov-jdk18on/1.86",
-    "dest-filename": "bcprov-jdk18on-1.86.jar",
+    "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.87/bcprov-jdk18on-1.87.jar",
+    "sha512": "fec4187f2d152ec10dcbb6928407bfa6dacea393d716bd024cbed907251d181e4eeda389501792435d6b5dac13a468b2f230c2fac80dd6382b9c0a6e4d85ff71",
+    "dest": "./offline-repository/org/bouncycastle/bcprov-jdk18on/1.87",
+    "dest-filename": "bcprov-jdk18on-1.87.jar",
     "only-arches": ["x86_64"]
   },
   {
     "type": "file",
-    "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.86/bcprov-jdk18on-1.86.pom",
-    "sha512": "86415df017940d1bcb5bfb5f30775128725b2e42ae08087c11af902a88d16c8b97c8e189b0f7e9be61f65a423654f1d4edb78652114787819bfe3ef50e6d748a",
-    "dest": "./offline-repository/org/bouncycastle/bcprov-jdk18on/1.86",
-    "dest-filename": "bcprov-jdk18on-1.86.pom",
+    "url": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.87/bcprov-jdk18on-1.87.pom",
+    "sha512": "49a1ffcce9c74dc8ebe228d527e0b9ace99867193f6e358cef71df5511b823f874bc009cde154845ab3af0799c1d35f6bf5df2d7ac360ac001a43add57ed654f",
+    "dest": "./offline-repository/org/bouncycastle/bcprov-jdk18on/1.87",
+    "dest-filename": "bcprov-jdk18on-1.87.pom",
     "only-arches": ["x86_64"]
   },
   {

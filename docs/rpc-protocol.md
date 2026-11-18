@@ -27,6 +27,14 @@ Main source files:
 | Frame | A block of data sent as one line over TCP or in `payload.frame` over a router connection. After key verification, it contains an encrypted RPC message. |
 | Room | A group of connections on the router. The shared `roomId` tells the router which client and server to connect. |
 
+## Connection QR code
+
+Open **RPC → Connection QR code** in settings to display a QR code, copy its image, or copy its data. It is generated locally from the current settings fields and includes the access key. Apply the RPC settings before connecting a client.
+
+The QR contains UTF-8 JSON with `type: "meshapp.rpc"`, `version: 1`, `mode`, `address`, and `accessKey`. When **Cloud External RPC Router** is enabled, it uses `mode: "router"` and `address: "wss://cloud.meshapp.privatepractice.app"`. The local address and port are omitted even if direct RPC is also enabled. The standard WSS port, 443, applies.
+
+When Cloud External is disabled, it uses `mode: "direct"`, the computer address, and a numeric `port`. The QR dialog lets you edit the address reachable by the client without changing the server listener. Replace `0.0.0.0` or `::` with a specific IP address or hostname. IPv6 addresses are exported without brackets. The QR exports connection settings; automatic import requires client support.
+
 ## Connection Modes
 
 ### Direct TCP
